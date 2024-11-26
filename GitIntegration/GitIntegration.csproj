@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <PackageReference Include="ktsu.AppDataStorage" Version="1.1.19" />
-    <PackageReference Include="ktsu.CredentialCache" Version="1.0.0-alpha.5" />
-    <PackageReference Include="ktsu.StrongPaths" Version="1.1.16" />
-    <PackageReference Include="ktsu.StrongStrings" Version="1.2.8" />
+    <PackageReference Include="ktsu.AppDataStorage" Version="1.1.33" />
+    <PackageReference Include="ktsu.CredentialCache" Version="1.0.0-alpha.21" />
+    <PackageReference Include="ktsu.StrongPaths" Version="1.1.23" />
+    <PackageReference Include="ktsu.StrongStrings" Version="1.2.11" />
     <PackageReference Include="LibGit2Sharp" Version="0.30.0" />
     <PackageReference Include="Octokit" Version="13.0.1" />
   </ItemGroup>
