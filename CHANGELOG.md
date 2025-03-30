@@ -6,5 +6,6 @@ Changes since v1.0.0-alpha.5:
 - Add LICENSE template ([@matt-edmondson](https://github.com/matt-edmondson))
 - Add mailmap ([@matt-edmondson](https://github.com/matt-edmondson))
 - Renamed metadata files ([@matt-edmondson](https://github.com/matt-edmondson))
+- Update packages and code style fixes ([@matt-edmondson](https://github.com/matt-edmondson))
 
 
