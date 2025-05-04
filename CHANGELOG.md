@@ -1,3 +1,9 @@
+## v1.1.1 (patch)
+
+Changes since v1.1.0:
+
+- Update project SDK in GitIntegration.csproj and fix README formatting ([@matt-edmondson](https://github.com/matt-edmondson))
+
 ## v1.1.0 (minor)
 
 Changes since v1.0.0-alpha.5:
