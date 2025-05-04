@@ -1,3 +1,8 @@
+## v1.1.2-pre.1 (prerelease)
+
+Changes since v1.1.1:
+
+- Sync scripts\PSBuild.psm1 ([@ktsu[bot]](https://github.com/ktsu[bot]))
 ## v1.1.1 (patch)
 
 Changes since v1.1.0:
@@ -38,9 +43,7 @@ Changes since v1.1.1-pre.1:
 - Sync .editorconfig ([@ktsu[bot]](https://github.com/ktsu[bot]))
 ## v1.1.1-pre.1 (prerelease)
 
-Changes since v1.1.0:
-
-- Bump the ktsu group with 3 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+Incremental prerelease update.
 ## v1.1.0 (minor)
 
 Changes since v1.0.0-alpha.5:
