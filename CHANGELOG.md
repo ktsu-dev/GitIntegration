@@ -1,3 +1,47 @@
+## v1.1.2-pre.15 (prerelease)
+
+Incremental prerelease update.
+## v1.1.2-pre.14 (prerelease)
+
+Changes since v1.1.2-pre.13:
+## v1.1.2-pre.13 (prerelease)
+
+Changes since v1.1.2-pre.12:
+## v1.1.2-pre.12 (prerelease)
+
+Changes since v1.1.2-pre.11:
+## v1.1.2-pre.11 (prerelease)
+
+Changes since v1.1.2-pre.10:
+## v1.1.2-pre.10 (prerelease)
+
+Changes since v1.1.2-pre.9:
+## v1.1.2-pre.9 (prerelease)
+
+Changes since v1.1.2-pre.8:
+## v1.1.2-pre.8 (prerelease)
+
+Changes since v1.1.2-pre.7:
+## v1.1.2-pre.7 (prerelease)
+
+Changes since v1.1.2-pre.6:
+## v1.1.2-pre.6 (prerelease)
+
+Changes since v1.1.2-pre.5:
+## v1.1.2-pre.5 (prerelease)
+
+Changes since v1.1.2-pre.4:
+## v1.1.2-pre.4 (prerelease)
+
+Changes since v1.1.2-pre.3:
+## v1.1.2-pre.3 (prerelease)
+
+Changes since v1.1.2-pre.2:
+
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+## v1.1.2-pre.2 (prerelease)
+
+Changes since v1.1.2-pre.1:
 ## v1.1.2-pre.1 (prerelease)
 
 Changes since v1.1.1:
