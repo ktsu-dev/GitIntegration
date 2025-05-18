@@ -1,6 +1,6 @@
 MIT License
 
-https://github.com/ktsu-dev/ktsu-dev/GitIntegration
+https://github.com/ktsu-dev/GitIntegration
 
 Copyright (c) 2023-2025 ktsu-dev
 
