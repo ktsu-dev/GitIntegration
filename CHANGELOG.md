@@ -15,6 +15,23 @@ Changes since v1.1.2-pre.15:
 - Renamed metadata files ([@matt-edmondson](https://github.com/matt-edmondson))
 - Replace LICENSE file with LICENSE.md and update copyright information ([@matt-edmondson](https://github.com/matt-edmondson))
 - Update license file format and content ([@matt-edmondson](https://github.com/matt-edmondson))
+## v1.1.2-pre.16 (prerelease)
+
+Changes since v1.1.2-pre.15:
+
+- Bump ktsu.AppDataStorage, ktsu.CredentialCache, and ktsu.StrongPaths package versions for updates ([@matt-edmondson](https://github.com/matt-edmondson))
+- Remove Directory.Build.props and Directory.Build.targets files; add copyright headers to Git integration classes; delete unused PowerShell scripts for commit metadata, changelog, license, and version management. ([@matt-edmondson](https://github.com/matt-edmondson))
+- Update project SDK in GitIntegration.csproj and fix README formatting ([@matt-edmondson](https://github.com/matt-edmondson))
+- Bump ktsu.CredentialCache and ktsu.StrongPaths package versions for updates ([@matt-edmondson](https://github.com/matt-edmondson))
+- Bump ktsu package versions for improved functionality and stability ([@matt-edmondson](https://github.com/matt-edmondson))
+- Initial commit ([@matt-edmondson](https://github.com/matt-edmondson))
+- Add automation scripts for metadata generation and project management ([@matt-edmondson](https://github.com/matt-edmondson))
+- Add mailmap ([@matt-edmondson](https://github.com/matt-edmondson))
+- Update packages and code style fixes ([@matt-edmondson](https://github.com/matt-edmondson))
+- Add LICENSE template ([@matt-edmondson](https://github.com/matt-edmondson))
+- Renamed metadata files ([@matt-edmondson](https://github.com/matt-edmondson))
+- Replace LICENSE file with LICENSE.md and update copyright information ([@matt-edmondson](https://github.com/matt-edmondson))
+- Update license file format and content ([@matt-edmondson](https://github.com/matt-edmondson))
 ## v1.1.2-pre.15 (prerelease)
 
 Changes since v1.1.2-pre.14:
