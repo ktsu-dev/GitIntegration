@@ -1,6 +1,6 @@
-## v1.1.2-pre.16 (prerelease)
+## v1.1.2-pre.17 (prerelease)
 
-Changes since v1.1.2-pre.15:
+Changes since v1.1.2-pre.16:
 
 - Bump ktsu.AppDataStorage, ktsu.CredentialCache, and ktsu.StrongPaths package versions for updates ([@matt-edmondson](https://github.com/matt-edmondson))
 - Remove Directory.Build.props and Directory.Build.targets files; add copyright headers to Git integration classes; delete unused PowerShell scripts for commit metadata, changelog, license, and version management. ([@matt-edmondson](https://github.com/matt-edmondson))
