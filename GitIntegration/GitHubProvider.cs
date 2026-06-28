@@ -31,7 +31,7 @@ public class GitHubProvider : GitProvider
 	/// </summary>
 	public override void RefreshRemoteRepositories()
 	{
-		if (TryGetCredential(out var credential) && credential is CredentialWithUsernamePassword credentialUsernamePassword)
+		if (TryGetCredential(out Credential? credential) && credential is CredentialWithUsernamePassword credentialUsernamePassword)
 		{
 			GitHubClient.Credentials = new(credentialUsernamePassword.Username, credentialUsernamePassword.Password);
 		}

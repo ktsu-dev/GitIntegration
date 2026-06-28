@@ -70,7 +70,7 @@ public abstract class GitProvider
 	/// <returns><c>true</c> if the credential was found; otherwise, <c>false</c>.</returns>
 	public bool TryGetCredential(out Credential? credential)
 	{
-		var credentialCache = CredentialCache.Instance;
+		CredentialCache credentialCache = CredentialCache.Instance;
 		return credentialCache.TryGet(PersonaGUID, out credential);
 	}
 }
