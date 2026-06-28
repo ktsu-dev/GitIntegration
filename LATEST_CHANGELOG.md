@@ -1,12 +1,8 @@
-## v1.1.2 (patch)
+## v1.1.3 (patch)
 
-Changes since v1.1.1:
+Changes since v1.1.2:
 
-- fix: clarify credential nullability in Git provider ([@matt-edmondson](https://github.com/matt-edmondson))
-- refactor: trim package refs and multi-target GitIntegration ([@matt-edmondson](https://github.com/matt-edmondson))
-- Add TAGS.md with NuGet package tags ([@matt-edmondson](https://github.com/matt-edmondson))
-- Remove legacy build scripts ([@matt-edmondson](https://github.com/matt-edmondson))
-- Update project configuration and scripts, including new SDK management, enhanced CI/CD workflows, and updated copyright information. ([@matt-edmondson](https://github.com/matt-edmondson))
-- Update configuration files and scripts for improved build and test processes ([@matt-edmondson](https://github.com/matt-edmondson))
-- Update ktsu.AppDataStorage package version to 1.15.5 ([@matt-edmondson](https://github.com/matt-edmondson))
+- Merge remote-tracking branch 'refs/remotes/origin/main' ([@ktsu[bot]](https://github.com/ktsu[bot]))
+- Sync .github\workflows\dotnet.yml ([@ktsu[bot]](https://github.com/ktsu[bot]))
+- Sync global.json ([@ktsu[bot]](https://github.com/ktsu[bot]))
 
