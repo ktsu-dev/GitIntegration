@@ -15,5 +15,5 @@
     <PackageReference Include="Octokit" />
   
     <PackageReference Include="ktsu.Extensions" />
-    <PackageReference Include="Polyfill" /></ItemGroup>
+    <PackageReference Include="Polyfill" PrivateAssets="all" /></ItemGroup>
 </Project>
