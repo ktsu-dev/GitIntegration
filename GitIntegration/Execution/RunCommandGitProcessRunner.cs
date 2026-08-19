@@ -26,6 +26,34 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 	private readonly string _executablePath = Ensure.NotNull(options).ExecutablePath;
 	private readonly TimeSpan? _timeout = Ensure.NotNull(options).Timeout;
 
+	/// <summary>
+	/// The environment applied over the inherited one for every git invocation.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// <c>GIT_TERMINAL_PROMPT=0</c> stops git blocking forever on a credential prompt. Output is
+	/// redirected and no terminal is attached, so a prompt could never be answered; without this,
+	/// a fetch or push against a repository needing credentials hangs until the timeout fires.
+	/// With it, git fails immediately and says why.
+	/// </para>
+	/// <para>
+	/// <c>LC_ALL=C</c> forces English, machine-stable output. Git translates its messages when the
+	/// host has the catalogs installed, which would otherwise make every message-matching decision
+	/// in this library — and every parser built on it — silently locale-dependent.
+	/// </para>
+	/// <para>
+	/// Both were impossible before <c>ktsu.RunCommand</c> 1.5.0, which added
+	/// <see cref="CommandOptions.EnvironmentVariables"/>. The entries are an overlay, so every
+	/// other variable the calling process had is inherited unchanged.
+	/// </para>
+	/// </remarks>
+	internal static IReadOnlyDictionary<string, string?> EnvironmentOverlay { get; } =
+		new Dictionary<string, string?>(StringComparer.Ordinal)
+		{
+			["GIT_TERMINAL_PROMPT"] = "0",
+			["LC_ALL"] = "C",
+		};
+
 	/// <inheritdoc />
 	public async Task<GitProcessResult> RunAsync(GitProcessRequest request, CancellationToken cancellationToken = default)
 	{
@@ -64,7 +92,11 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 				_executablePath,
 				arguments,
 				outputHandler,
-				Elevation.Default,
+				new CommandOptions
+				{
+					Elevation = Elevation.Default,
+					EnvironmentVariables = EnvironmentOverlay,
+				},
 				linked.Token).ConfigureAwait(false);
 		}
 		catch (Win32Exception ex)

@@ -155,12 +155,12 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		// Git reports a missing working tree with a stable phrase and exit code 128. Surfacing it
 		// as a distinct type lets callers distinguish "wrong directory" from "command failed".
 		//
-		// The phrase match assumes an English git. ktsu.RunCommand cannot set environment
-		// variables (upstream ktsu-dev/RunCommand issue #40), so LC_ALL=C cannot be forced; on a
-		// machine with git's translation catalogs installed and a non-English locale active, the
-		// match silently misses and the failure degrades to a generic GitCommandException rather
-		// than GitRepositoryNotFoundException. That is a lossy but safe degradation: the exit code,
-		// arguments, and stderr are still carried.
+		// The phrase match relies on an English git, which RunCommandGitProcessRunner guarantees by
+		// running every invocation with LC_ALL=C. That guarantee is the whole reason the match is
+		// dependable: git translates its messages wherever the host has the catalogs installed, so
+		// without a forced locale this would silently miss on a non-English machine and degrade to
+		// a generic GitCommandException. Any alternative IGitProcessRunner implementation must
+		// force the locale too, or accept that degradation.
 		return result.StandardError.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
 			? new GitRepositoryNotFoundException(message, result.ExitCode, result.Arguments, result.StandardError)
 			: new GitCommandException(message, result.ExitCode, result.Arguments, result.StandardError);

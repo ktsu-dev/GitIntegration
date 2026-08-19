@@ -248,6 +248,43 @@ public class RunCommandGitProcessRunnerTests
 		Assert.IsTrue(result.Success);
 	}
 
+	[TestMethod]
+	public async Task ForcedEnvironmentReachesTheChildProcessAsync()
+	{
+		// Asserts the variables actually arrive in the spawned process, not merely that the
+		// overlay dictionary contains them. Uses the platform shell to echo them back, since no
+		// portable single command prints an environment variable.
+		string executable;
+		string[] arguments;
+
+		if (OperatingSystem.IsWindows())
+		{
+			executable = "cmd";
+			arguments = ["/c", "echo %GIT_TERMINAL_PROMPT%-%LC_ALL%"];
+		}
+		else
+		{
+			executable = "sh";
+			arguments = ["-c", "echo $GIT_TERMINAL_PROMPT-$LC_ALL"];
+		}
+
+		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = executable });
+
+		GitProcessResult result = await runner.RunAsync(
+			new GitProcessRequest { Arguments = arguments },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(0, result.ExitCode);
+		Assert.AreEqual("0-C", result.StandardOutput.Trim());
+	}
+
+	[TestMethod]
+	public void EnvironmentOverlayForcesNonInteractiveEnglishGit()
+	{
+		Assert.AreEqual("0", RunCommandGitProcessRunner.EnvironmentOverlay["GIT_TERMINAL_PROMPT"]);
+		Assert.AreEqual("C", RunCommandGitProcessRunner.EnvironmentOverlay["LC_ALL"]);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 
 	/// <summary>An <see cref="IProgress{T}"/> that invokes its callback on the reporting thread.</summary>
