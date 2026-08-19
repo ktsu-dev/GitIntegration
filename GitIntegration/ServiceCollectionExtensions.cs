@@ -28,7 +28,10 @@ public static class ServiceCollectionExtensions
 	/// </summary>
 	/// <remarks>
 	/// Registrations are singletons exposed by both concrete type and interface, and calling this
-	/// more than once is a no-op, matching the conventions in <c>ktsu.Essentials</c>.
+	/// more than once is a no-op, matching the conventions in <c>ktsu.Essentials</c>. Idempotency
+	/// applies per service, not per call: the first call to register <see cref="GitOptions"/> wins,
+	/// so a later call carrying different configuration is silently ignored rather than merged into
+	/// or rejected against the first — it neither takes effect nor raises an error.
 	/// </remarks>
 	/// <param name="services">The service collection to add to.</param>
 	/// <param name="configure">Mutates the options before they are registered.</param>
