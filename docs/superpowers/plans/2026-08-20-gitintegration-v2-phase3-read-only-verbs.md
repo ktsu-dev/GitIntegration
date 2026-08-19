@@ -2071,6 +2071,7 @@ public class GitLogParserTests
 	private const string SecondSha = "94947d6da5c05bf1c86af335b33cff8cee83cb3f";
 	private const string FirstTree = "f3758b7757b1f9bfe8c8e05fc5ac51bf3650c7d5";
 	private const string SecondTree = "50997ba19ef5248ac46e7ec0992ec0b07d7c8f8b";
+	private const string MergedInSha = "6f8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b";
 
 	// Captured verbatim from a real repository. The second record is the root commit, so its
 	// parents field is empty, and it carries a two-paragraph body ending in the newline %b appends.
@@ -2085,7 +2086,7 @@ public class GitLogParserTests
 		"Initial commit" + Us + "A body line.\n\nAnd a second paragraph.\n" + Nul;
 
 	private const string MergeCommit =
-		FirstSha + Us + FirstTree + Us + SecondSha + " " + FirstTree + Us +
+		FirstSha + Us + FirstTree + Us + SecondSha + " " + MergedInSha + Us +
 		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
 		"Other Committer" + Us + "other@example.com" + Us + "2026-08-21T09:00:00-04:00" + Us +
 		"Merge branch 'feature/x'" + Us + Nul;
@@ -2126,7 +2127,7 @@ public class GitLogParserTests
 
 		Assert.AreEqual(2, commits[0].ParentShas.Count);
 		Assert.AreEqual(SecondSha.As<GitCommitSha>(), commits[0].ParentShas[0]);
-		Assert.AreEqual(FirstTree.As<GitCommitSha>(), commits[0].ParentShas[1]);
+		Assert.AreEqual(MergedInSha.As<GitCommitSha>(), commits[0].ParentShas[1]);
 	}
 
 	[TestMethod]
@@ -4069,6 +4070,7 @@ Two builders that need no parser of their own: one resolves a revision to an obj
 - Create: `GitIntegration/Builders/GitRevParseBuilder.cs`
 - Create: `GitIntegration/Builders/GitTextBuilder.cs`
 - Test: `GitIntegration.Test/Builders/GitRevParseBuilderTests.cs`
+- Test: `GitIntegration.Test/Builders/GitTextBuilderTests.cs`
 
 **Interfaces:**
 - Consumes: `GitParseValues` (Task 1); `GitRefName`, `GitCommitSha`, `GitCommandBuilder<TResult>.AppendOperands`; `TestPaths.Root`.
@@ -4161,8 +4163,24 @@ public class GitRevParseBuilderTests
 			.ConfigureAwait(false);
 	}
 
+	public TestContext TestContext { get; set; } = null!;
+}
+```
+
+`GitIntegration.Test/Builders/GitTextBuilderTests.cs`:
+
+```csharp
+// Copyright (c) 2023-2026 ktsu-dev contributors
+
+namespace ktsu.GitIntegration.Test;
+
+using System.Threading.Tasks;
+
+[TestClass]
+public class GitTextBuilderTests
+{
 	[TestMethod]
-	public void BuildsAFixedTextVectorWithoutRepositoryScoping()
+	public void BuildsAFixedVectorWithoutRepositoryScoping()
 	{
 		RecordingGitProcessRunner runner = new();
 		GitTextBuilder builder = new(runner, null, "rev-parse", "--show-toplevel");
@@ -4179,9 +4197,28 @@ public class GitRevParseBuilderTests
 	}
 
 	[TestMethod]
-	public async Task TextBuilderTrimsTheOutputAsync()
+	public void ScopesToTheRepositoryWhenGivenAPath()
 	{
-		RecordingGitProcessRunner runner = new() { StandardOutput = "  true \n" };
+		RecordingGitProcessRunner runner = new();
+		GitTextBuilder builder = new(runner, TestPaths.Root, "remote", "get-url", "origin");
+
+		string[] expectedArguments =
+		[
+			"-C", TestPaths.Root.WeakString,
+			"--no-pager",
+			"-c", "core.quotepath=false",
+			"-c", "color.ui=false",
+			"remote", "get-url", "origin",
+		];
+		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
+	}
+
+	[TestMethod]
+	public async Task TrimsTheOutputAsync()
+	{
+		// Every probe command produces one line with a trailing newline and every caller compares the
+		// value against a literal, so trimming belongs here rather than at each call site.
+		RecordingGitProcessRunner runner = new() { StandardOutput = "  true " + (char)10 };
 		GitTextBuilder builder = new(runner, TestPaths.Root, "rev-parse", "--is-inside-work-tree");
 
 		string value = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
@@ -4195,7 +4232,7 @@ public class GitRevParseBuilderTests
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `dotnet test --filter "FullyQualifiedName~GitRevParseBuilderTests"`
+Run: `dotnet test --filter "FullyQualifiedName~GitRevParseBuilderTests|FullyQualifiedName~GitTextBuilderTests"`
 
 Expected: compilation failure — `GitRevParseBuilder` and `GitTextBuilder` do not exist.
 
@@ -4313,9 +4350,9 @@ internal sealed class GitRevParseBuilder(
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `dotnet test --filter "FullyQualifiedName~GitRevParseBuilderTests"`
+Run: `dotnet test --filter "FullyQualifiedName~GitRevParseBuilderTests|FullyQualifiedName~GitTextBuilderTests"`
 
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests (4 in `GitRevParseBuilderTests`, 3 in `GitTextBuilderTests`).
 
 - [ ] **Step 6: Build and run everything**
 
@@ -4326,7 +4363,7 @@ Expected: 0 warnings, 0 errors, all tests passing.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add GitIntegration/Builders/GitRevParseBuilder.cs GitIntegration/Builders/GitTextBuilder.cs GitIntegration.Test/Builders/GitRevParseBuilderTests.cs
+git add GitIntegration/Builders/GitRevParseBuilder.cs GitIntegration/Builders/GitTextBuilder.cs GitIntegration.Test/Builders/GitRevParseBuilderTests.cs GitIntegration.Test/Builders/GitTextBuilderTests.cs
 git commit -m "[minor] Add the rev-parse verb and the fixed-vector text builder"
 ```
 
