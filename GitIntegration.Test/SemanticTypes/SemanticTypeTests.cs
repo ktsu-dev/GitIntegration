@@ -2,8 +2,6 @@
 
 namespace ktsu.GitIntegration.Test;
 
-using System.Diagnostics.CodeAnalysis;
-
 using ktsu.Semantics.Strings;
 
 [TestClass]
@@ -131,12 +129,13 @@ public class SemanticTypeTests
 	}
 
 	[TestMethod]
-	[SuppressMessage("Assertions", "MSTEST0065:Do not assert on IEnumerable<T> with AreEqual/AreNotEqual", Justification = "The <object> type argument is deliberate: this checks reference/value inequality between two distinct semantic string types, not element-wise sequence content.")]
 	public void SemanticTypesAreDistinctAtCompileTime()
 	{
 		GitBranchName branch = "main".As<GitBranchName>();
-		GitRemoteName remote = "origin".As<GitRemoteName>();
 
-		Assert.AreNotEqual<object>(branch, remote);
+		// Asserting inequality of the two values would pass against any implementation, including
+		// one where both types were aliases for the same thing. The type identity is the invariant
+		// worth checking, so check that instead.
+		Assert.IsNotInstanceOfType<GitRemoteName>(branch);
 	}
 }

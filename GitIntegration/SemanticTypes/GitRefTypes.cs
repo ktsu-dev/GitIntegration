@@ -2,8 +2,6 @@
 
 namespace ktsu.GitIntegration;
 
-using System.Diagnostics.CodeAnalysis;
-
 using ktsu.Semantics.Strings;
 
 /// <summary>
@@ -45,6 +43,9 @@ public sealed record GitRefName : SemanticString<GitRefName> { }
 public sealed record GitCommitSha : SemanticString<GitCommitSha>
 {
 	/// <inheritdoc />
-	[SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The SemanticString<T> base class guarantees input is non-null before invoking MakeCanonical.")]
-	protected override string MakeCanonical(string input) => input.Trim().ToLowerInvariant();
+	protected override string MakeCanonical(string input)
+	{
+		Ensure.NotNull(input);
+		return input.Trim().ToLowerInvariant();
+	}
 }
