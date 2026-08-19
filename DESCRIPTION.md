@@ -1,1 +1,1 @@
-Git Integration
+A .NET library that unifies access to hosted Git providers behind a single abstraction. Provides a pluggable GitProvider base with a GitHub implementation built on Octokit and Azure DevOps support via the Team Foundation Server client, credential resolution through ktsu.CredentialCache, and a set of semantic string types for branch names, commit SHAs, ref names, remote names, author names and emails, repository names, and web URIs that replace stringly-typed Git identifiers with validated, compile-time-safe wrappers.
