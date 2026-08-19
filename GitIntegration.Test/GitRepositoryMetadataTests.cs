@@ -34,6 +34,7 @@ public class GitRepositoryMetadataTests
 
 		Assert.AreEqual("GitIntegration", repository.Name?.WeakString);
 		Assert.AreEqual("https://github.com/ktsu-dev/GitIntegration", repository.WebURI?.WeakString);
+		Assert.AreEqual("https://github.com/ktsu-dev/GitIntegration.git", repository.RemotePath?.WeakString);
 	}
 
 	[TestMethod]

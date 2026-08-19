@@ -109,6 +109,11 @@ public class GitCommandBuilderTests
 		string result = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.AreEqual("clean", result);
+
+		// The load-bearing invariant of the execution core: what BuildArguments returns is exactly
+		// what gets sent. Without this, a builder whose ExecuteAsync assembled a different vector
+		// would pass every other test in this file.
+		CollectionAssert.AreEqual(builder.BuildArguments().ToArray(), runner.LastArguments?.ToArray());
 	}
 
 	[TestMethod]
@@ -161,6 +166,7 @@ public class GitCommandBuilderTests
 
 		Assert.IsTrue(result.Success);
 		Assert.AreEqual("clean", result.Value);
+		CollectionAssert.AreEqual(builder.BuildArguments().ToArray(), runner.LastArguments?.ToArray());
 	}
 
 	public TestContext TestContext { get; set; } = null!;
