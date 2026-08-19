@@ -64,6 +64,26 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 				ex);
 		}
 
+		// RunCommand delivers cancellation two ways at once: a registration that kills the process, and
+		// WaitForExitAsync observing the token. When the kill wins that race the process exits before the
+		// await faults, so ExecuteAsync returns normally carrying a killed process's exit code (-1 on
+		// Windows) and a cancelled run is indistinguishable from an ordinary git failure. Classify it the
+		// same way the catch clause does, so both paths reach the caller with identical semantics.
+		if (linked.IsCancellationRequested)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+
+			if (Options.Timeout is TimeSpan timeout)
+			{
+				throw new GitTimeoutException(
+					$"git did not complete within {timeout}.",
+					timeout,
+					new OperationCanceledException(linked.Token));
+			}
+
+			throw new OperationCanceledException(linked.Token);
+		}
+
 		return new GitProcessResult
 		{
 			ExitCode = exitCode,

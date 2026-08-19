@@ -101,5 +101,26 @@ public class RunCommandGitProcessRunnerTests
 		Assert.AreEqual(timeout, exception.Timeout);
 	}
 
+	[TestMethod]
+	public async Task TimeoutNeverReturnsSilentlyWhenCancellationRacesProcessExitAsync()
+	{
+		// 1ms is deliberate, not a typo to "fix" upward: it is short enough that the kill-the-process
+		// registration frequently wins the race against WaitForExitAsync observing the token, which is
+		// exactly the silent-return path this test exists to close off. Raising this value to something
+		// comfortable (e.g. the 50ms used above) would stop the race from firing and silently gut the
+		// test's ability to catch a regression here.
+		RunCommandGitProcessRunner runner = new(new GitOptions
+		{
+			ExecutablePath = "dotnet",
+			Timeout = TimeSpan.FromMilliseconds(1),
+		});
+
+		for (int iteration = 0; iteration < 20; iteration++)
+		{
+			await Assert.ThrowsExactlyAsync<GitTimeoutException>(
+				async () => await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+		}
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }
