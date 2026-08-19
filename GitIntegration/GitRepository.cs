@@ -2,66 +2,89 @@
 
 namespace ktsu.GitIntegration;
 
-using ktsu.StrongPaths;
-using ktsu.StrongStrings;
+using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+
+using ktsu.Semantics.Paths;
 
 /// <summary>
-/// Represents a strongly-typed name for a Git repository.
-/// </summary>
-public sealed record class GitRepositoryName : StrongStringAbstract<GitRepositoryName> { }
-/// <summary>
-/// Represents a strongly-typed web URI for a Git repository.
-/// </summary>
-public sealed record class GitRepositoryWebURI : StrongStringAbstract<GitRepositoryWebURI> { }
-/// <summary>
-/// Represents a strongly-typed remote path for a Git repository.
-/// </summary>
-public sealed record class GitRepositoryRemotePath : StrongStringAbstract<GitRepositoryRemotePath> { }
-
-/// <summary>
-/// Represents a Git repository with its associated metadata and functionality.
+/// Represents a git repository: where its working copy is, and what is known about the host it
+/// came from.
 /// </summary>
 public class GitRepository
 {
 	/// <summary>
-	/// Gets the name of the Git repository.
+	/// Gets the local filesystem path where the repository is, or is intended to be, cloned.
 	/// </summary>
-	public GitRepositoryName Name { get; init; } = new();
+	public required AbsoluteDirectoryPath LocalPath { get; init; }
 
 	/// <summary>
-	/// Gets the web URI for accessing the Git repository through a browser.
+	/// Gets the repository name, or <see langword="null"/> when it is not known.
 	/// </summary>
-	public GitRepositoryWebURI WebURI { get; init; } = new();
+	public GitRepositoryName? Name { get; init; }
 
 	/// <summary>
-	/// Gets the remote path of the Git repository.
+	/// Gets the browser-facing URI, or <see langword="null"/> when it is not known.
 	/// </summary>
-	public GitRepositoryRemotePath RemotePath { get; init; } = new();
+	public GitRepositoryWebURI? WebURI { get; init; }
 
 	/// <summary>
-	/// Gets the local file system path where the Git repository is or will be cloned.
+	/// Gets the remote path, or <see langword="null"/> when it is not known.
 	/// </summary>
-	public AbsoluteDirectoryPath LocalPath { get; init; } = new();
+	public GitRepositoryRemotePath? RemotePath { get; init; }
 
 	/// <summary>
-	/// Gets a value indicating whether the repository has been cloned locally.
+	/// Opens <see cref="WebURI"/> in the default browser.
 	/// </summary>
 	/// <remarks>
-	/// Currently only checks if the directory exists. Future implementations should verify it's a valid Git repository.
+	/// Only an absolute <c>http</c> or <c>https</c> URI is launched. Anything else — a
+	/// <see langword="null"/> <see cref="WebURI"/>, a <c>file:</c> URI, a bare filesystem path, a
+	/// relative string, or any other registered handler scheme — is silently ignored. The check is
+	/// deliberate rather than defensive: the launch runs through <c>UseShellExecute</c>, so without
+	/// it any non-blank string would be handed to the shell as something to execute, and
+	/// <see cref="GitRepositoryWebURI"/> only guarantees that the value is not blank. The value is
+	/// expected to be populated from a hosting provider's API response, which is remote data.
 	/// </remarks>
-	public bool IsCloned => Directory.Exists(LocalPath); //TODO: Implement this properly by checking if it is a valid clone
-
-	/// <summary>
-	/// Opens the repository in the default web browser.
-	/// </summary>
 	public void OpenWebClient()
 	{
-		_ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo()
+		if (!IsBrowsableUri(WebURI?.WeakString, out Uri? uri))
 		{
-			FileName = "explorer",
-			Arguments = WebURI,
+			return;
+		}
+
+		// UseShellExecute with the URI as FileName is the portable form. The previous
+		// implementation hardcoded "explorer", which does not exist on Linux or macOS.
+		_ = Process.Start(new ProcessStartInfo
+		{
+			FileName = uri.AbsoluteUri,
 			UseShellExecute = true,
-			Verb = "open",
 		});
+	}
+
+	/// <summary>
+	/// Decides whether a value is safe to hand to the shell as something to open.
+	/// </summary>
+	/// <remarks>
+	/// Separate from <see cref="OpenWebClient"/> so the decision can be asserted in tests without
+	/// the side effect of actually launching a browser.
+	/// </remarks>
+	/// <param name="value">The candidate value, which may be <see langword="null"/>.</param>
+	/// <param name="uri">The parsed absolute http or https URI, when the value is accepted.</param>
+	/// <returns>
+	/// <see langword="true"/> when <paramref name="value"/> is an absolute <c>http</c> or
+	/// <c>https</c> URI; otherwise, <see langword="false"/>.
+	/// </returns>
+	internal static bool IsBrowsableUri(string? value, [NotNullWhen(true)] out Uri? uri)
+	{
+		if (value is null ||
+			!Uri.TryCreate(value, UriKind.Absolute, out uri) ||
+			(uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+		{
+			uri = null;
+			return false;
+		}
+
+		return true;
 	}
 }

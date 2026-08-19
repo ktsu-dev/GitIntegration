@@ -5,20 +5,6 @@ namespace ktsu.GitIntegration;
 using System.Collections.Concurrent;
 
 using ktsu.CredentialCache;
-using ktsu.StrongStrings;
-
-/// <summary>
-/// A strongly-typed identifier for a Git provider.
-/// </summary>
-public sealed record class GitProviderGUID : StrongStringAbstract<GitProviderGUID> { }
-/// <summary>
-/// A strongly-typed name for a Git provider (e.g. GitHub, GitLab, etc.).
-/// </summary>
-public sealed record class GitProviderName : StrongStringAbstract<GitProviderName> { }
-/// <summary>
-/// A strongly-typed identifier for the owner of repositories in a Git provider.
-/// </summary>
-public sealed record class GitProviderOwner : StrongStringAbstract<GitProviderOwner> { }
 
 /// <summary>
 /// Represents a Git service provider that hosts repositories.
@@ -33,10 +19,15 @@ public abstract class GitProvider
 	public abstract GitProviderName Name { get; }
 
 	/// <summary>
-	/// Gets or initializes the owner of the repositories in this provider.
+	/// Gets the owner of the repositories in this provider.
 	/// </summary>
+	/// <remarks>
+	/// Required rather than defaulted. A <c>new GitProviderOwner()</c> default bypasses the
+	/// type's own validation and yields an empty value, which every caller would then have to
+	/// re-check; making it required moves the failure to construction, where it belongs.
+	/// </remarks>
 	/// <value>The repository owner name.</value>
-	public GitProviderOwner Owner { get; init; } = new();
+	public required GitProviderOwner Owner { get; init; }
 
 	/// <summary>
 	/// Gets or initializes the persona GUID used for authentication with the provider.

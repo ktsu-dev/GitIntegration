@@ -7,13 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ktsu.AppDataStorage" />
     <PackageReference Include="ktsu.CredentialCache" />
-    <PackageReference Include="ktsu.StrongPaths" />
-    <PackageReference Include="ktsu.StrongStrings" />
-    <PackageReference Include="LibGit2Sharp" />
+    <PackageReference Include="ktsu.Essentials" />
+    <PackageReference Include="ktsu.Essentials.FileSystemProviders.Native" />
+    <PackageReference Include="ktsu.RunCommand" />
+    <PackageReference Include="ktsu.Semantics.Paths" />
+    <PackageReference Include="ktsu.Semantics.Strings" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Octokit" />
-  
-    <PackageReference Include="ktsu.Extensions" />
-    <PackageReference Include="Polyfill" PrivateAssets="all" /></ItemGroup>
+    <PackageReference Include="Polyfill" PrivateAssets="all" />
+  </ItemGroup>
 </Project>
