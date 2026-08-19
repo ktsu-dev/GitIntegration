@@ -110,10 +110,20 @@ public sealed record GitProcessResult
     public bool Success => ExitCode == 0;
 }
 
+/// <summary>Describes one git invocation. A record so it can grow without breaking implementers.</summary>
+public sealed record GitProcessRequest
+{
+    public required IReadOnlyList<string> Arguments { get; init; }
+
+    /// <summary>Optional sink for incremental output, reported as git produces it.
+    /// May be invoked concurrently from the stdout and stderr readers, so it must be thread-safe.</summary>
+    public IProgress<string>? Progress { get; init; }
+}
+
 public interface IGitProcessRunner
 {
     Task<GitProcessResult> RunAsync(
-        IReadOnlyList<string> arguments,
+        GitProcessRequest request,
         CancellationToken cancellationToken = default);
 }
 
@@ -128,7 +138,9 @@ public sealed class GitOptions
 ```
 
 `RunCommandGitProcessRunner` is the shipped implementation. It calls
-`RunCommand.ExecuteAsync(options.ExecutablePath, arguments, outputHandler, cancellationToken)`,
+`RunCommand.ExecuteAsync(executablePath, arguments, outputHandler, cancellationToken)` — reading
+an executable path and timeout **snapshotted into readonly fields at construction**, so a consumer
+mutating the shared `GitOptions` singleton cannot change a runner's behaviour mid-flight —
 accumulating stdout and stderr into separate `StringBuilder` instances through an `OutputHandler`.
 When `Timeout` is set it links a timeout token to the caller's token; `RunCommand` kills the
 process tree on cancellation.
@@ -219,6 +231,12 @@ produced by `OpenAsync` has `LocalPath` populated, and `RemotePath` back-filled 
 `git remote get-url origin` when an `origin` remote exists — so "opened locally" does not imply
 blank metadata in the common case. `WebURI` stays null unless a provider supplied it.
 
+`OpenWebClient` also validates before launching. It accepts only an **absolute http or https URI**
+and silently ignores anything else. Without that gate, `UseShellExecute = true` would hand any
+non-blank string to the shell — `C:\Windows\System32\calc.exe`, a `.bat` path, a registered handler
+scheme — and Phase 5 populates `WebURI` from hosting-provider API JSON, which is remote data. The
+gate makes the portable fix no more permissive than the Windows-only call it replaced.
+
 `OpenWebClient` is additionally fixed while migrating it. It currently hardcodes `FileName =
 "explorer"`, which fails on Linux and macOS even though the library multi-targets and the type
 carries no Windows-only marker. It becomes `UseShellExecute = true` with the URI as `FileName`,
@@ -243,6 +261,24 @@ public interface IGitCommandBuilder<TResult>
 
 `BuildArguments()` is public because it makes the argument vector directly assertable in tests and
 inspectable when debugging, without running anything.
+
+Three members exist so later phases can extend the base rather than reopen it: `Runner` is
+`protected`, `ExecuteAsync`/`TryExecuteAsync` are `virtual`, and `CreateException` is
+`protected virtual`. `Commit` needs two invocations (`commit`, then `log -1`) and `Fetch` needs an
+argument vector that depends on a runtime version probe, so a derived builder must be able to reach
+the runner and override execution.
+
+### Argument injection
+
+Bypassing the shell stops shell injection; it does not stop **git option injection**. A value
+beginning with `-` is read by git as an option, so an unvalidated remote path of
+`--upload-pack=calc.exe` reaching `git clone` is remote code execution. Two defences, both required:
+
+- `NotAnOptionAttribute` rejects a leading `-` on `GitBranchName`, `GitRemoteName`, `GitRefName`,
+  and `GitRepositoryRemotePath`, composed with `[HasNonWhitespaceContent]` under the default
+  all-must-pass strategy.
+- `GitCommandBuilder.AppendOperands` emits `--end-of-options` before any caller-supplied operand, so
+  even a value that passed validation cannot be reinterpreted positionally.
 
 Builders are mutable and return `this` from each configuration method. They are single-use and not
 thread-safe; each `repo.Verb()` call returns a fresh builder.
@@ -490,17 +526,21 @@ construction through `Create`, `TryCreate`, or `As<T>()`.
 
 ### Types
 
-Migrated: `GitProviderGUID`, `GitProviderName`, `GitProviderOwner`, `GitRepositoryName`,
+Migrated: `GitProviderName`, `GitProviderOwner`, `GitRepositoryName`,
 `GitRepositoryWebURI`, `GitRepositoryRemotePath`.
 
 Added for the local layer: `GitBranchName`, `GitRemoteName`, `GitRefName`, `GitCommitMessage`,
 `GitAuthorName`, `GitAuthorEmail`, `AzureDevOpsProjectName`, and
 
 ```csharp
-[RegexMatch("^[0-9a-fA-F]{4,40}$")]
+[RegexMatch("^[0-9a-fA-F]{4,64}$")]
 public sealed record GitCommitSha : SemanticString<GitCommitSha>
 {
-    protected override string MakeCanonical(string input) => input.Trim().ToLowerInvariant();
+    protected override string MakeCanonical(string input)
+    {
+        Ensure.NotNull(input);
+        return input.Trim().ToLowerInvariant();
+    }
 }
 ```
 
@@ -555,9 +595,16 @@ testable abstraction rather than static `Directory`/`File` calls.
 | Add | `ktsu.Essentials` | `IFileSystemProvider` for filesystem access |
 | Add | `ktsu.Essentials.FileSystemProviders.Native` | Default filesystem registration |
 | Add | `Microsoft.Extensions.DependencyInjection.Abstractions` | `IServiceCollection` extensions |
-| Add | `Microsoft.TeamFoundationServer.Client` | Azure DevOps repositories |
-| Add | `Microsoft.VisualStudio.Services.Client` | Azure DevOps authentication |
-| Keep | `Octokit`, `ktsu.CredentialCache`, `ktsu.Extensions`, `Polyfill` | Still used |
+| Deferred to Phase 5 | `Microsoft.TeamFoundationServer.Client`, `Microsoft.VisualStudio.Services.Client` | Azure DevOps; see the note below |
+| Keep | `Octokit`, `ktsu.CredentialCache`, `Polyfill` | Still used |
+| Removed | `ktsu.Extensions` | No source file references it once `As<T>` comes from `ktsu.Semantics.Strings` |
+
+The two Azure DevOps client packages are **not referenced until Phase 5**, deliberately. They pull
+`System.Data.SqlClient` 4.8.5, which carries a known high-severity advisory, and with them referenced
+the pinned replacement became a *direct* dependency of the published package — a git-binary wrapper
+that makes every consumer take a SQL client. Phase 5 must re-add them and will re-inherit that pin
+unless it uses a lighter Azure DevOps client or the REST API over `HttpClient` directly. Decide that
+when Phase 5 starts; do not re-add them casually.
 
 Target frameworks remain `net10.0;net9.0`.
 
@@ -615,6 +662,32 @@ hosting work and could proceed in parallel if desired.
 | Remote operations block on an auth prompt | `GitOptions.Timeout` plus caller `CancellationToken`; RunCommand kills the process tree. The timeout surfaces as `GitTimeoutException`, never as a bare `OperationCanceledException`, so a caller can tell "git hung" (retryable) from "I cancelled" (not) |
 | Azure DevOps client packages are large and `netstandard2.0` | Acceptable; the same pair is already used by `ktsu.BuildMonitor` |
 | Merged `GitRepository` mixes local and hosting concerns | Metadata is nullable rather than blank; `RemotePath` back-filled from `origin`; verbs fail with a specific exception type |
+
+## Upstream gaps: filed, fixed, and pending adoption
+
+Every RunCommand limitation this design works around was filed against `ktsu-dev/RunCommand` and
+**all four are now fixed and published in 1.4.29**:
+
+| Issue | Gap | Fix |
+|---|---|---|
+| #38 | A cancelled run could return normally with a killed process's exit code | `ThrowIfCancellationRequested()` after the await |
+| #39 | No working-directory support | `CommandOptions.WorkingDirectory` |
+| #40 | No environment-variable support | `CommandOptions.EnvironmentVariables` |
+| #41 | `Execute(string)` split on the first space, breaking paths with spaces | String overloads obsoleted |
+
+This repository still pins **1.4.26**, so every workaround in this document remains necessary as
+written. Bumping to 1.4.29 is the **first task of Phase 3**, not a Phase 1-2 change: it would alter
+the argument-injection design that Phases 1-2 were reviewed against, and the branch is complete and
+verified as it stands.
+
+What the bump buys, and why it is worth doing before the verbs are built:
+
+- **`GIT_TERMINAL_PROMPT=0`** removes the credential-prompt hang outright, which is the entire
+  reason `GitOptions.Timeout` exists.
+- **`LC_ALL=C`** forces English, machine-stable output, retiring the locale-fragile
+  `"not a git repository"` string match that currently degrades silently on a localized machine.
+- **`WorkingDirectory`** makes `git -C` optional, though `-C` is explicit and can stay.
+- The post-return cancellation guard becomes belt-and-braces rather than load-bearing.
 
 ## Open follow-ups (outside this repository)
 
