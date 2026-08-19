@@ -83,21 +83,19 @@ public class RunCommandGitProcessRunnerTests
 	[TestMethod]
 	public async Task TimeoutSurfacesAsGitTimeoutExceptionAsync()
 	{
-		// 50ms rather than the tightest possible bound: at 1ms the timer can fire before
-		// ktsu.RunCommand starts the process, which races a different, non-throwing internal path
-		// that returns exit code -1 without ever surfacing a cancellation. 50ms is comfortably
-		// shorter than a `dotnet --version` invocation while reliably landing on the code path
-		// that cancels the awaited task, so this test is deterministic. See task-5-report.md for
-		// the measurements behind this choice.
+		// The command sleeps far longer than the bound, so the timeout is certain to fire whatever
+		// the host's speed. See LongRunningCommand for why a short-lived process is unsafe here.
+		(string executable, string[] arguments) = LongRunningCommand();
+
 		TimeSpan timeout = TimeSpan.FromMilliseconds(50);
 		RunCommandGitProcessRunner runner = new(new GitOptions
 		{
-			ExecutablePath = "dotnet",
+			ExecutablePath = executable,
 			Timeout = timeout,
 		});
 
 		GitTimeoutException exception = await Assert.ThrowsExactlyAsync<GitTimeoutException>(
-			async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+			async () => await runner.RunAsync(new GitProcessRequest { Arguments = arguments }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
 
 		Assert.AreEqual(timeout, exception.Timeout);
 	}
@@ -105,21 +103,27 @@ public class RunCommandGitProcessRunnerTests
 	[TestMethod]
 	public async Task TimeoutNeverReturnsSilentlyWhenCancellationRacesProcessExitAsync()
 	{
-		// 1ms is deliberate, not a typo to "fix" upward: it is short enough that the kill-the-process
-		// registration frequently wins the race against WaitForExitAsync observing the token, which is
-		// exactly the silent-return path this test exists to close off. Raising this value to something
-		// comfortable (e.g. the 50ms used above) would stop the race from firing and silently gut the
-		// test's ability to catch a regression here.
+		// A 1ms bound against a long-running process means cancellation always arrives while the
+		// process is still alive, which is when the kill-the-process registration can win the race
+		// against the wait observing the token. ktsu.RunCommand 1.5.0 closed the silent-return path
+		// upstream by re-checking the token after the await, so both deliveries now throw; this
+		// keeps the runner's own post-return guard honest as defence in depth, and pins that a
+		// timeout surfaces as GitTimeoutException no matter which path delivers it.
+		//
+		// Repeated because the delivery path is decided by OS scheduling, so a single pass would
+		// exercise only whichever happened to win that time.
+		(string executable, string[] arguments) = LongRunningCommand();
+
 		RunCommandGitProcessRunner runner = new(new GitOptions
 		{
-			ExecutablePath = "dotnet",
+			ExecutablePath = executable,
 			Timeout = TimeSpan.FromMilliseconds(1),
 		});
 
 		for (int iteration = 0; iteration < 20; iteration++)
 		{
 			await Assert.ThrowsExactlyAsync<GitTimeoutException>(
-				async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+				async () => await runner.RunAsync(new GitProcessRequest { Arguments = arguments }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
 		}
 	}
 
@@ -132,18 +136,22 @@ public class RunCommandGitProcessRunnerTests
 		// drive execution into that guard, where the caller's cancellation must be re-raised as a
 		// plain OperationCanceledException rather than being misreported as a timeout.
 		//
-		// 1ms and 50 iterations, both measured rather than guessed. Which of the two delivery
-		// paths wins is a race, and the guard is only reached when the kill-the-process
-		// registration wins — which in practice happens around process startup, the same window
-		// TimeoutNeverReturnsSilentlyWhenCancellationRacesProcessExitAsync targets with its 1ms
-		// timeout. A delay sweep over 1-250ms hit the guard only at 1ms and 6ms (3 of 500
-		// attempts); at a fixed 20ms it was never hit in 60 attempts. At 1ms, 50 iterations hit it
-		// in 5 of 5 runs (1 to 11 hits per run), while 20 iterations missed entirely in 1 of 4.
-		// Do not raise the delay or lower the iteration count: either silently stops this test
-		// exercising the branch it exists for.
+		// Cancelling 1ms in, against a process that sleeps far longer, guarantees the token is
+		// signalled while the process is still alive — which is the only window in which the
+		// kill-the-process registration can win and drive execution into the guard. Repeated 50
+		// times because which delivery path wins is decided by OS scheduling, so a single pass
+		// would exercise only whichever won that time.
+		//
+		// Do not raise the delay: a bound long enough for the process to finish first would stop
+		// this test exercising the branch it exists for. Earlier revisions ran a short-lived
+		// `dotnet --info` here and depended on it outlasting the cancellation, which was a bet on
+		// host speed — CI ran the equivalent invocation in roughly 19ms and broke two sibling
+		// tests that made the same bet.
+		(string executable, string[] arguments) = LongRunningCommand();
+
 		RunCommandGitProcessRunner runner = new(new GitOptions
 		{
-			ExecutablePath = "dotnet",
+			ExecutablePath = executable,
 			Timeout = TimeSpan.FromMinutes(5),
 		});
 
@@ -158,7 +166,7 @@ public class RunCommandGitProcessRunnerTests
 			// as a plain OperationCanceledException. Both are correct; neither may be a timeout.
 			OperationCanceledException exception = await Assert.ThrowsAsync<OperationCanceledException>(
 				async () => await runner.RunAsync(
-					new GitProcessRequest { Arguments = ["--info"] },
+					new GitProcessRequest { Arguments = arguments },
 					cancellation.Token).ConfigureAwait(false)).ConfigureAwait(false);
 
 			// The generous timeout cannot have elapsed, so a GitTimeoutException here would mean
@@ -288,6 +296,29 @@ public class RunCommandGitProcessRunnerTests
 	public TestContext TestContext { get; set; } = null!;
 
 	/// <summary>An <see cref="IProgress{T}"/> that invokes its callback on the reporting thread.</summary>
+	/// <summary>
+	/// A command that runs far longer than any timeout under test, so that a timeout is guaranteed
+	/// to fire on any host.
+	/// </summary>
+	/// <remarks>
+	/// These tests previously ran <c>dotnet --version</c> and assumed it outlived a 50ms bound.
+	/// That held on a developer machine but not on CI, which completed the same invocation in
+	/// roughly 19ms — so the timeout never fired and the tests failed with "no exception was
+	/// thrown". The bug was the assumption, not the bound: no fixed number is safe when the thing
+	/// being outrun is an arbitrarily fast process. A process that sleeps far longer than any bound
+	/// removes the race in the only direction that matters. Cancellation kills it immediately, so
+	/// these tests still finish in milliseconds rather than waiting out the sleep.
+	/// </remarks>
+	private static (string Executable, string[] Arguments) LongRunningCommand()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			return ("powershell", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]);
+		}
+
+		return ("sh", ["-c", "sleep 30"]);
+	}
+
 	private sealed class SynchronousProgress(Action<string> onReport) : IProgress<string>
 	{
 		public void Report(string value) => onReport(value);
