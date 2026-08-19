@@ -89,7 +89,13 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 		// await faults, so ExecuteAsync returns normally carrying a killed process's exit code (-1 on
 		// Windows) and a cancelled run is indistinguishable from an ordinary git failure. Classify it the
 		// same way the catch clause does, so both paths reach the caller with identical semantics.
-		if (linked.IsCancellationRequested)
+		//
+		// Gated on a non-zero exit code as well, because the token being signalled does not by
+		// itself mean the process was killed: git can exit successfully microseconds before the
+		// timeout timer fires, and discarding that valid result as a timeout would be wrong. A
+		// killed process never exits 0 on any platform, so a zero exit code proves git finished
+		// on its own.
+		if (linked.IsCancellationRequested && exitCode != 0)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
@@ -109,7 +115,11 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 			ExitCode = exitCode,
 			StandardOutput = standardOutput.ToString(),
 			StandardError = standardError.ToString(),
-			Arguments = arguments,
+
+			// Copied, not aliased: the caller's list must not be observable through the result,
+			// and a caller holding a mutable List<string> could otherwise change what the result
+			// reports the command was.
+			Arguments = [.. arguments],
 		};
 	}
 

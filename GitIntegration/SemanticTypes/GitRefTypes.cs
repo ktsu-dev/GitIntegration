@@ -31,10 +31,17 @@ public sealed record GitRefName : SemanticString<GitRefName> { }
 /// A strongly-typed git object identifier, either abbreviated or full length.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Values are canonicalised to lowercase, because git emits lowercase but accepts either case as
 /// input, and callers should be able to compare two SHAs for equality without normalising first.
+/// </para>
+/// <para>
+/// The upper bound is 64, not 40: a repository created with <c>--object-format=sha256</c> emits
+/// 64-character object IDs, and rejecting those would make every parser throw against such a
+/// repository.
+/// </para>
 /// </remarks>
-[RegexMatch("^[0-9a-fA-F]{4,40}$")]
+[RegexMatch("^[0-9a-fA-F]{4,64}$")]
 public sealed record GitCommitSha : SemanticString<GitCommitSha>
 {
 	/// <inheritdoc />

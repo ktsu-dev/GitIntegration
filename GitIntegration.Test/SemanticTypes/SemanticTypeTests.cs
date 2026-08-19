@@ -18,6 +18,24 @@ public class SemanticTypeTests
 	}
 
 	[TestMethod]
+	public void GitCommitShaAcceptsSha256ObjectId()
+	{
+		// A repository created with --object-format=sha256 emits 64 hex characters.
+		const string sha256 = "5b4c3d2e1f009a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b";
+
+		GitCommitSha sha = GitCommitSha.Create(sha256);
+
+		Assert.AreEqual(sha256, sha.WeakString);
+	}
+
+	[TestMethod]
+	public void GitCommitShaRejectsValueLongerThanSha256()
+	{
+		Assert.IsFalse(GitCommitSha.TryCreate(new string('a', 65), out GitCommitSha? result));
+		Assert.IsNull(result);
+	}
+
+	[TestMethod]
 	public void GitCommitShaAcceptsAbbreviatedSha()
 	{
 		GitCommitSha sha = GitCommitSha.Create("3f2a1b4");
