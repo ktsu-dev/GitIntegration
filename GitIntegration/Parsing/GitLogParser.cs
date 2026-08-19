@@ -41,7 +41,11 @@ internal static class GitLogParser
 
 	private static GitCommit ReadCommit(string record)
 	{
-		string[] fields = record.Split(GitOutputFormats.UnitSeparator);
+		// Bounded to FieldCount: the last field, %b, is free-form message text that may itself
+		// contain the unit separator (verified against real git). A bounded split makes the
+		// trailing body field absorb any embedded separator instead of overflowing into extra
+		// array elements and shifting every field that follows.
+		string[] fields = record.Split(GitOutputFormats.UnitSeparator, FieldCount);
 
 		if (fields.Length < FieldCount)
 		{

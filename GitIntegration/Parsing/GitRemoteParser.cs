@@ -87,6 +87,9 @@ internal static class GitRemoteParser
 			fetchUrl ??= pushUrl;
 			pushUrl ??= fetchUrl;
 
+			// Unreachable at runtime — the two ??= assignments above mean fetchUrl and pushUrl are
+			// either both null or both non-null — but required so nullable analysis can prove
+			// non-nullness below without a suppression.
 			if (fetchUrl is null || pushUrl is null)
 			{
 				throw new GitParseException($"git listed the remote '{name}' with no URL.");

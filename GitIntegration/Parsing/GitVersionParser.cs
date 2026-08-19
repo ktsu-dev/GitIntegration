@@ -35,8 +35,7 @@ internal static class GitVersionParser
 		// The major component must be a number for the value to mean anything. Minor and patch
 		// default to zero, because git has shipped two-component versions and because a build
 		// suffix such as ".windows.1" makes trailing components non-numeric by design.
-		if (components.Length == 0 ||
-			!int.TryParse(components[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major))
+		if (!int.TryParse(components[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major))
 		{
 			throw new GitParseException($"Unrecognised git version number: '{raw}'.");
 		}

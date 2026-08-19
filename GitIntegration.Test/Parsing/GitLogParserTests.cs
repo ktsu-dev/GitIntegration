@@ -141,4 +141,22 @@ public class GitLogParserTests
 
 		Assert.ThrowsExactly<GitParseException>(() => GitLogParser.Parse(broken));
 	}
+
+	[TestMethod]
+	public void ReadsABodyContainingTheUnitSeparator()
+	{
+		// Verified against real git: a commit whose body is "body before<US>body after" emits a log
+		// record with 12 raw fields when split unbounded, and an unbounded split silently drops
+		// everything after the 11th. The bounded split used here keeps the body whole instead.
+		string bodyWithSeparator = "body before" + Us + "body after";
+		string record =
+			FirstSha + Us + FirstTree + Us + Us +
+			"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
+			"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
+			"Subject line" + Us + bodyWithSeparator + Nul;
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		Assert.AreEqual(bodyWithSeparator, commits[0].Body);
+	}
 }

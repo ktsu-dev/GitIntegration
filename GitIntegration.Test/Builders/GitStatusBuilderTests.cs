@@ -84,9 +84,7 @@ public class GitStatusBuilderTests
 
 		// A value outside the enum reaches the builder whenever a caller casts an int, and mapping
 		// it to a silent default would send git an option the caller never asked for.
-		_ = builder.WithUntrackedFiles((GitUntrackedFilesMode)99);
-
-		Assert.ThrowsExactly<System.ComponentModel.InvalidEnumArgumentException>(() => _ = builder.BuildArguments());
+		Assert.ThrowsExactly<System.ComponentModel.InvalidEnumArgumentException>(() => _ = builder.WithUntrackedFiles((GitUntrackedFilesMode)99));
 	}
 
 	[TestMethod]

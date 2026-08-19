@@ -2,6 +2,7 @@
 
 namespace ktsu.GitIntegration;
 
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 
@@ -17,6 +18,7 @@ public interface IGitStatusBuilder : IGitCommandBuilder<GitStatus>
 	/// </summary>
 	/// <param name="mode">The reporting mode.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="mode"/> is not a recognised value.</exception>
 	public IGitStatusBuilder WithUntrackedFiles(GitUntrackedFilesMode mode);
 
 	/// <summary>
@@ -40,6 +42,15 @@ internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirecto
 	/// <inheritdoc />
 	public IGitStatusBuilder WithUntrackedFiles(GitUntrackedFilesMode mode)
 	{
+		// Validated here, at the fluent call, rather than deferred to ToOptionValue inside
+		// AppendVerbArguments: BuildArguments() is documented as a pure computation with no
+		// exceptions of its own, and every sibling builder (GitLogBuilder.Take/Skip, ForRevision,
+		// ForPath) validates its argument at the setter for the same reason.
+		if (!Enum.IsDefined(mode))
+		{
+			throw new InvalidEnumArgumentException(nameof(mode), (int)mode, typeof(GitUntrackedFilesMode));
+		}
+
 		_untrackedFiles = mode;
 		return this;
 	}
@@ -88,6 +99,9 @@ internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirecto
 		GitUntrackedFilesMode.No => "no",
 		GitUntrackedFilesMode.Normal => "normal",
 		GitUntrackedFilesMode.All => "all",
+
+		// Unreachable once WithUntrackedFiles validates: this arm only exists to satisfy the
+		// compiler's exhaustiveness check over the switch.
 		_ => throw new InvalidEnumArgumentException(nameof(mode), (int)mode, typeof(GitUntrackedFilesMode)),
 	};
 }

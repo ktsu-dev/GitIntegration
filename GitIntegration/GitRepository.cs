@@ -55,10 +55,20 @@ public class GitRepository
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns><see langword="true"/> when the path is inside a working tree.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public async Task<bool> IsClonedAsync(CancellationToken cancellationToken = default)
+	public Task<bool> IsClonedAsync(CancellationToken cancellationToken = default)
+	{
+		// Validated here rather than in the async body, matching GitClient's wrapper/core split, so
+		// a metadata-only repository throws from the call itself rather than only once the returned
+		// task is awaited.
+		IGitProcessRunner runner = RequireRunner();
+
+		return IsClonedCoreAsync(runner, cancellationToken);
+	}
+
+	private async Task<bool> IsClonedCoreAsync(IGitProcessRunner runner, CancellationToken cancellationToken)
 	{
 		GitResult<string> result = await new GitTextBuilder(
-			RequireRunner(), LocalPath, "rev-parse", "--is-inside-work-tree")
+			runner, LocalPath, "rev-parse", "--is-inside-work-tree")
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		return result.Success && string.Equals(result.Value, "true", StringComparison.Ordinal);
@@ -84,8 +94,15 @@ public class GitRepository
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="revision"/> is <see langword="null"/>.</exception>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitRevParseBuilder RevParse(GitRefName revision) =>
-		new GitRevParseBuilder(RequireRunner(), LocalPath, Ensure.NotNull(revision));
+	public IGitRevParseBuilder RevParse(GitRefName revision)
+	{
+		// Argument validation before RequireRunner(): left-to-right evaluation would otherwise
+		// report the missing runner for a null revision on a metadata-only repository, which is the
+		// wrong diagnostic for what the caller got wrong.
+		Ensure.NotNull(revision);
+
+		return new GitRevParseBuilder(RequireRunner(), LocalPath, revision);
+	}
 
 	/// <summary>Lists branch references.</summary>
 	/// <returns>A fresh builder.</returns>

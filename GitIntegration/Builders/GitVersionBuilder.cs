@@ -7,7 +7,13 @@ using System.Collections.Generic;
 /// <summary>
 /// Reports the version of the git binary being invoked.
 /// </summary>
-public interface IGitVersionBuilder : IGitCommandBuilder<GitVersion>
+/// <remarks>
+/// Internal, unlike its sibling builder interfaces: no public member anywhere returns
+/// <see cref="IGitVersionBuilder"/> — <see cref="IGitClient.GetVersionAsync"/> returns a
+/// <see cref="GitVersion"/> task directly — so a consumer could neither obtain one nor usefully
+/// implement one.
+/// </remarks>
+internal interface IGitVersionBuilder : IGitCommandBuilder<GitVersion>
 {
 }
 

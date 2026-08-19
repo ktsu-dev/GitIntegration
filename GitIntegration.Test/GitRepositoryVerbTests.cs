@@ -52,7 +52,9 @@ public class GitRepositoryVerbTests
 	public void VerbsOnAMetadataOnlyRepositoryExplainWhatIsMissing()
 	{
 		// A repository produced by a hosting provider carries metadata for something that may not
-		// exist on disk yet, so it has no runner.
+		// exist on disk yet, so it has no runner. All seven entry points route through
+		// RequireRunner(); deleting the guard from six of them would fail no test if only Status()
+		// were exercised here, so every entry point is asserted.
 		GitRepository repository = new()
 		{
 			LocalPath = TestPaths.Root,
@@ -63,6 +65,18 @@ public class GitRepositoryVerbTests
 			Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Status());
 
 		StringAssert.Contains(exception.Message, nameof(IGitClient.OpenAsync));
+
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Log());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Diff());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Branches());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Remotes());
+
+		// A valid revision, so the guard is what fires rather than the null check.
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.RevParse("HEAD".As<GitRefName>()));
+
+		// IsClonedAsync now validates eagerly (F5), so it throws synchronously rather than only once
+		// the returned task is awaited.
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.IsClonedAsync());
 	}
 
 	[TestMethod]

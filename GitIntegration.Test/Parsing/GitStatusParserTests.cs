@@ -207,9 +207,12 @@ public class GitStatusParserTests
 	[TestMethod]
 	public void RejectsARenameRecordWithNoFollowingOriginalPath()
 	{
+		// Deliberately no trailing Nul: with one, Split yields a trailing empty element, the index
+		// guard never fires, and the exception instead comes from ToRelativeFilePath("") — this
+		// fixture must end with the '2' record as the true final element to exercise the guard.
 		string truncated =
 			"2 R. N... 100644 100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 " +
-			"5626abf0f72e58d7a153368ba57db4c673c0e171 R100 renamed.txt" + Nul;
+			"5626abf0f72e58d7a153368ba57db4c673c0e171 R100 renamed.txt";
 
 		Assert.ThrowsExactly<GitParseException>(() => GitStatusParser.Parse(truncated));
 	}

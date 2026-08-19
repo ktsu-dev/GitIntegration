@@ -46,14 +46,20 @@ public interface IGitClient
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns>The opened repository.</returns>
 	/// <exception cref="GitRepositoryNotFoundException">The path is not inside a working tree.</exception>
+	/// <exception cref="GitParseException">
+	/// git reported a working-tree root that is not an absolute directory path.
+	/// </exception>
 	public Task<GitRepository> OpenAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken = default);
 
 	/// <summary>
-	/// Opens the repository containing a path, reporting absence as a result rather than an
-	/// exception.
+	/// Opens the repository containing a path, reporting the ordinary case of absence as a result
+	/// rather than an exception.
 	/// </summary>
 	/// <param name="startingPath">A path inside, or below, the repository.</param>
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns>The opened repository, or <see langword="null"/> when there is none.</returns>
+	/// <exception cref="GitParseException">
+	/// git reported a working-tree root that is not an absolute directory path.
+	/// </exception>
 	public Task<GitRepository?> DiscoverAsync(AbsoluteDirectoryPath startingPath, CancellationToken cancellationToken = default);
 }

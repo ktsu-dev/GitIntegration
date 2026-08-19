@@ -16,8 +16,11 @@ internal static class GitOutputFormats
 	/// The ASCII unit separator, used between fields within one record.
 	/// </summary>
 	/// <remarks>
-	/// Chosen because git forbids it in a reference name and no filesystem permits it in a path,
-	/// so it can never appear inside a field and be mistaken for a separator.
+	/// Chosen because git forbids it in a reference name and no filesystem permits it in a path, so
+	/// it can never appear inside those fields and be mistaken for a separator. A commit message,
+	/// however, is free-form text and legally can contain it. <see cref="GitLogParser"/> bounds its
+	/// split of the log format's fields so the trailing body field absorbs any embedded separator
+	/// rather than the field count shifting.
 	/// </remarks>
 	internal const char UnitSeparator = '\u001f';
 
