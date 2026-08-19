@@ -44,6 +44,22 @@ the design and are not worked around silently.
 | No working-directory parameter | Cannot set the child process cwd | Scope every command with `git -C <path>` |
 | No environment-variable support | Cannot set `GIT_ASKPASS`, `GIT_TERMINAL_PROMPT`, `GIT_CONFIG_*` | Remote operations rely on ambient credential configuration; git may block on an auth prompt, bounded by `GitOptions.Timeout` and the caller's `CancellationToken` |
 | `RunCommand` is a static class | Cannot implement an interface | GitIntegration owns `IGitProcessRunner`; the shipped implementation delegates to the static API |
+| `RunCommand` can return normally from a cancelled run | A cancelled command is indistinguishable from an ordinary git failure | `RunCommandGitProcessRunner` checks the linked token after the call returns and classifies it explicitly |
+
+That last row is a measured behaviour of the dependency, not a theoretical one. `RunCommand.RunAsync`
+delivers cancellation two ways simultaneously — a `cancellationToken.Register(() => TryKill(process))`
+that kills the process, and `process.WaitForExitAsync(cancellationToken)` racing to observe the same
+token. When the kill wins, the process exits before the await faults, so `ExecuteAsync` returns
+normally carrying a killed process's exit code (`-1` on Windows) and throws nothing. Measured at a
+1 ms timeout, roughly 40% of runs take that path. The magnitude of the timeout is irrelevant — any
+cancellation reaching `TryKill` can lose the race, including a caller cancelling a long-running
+`fetch`.
+
+Left undetected this would matter a great deal, because the verb builders translate any non-success
+`GitProcessResult` into `GitCommandException`: a cancelled fetch would reach the caller as
+"`GitCommandException`, exit code -1, no output", indistinguishable from a genuine git failure. So
+the runner checks `linked.IsCancellationRequested` after the call returns and applies the same
+classification as its catch clause — caller cancellation first, then timeout.
 
 `ktsu.Essentials.ICommandExecutor` is **not** used for git execution. Its contract takes a single
 `string command` and runs it through `cmd.exe /c` or `/bin/sh -c`, which would flatten the
