@@ -47,7 +47,14 @@ public sealed class GitExecutableNotFoundException : GitException
 public class GitCommandException : GitException
 {
 	/// <summary>Gets the exit code git returned.</summary>
-	public int ExitCode { get; }
+	/// <remarks>
+	/// Defaults to <c>-1</c>, not <c>0</c>, when the parameterless, message-only, or
+	/// message-and-inner-exception constructors are used. <c>0</c> is what this codebase treats as
+	/// success (see <see cref="GitProcessResult.Success"/>), so defaulting to it here would make a
+	/// catch block reading an unset exit code see something that looks like success instead of
+	/// "no data".
+	/// </remarks>
+	public int ExitCode { get; } = -1;
 
 	/// <summary>Gets the argument vector that produced the failure.</summary>
 	public IReadOnlyList<string> Arguments { get; } = [];

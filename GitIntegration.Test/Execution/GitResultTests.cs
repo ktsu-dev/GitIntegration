@@ -2,6 +2,8 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
+
 [TestClass]
 public class GitResultTests
 {
@@ -12,6 +14,15 @@ public class GitResultTests
 
 		Assert.IsTrue(result.Success);
 		Assert.AreEqual("ok", result.Value);
+		Assert.IsNull(result.Error);
+	}
+
+	[TestMethod]
+	public void FromValueReportsSuccessAndNullErrorTogether()
+	{
+		GitResult<string> result = GitResult<string>.FromValue("ok");
+
+		Assert.IsTrue(result.Success);
 		Assert.IsNull(result.Error);
 	}
 
@@ -30,6 +41,28 @@ public class GitResultTests
 		Assert.IsFalse(result.Success);
 		Assert.IsNull(result.Value);
 		Assert.AreEqual(128, result.Error?.ExitCode);
+	}
+
+	[TestMethod]
+	public void FromErrorReportsFailureAndNonNullErrorTogether()
+	{
+		GitCommandError error = new()
+		{
+			ExitCode = 128,
+			Arguments = ["status"],
+			StandardError = "fatal: not a git repository",
+		};
+
+		GitResult<string> result = GitResult<string>.FromError(error);
+
+		Assert.IsFalse(result.Success);
+		Assert.IsNotNull(result.Error);
+	}
+
+	[TestMethod]
+	public void FromErrorRejectsNullError()
+	{
+		_ = Assert.ThrowsExactly<ArgumentNullException>(() => GitResult<string>.FromError(null!));
 	}
 
 	[TestMethod]
@@ -77,5 +110,22 @@ public class GitResultTests
 		GitRepositoryNotFoundException exception = new("not a repo", 128, ["status"], "fatal:");
 
 		Assert.IsInstanceOfType<GitCommandException>(exception);
+	}
+
+	[TestMethod]
+	public void MessageOnlyCommandExceptionDefaultsExitCodeToSentinel()
+	{
+		GitCommandException exception = new("git failed");
+
+		Assert.AreEqual(-1, exception.ExitCode);
+	}
+
+	[TestMethod]
+	public void MessageOnlyCommandExceptionHasSafeDefaultsForCatchBlockReads()
+	{
+		GitCommandException exception = new("git failed");
+
+		Assert.IsNotNull(exception.Arguments);
+		Assert.IsNotNull(exception.StandardError);
 	}
 }
