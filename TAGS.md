@@ -1,1 +1,1 @@
-git integration;git;version control;source control;git provider;github;azure devops;octokit;team foundation server;semantic types;strongly typed;branch name;commit sha;credentials;credential cache;dependency injection;dotnet;csharp;git cli;process runner;command builder
+.NET;C#;git integration;git;git wrapper;version control;source control;fluent api;git status;git log;git diff;git provider;github;octokit;semantic types;strongly typed;branch name;commit sha;credentials;credential cache;dependency injection;dotnet;csharp;git cli;process runner;command builder
