@@ -49,6 +49,11 @@ public static class ServiceCollectionExtensions
 		services.TryAddSingleton<IGitProcessRunner>(static provider =>
 			provider.GetRequiredService<RunCommandGitProcessRunner>());
 
+		// Registered by concrete type first and then projected onto the interface, so both
+		// resolutions return the same singleton rather than two independently-constructed clients.
+		services.TryAddSingleton<GitClient>();
+		services.TryAddSingleton<IGitClient>(static provider => provider.GetRequiredService<GitClient>());
+
 		// Filesystem access goes through an injected abstraction so that discovery, clone, and
 		// init can be tested without touching disk.
 		services.AddNativeFileSystemProvider();

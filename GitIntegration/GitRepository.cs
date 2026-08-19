@@ -5,6 +5,8 @@ namespace ktsu.GitIntegration;
 using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Threading;
+using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
 
@@ -33,6 +35,73 @@ public class GitRepository
 	/// Gets the remote path, or <see langword="null"/> when it is not known.
 	/// </summary>
 	public GitRepositoryRemotePath? RemotePath { get; init; }
+
+	/// <summary>
+	/// Gets the runner this repository's verbs execute through, or <see langword="null"/> when this
+	/// value carries hosting metadata only.
+	/// </summary>
+	/// <remarks>
+	/// Nullable for the same reason the metadata is. A repository produced by
+	/// <see cref="IGitClient.OpenAsync"/> or <see cref="IGitClient.DiscoverAsync"/> has one; a
+	/// repository produced by a hosting provider describes something that may not exist on disk
+	/// yet and has none. Calling a verb without one throws
+	/// <see cref="InvalidOperationException"/> rather than failing later inside git.
+	/// </remarks>
+	public IGitProcessRunner? ProcessRunner { get; init; }
+
+	/// <summary>
+	/// Decides whether <see cref="LocalPath"/> currently holds a git working tree.
+	/// </summary>
+	/// <param name="cancellationToken">Cancels the invocation.</param>
+	/// <returns><see langword="true"/> when the path is inside a working tree.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public async Task<bool> IsClonedAsync(CancellationToken cancellationToken = default)
+	{
+		GitResult<string> result = await new GitTextBuilder(
+			RequireRunner(), LocalPath, "rev-parse", "--is-inside-work-tree")
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return result.Success && string.Equals(result.Value, "true", StringComparison.Ordinal);
+	}
+
+	/// <summary>Reports the working tree and index state.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitStatusBuilder Status() => new GitStatusBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Lists commits.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitLogBuilder Log() => new GitLogBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Lists the paths that differ between two states of the repository.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitDiffBuilder Diff() => new GitDiffBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Resolves a revision to the object id it names.</summary>
+	/// <param name="revision">The revision to resolve.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="revision"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRevParseBuilder RevParse(GitRefName revision) =>
+		new GitRevParseBuilder(RequireRunner(), LocalPath, Ensure.NotNull(revision));
+
+	/// <summary>Lists branch references.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitBranchListBuilder Branches() => new GitBranchListBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Lists the configured remotes.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRemoteListBuilder Remotes() => new GitRemoteListBuilder(RequireRunner(), LocalPath);
+
+	private IGitProcessRunner RequireRunner() =>
+		ProcessRunner ?? throw new InvalidOperationException(
+			"This GitRepository carries hosting metadata only and has no process runner. Obtain one " +
+			$"from {nameof(IGitClient)}.{nameof(IGitClient.OpenAsync)} or " +
+			$"{nameof(IGitClient)}.{nameof(IGitClient.DiscoverAsync)} before running git commands against it.");
 
 	/// <summary>
 	/// Opens <see cref="WebURI"/> in the default browser.

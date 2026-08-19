@@ -10,7 +10,7 @@ using ktsu.Semantics.Paths;
 /// Runs a fixed argument vector and returns git's trimmed standard output.
 /// </summary>
 /// <remarks>
-/// Used by <c>GitClient</c> for the single-value probes — <c>rev-parse --show-toplevel</c>,
+/// Used by <see cref="GitClient"/> for the single-value probes — <c>rev-parse --show-toplevel</c>,
 /// <c>rev-parse --is-inside-work-tree</c>, and <c>remote get-url origin</c> — that need no options
 /// and produce one line. Internal, and deliberately so: it accepts an arbitrary vector, which is
 /// safe only because every caller of it is inside this assembly and passes literals.

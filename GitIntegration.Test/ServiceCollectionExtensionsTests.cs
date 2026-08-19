@@ -93,4 +93,32 @@ public class ServiceCollectionExtensionsTests
 		// Registration is idempotent, so the first call wins and later configuration is discarded.
 		Assert.AreEqual("git", provider.GetRequiredService<GitOptions>().ExecutablePath);
 	}
+
+	[TestMethod]
+	public void RegistersTheGitClientByBothConcreteTypeAndInterface()
+	{
+		ServiceCollection services = new();
+		_ = services.AddGitIntegration();
+
+		using ServiceProvider provider = services.BuildServiceProvider();
+
+		GitClient concrete = provider.GetRequiredService<GitClient>();
+		IGitClient asInterface = provider.GetRequiredService<IGitClient>();
+
+		// One singleton reached two ways, not two instances: a second client would mean two
+		// independent runners once Phase 5 gives the client per-instance state.
+		Assert.AreSame(concrete, asInterface);
+	}
+
+	[TestMethod]
+	public void TheRegisteredClientUsesTheConfiguredExecutablePath()
+	{
+		ServiceCollection services = new();
+		_ = services.AddGitIntegration(options => options.ExecutablePath = "/usr/local/bin/git");
+
+		using ServiceProvider provider = services.BuildServiceProvider();
+
+		Assert.AreEqual("/usr/local/bin/git", provider.GetRequiredService<GitOptions>().ExecutablePath);
+		Assert.IsNotNull(provider.GetRequiredService<IGitClient>());
+	}
 }
