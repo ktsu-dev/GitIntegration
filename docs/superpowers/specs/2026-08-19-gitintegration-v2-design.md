@@ -490,6 +490,19 @@ registrations additionally `TryAddEnumerable` their `IGitHostingProvider` so
 
 `GitRepository` is never resolved from the container; it is produced by `IGitClient`.
 
+### Filesystem access
+
+`ktsu.Essentials` is a real dependency, not a convention-only one. Every filesystem touchpoint —
+`DiscoverAsync` walking up for a work tree, `Clone` checking its destination, `Init` checking its
+target — goes through `ktsu.Essentials.IFileSystemProvider`, which derives from
+`System.IO.Abstractions.IFileSystem`. `AddGitIntegration` calls `AddNativeFileSystemProvider` so
+the default is the real filesystem, and tests substitute an in-memory filesystem instead of
+touching disk.
+
+This is also what replaces `ktsu.AppDataStorage`: the removed package was the only thing in the
+manifest gesturing at storage, and it was unreferenced. Filesystem access now has an injected,
+testable abstraction rather than static `Directory`/`File` calls.
+
 ## Package manifest
 
 | Action | Package | Reason |
@@ -501,7 +514,8 @@ registrations additionally `TryAddEnumerable` their `IGitHostingProvider` so
 | Add | `ktsu.Semantics.Strings` | Semantic string types |
 | Add | `ktsu.Semantics.Paths` | Semantic path types |
 | Add | `ktsu.RunCommand` | Process execution |
-| Add | `ktsu.Essentials` | DI conventions |
+| Add | `ktsu.Essentials` | `IFileSystemProvider` for filesystem access |
+| Add | `ktsu.Essentials.FileSystemProviders.Native` | Default filesystem registration |
 | Add | `Microsoft.Extensions.DependencyInjection.Abstractions` | `IServiceCollection` extensions |
 | Add | `Microsoft.TeamFoundationServer.Client` | Azure DevOps repositories |
 | Add | `Microsoft.VisualStudio.Services.Client` | Azure DevOps authentication |
