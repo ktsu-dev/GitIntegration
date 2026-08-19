@@ -11,4 +11,11 @@
   <ItemGroup>
     <ProjectReference Include="..\GitIntegration\GitIntegration.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- ServiceCollectionExtensionsTests builds a real container to assert resolution, so the test
+         project needs the concrete DI container (ServiceProvider, BuildServiceProvider), not just
+         the Microsoft.Extensions.DependencyInjection.Abstractions the library project depends on. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
 </Project>
