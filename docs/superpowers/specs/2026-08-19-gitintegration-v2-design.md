@@ -663,31 +663,37 @@ hosting work and could proceed in parallel if desired.
 | Azure DevOps client packages are large and `netstandard2.0` | Acceptable; the same pair is already used by `ktsu.BuildMonitor` |
 | Merged `GitRepository` mixes local and hosting concerns | Metadata is nullable rather than blank; `RemotePath` back-filled from `origin`; verbs fail with a specific exception type |
 
-## Upstream gaps: filed, fixed, and pending adoption
+## Upstream gaps: filed, and their release status
 
-Every RunCommand limitation this design works around was filed against `ktsu-dev/RunCommand` and
-**all four are now fixed and published in 1.4.29**:
+Every RunCommand limitation this design works around was filed against `ktsu-dev/RunCommand`. All
+four are **fixed upstream**, but only one is **published**:
 
-| Issue | Gap | Fix |
-|---|---|---|
-| #38 | A cancelled run could return normally with a killed process's exit code | `ThrowIfCancellationRequested()` after the await |
-| #39 | No working-directory support | `CommandOptions.WorkingDirectory` |
-| #40 | No environment-variable support | `CommandOptions.EnvironmentVariables` |
-| #41 | `Execute(string)` split on the first space, breaking paths with spaces | String overloads obsoleted |
+| Issue | Gap | Fix | Released? |
+|---|---|---|---|
+| #38 | A cancelled run could return normally with a killed process's exit code | `ThrowIfCancellationRequested()` after the await | **Yes — 1.4.29**, adopted here |
+| #39 | No working-directory support | `CommandOptions.WorkingDirectory` | Merged to `main`, unpublished |
+| #40 | No environment-variable support | `CommandOptions.EnvironmentVariables` | Merged to `main`, unpublished |
+| #41 | `Execute(string)` split on the first space, breaking paths with spaces | String overloads obsoleted | Merged to `main`, unpublished |
 
-This repository still pins **1.4.26**, so every workaround in this document remains necessary as
-written. Bumping to 1.4.29 is the **first task of Phase 3**, not a Phase 1-2 change: it would alter
-the argument-injection design that Phases 1-2 were reviewed against, and the branch is complete and
-verified as it stands.
+The `v1.4.29` tag sits *before* the `CommandOptions` commits, so that package contains the
+cancellation fix and nothing else. This repository pins 1.4.29 and takes that fix. The post-return
+cancellation guard in `RunCommandGitProcessRunner` is consequently now **defence in depth rather
+than load-bearing**: upstream throws on cancellation, so the guard only fires if that regresses.
+It is kept deliberately, and cheaply.
 
-What the bump buys, and why it is worth doing before the verbs are built:
+The remaining three need a RunCommand **1.5.0** release before this library can adopt them. Once
+published, the wins are worth taking before Phase 3's verbs are built:
 
 - **`GIT_TERMINAL_PROMPT=0`** removes the credential-prompt hang outright, which is the entire
   reason `GitOptions.Timeout` exists.
 - **`LC_ALL=C`** forces English, machine-stable output, retiring the locale-fragile
-  `"not a git repository"` string match that currently degrades silently on a localized machine.
-- **`WorkingDirectory`** makes `git -C` optional, though `-C` is explicit and can stay.
-- The post-return cancellation guard becomes belt-and-braces rather than load-bearing.
+  `"not a git repository"` string match that currently degrades silently on a localized machine,
+  and stabilising every Phase 3 parser against the host locale.
+- **`WorkingDirectory`** would make `git -C` optional. Keeping `-C` is defensible either way: it is
+  explicit and visible in the argument vector.
+
+Note that `CommandOptions.WorkingDirectory` is typed `AbsoluteDirectoryPath?` from
+`ktsu.Semantics.Paths`, the same type this library already uses, so adoption needs no conversion.
 
 ## Open follow-ups (outside this repository)
 
