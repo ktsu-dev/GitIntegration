@@ -14,7 +14,7 @@ public class GitCommandBuilderTests
 	private sealed class EchoBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)
 		: GitCommandBuilder<string>(runner, repositoryPath)
 	{
-		protected override void AppendVerbArguments(List<string> arguments) => arguments.Add("status");
+		protected override void AppendVerbArguments(ICollection<string> arguments) => arguments.Add("status");
 
 		protected override string ParseResult(GitProcessResult result) => result.StandardOutput;
 	}

@@ -4,7 +4,6 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,8 +33,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	/// Appends the verb and its options to the argument vector, after the global arguments.
 	/// </summary>
 	/// <param name="arguments">The vector being assembled.</param>
-	[SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "The task 6 brief mandates this exact signature verbatim, since every verb builder in Phases 3-5 overrides it and simply appends to the caller-owned vector; wrapping it in Collection<T> would add no safety here and would break the required override signature across every future builder.")]
-	protected abstract void AppendVerbArguments(List<string> arguments);
+	protected abstract void AppendVerbArguments(ICollection<string> arguments);
 
 	/// <summary>
 	/// Turns a successful invocation's output into the result type.
