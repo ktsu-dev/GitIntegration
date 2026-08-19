@@ -252,17 +252,33 @@ public class GitCommandException : GitException
 
 public sealed class GitRepositoryNotFoundException : GitCommandException { }
 
-public readonly record struct GitResult<T>
+public sealed record GitResult<T>
 {
-    public bool Success { get; init; }
-    public T? Value { get; init; }
-    public GitCommandError? Error { get; init; }
+    private GitResult() { }
+    public bool Success => Error is null;   // derived, so it can never disagree with Error
+    public T? Value { get; private init; }
+    public GitCommandError? Error { get; private init; }
+
+    public static GitResult<T> FromValue(T value);
+    public static GitResult<T> FromError(GitCommandError error);   // throws on null
 }
 ```
 
 `ExecuteAsync` throws on a non-zero exit code. `TryExecuteAsync` never throws for a non-zero exit
 code and returns a `GitResult<T>`; it still propagates cancellation and programmer errors such as
 `ArgumentNullException`.
+
+`GitResult<T>` is a sealed record *class* with a private constructor, not a struct, and `Success`
+is derived from `Error` rather than stored. Both choices close the same hole: a struct has a
+reachable `default` — from an uninitialised field, an array allocation, or a failed
+`TryGetValue` — and with three independently stored members that default reads as "failed, but
+with no error", so a consumer writing `result.Error!.ExitCode` on the failure branch gets a
+`NullReferenceException`. Deriving `Success` alone would only move the trap to "succeeded with a
+null value". As a class with no public constructor, no such instance exists.
+
+`GitCommandException.ExitCode` defaults to `-1`, not `0`, for the same class of reason: `0` is
+what this codebase means by success, so a caller reading `ExitCode` after a message-only
+construction would see something indistinguishable from a successful run instead of "no data".
 
 ### Output parsing
 

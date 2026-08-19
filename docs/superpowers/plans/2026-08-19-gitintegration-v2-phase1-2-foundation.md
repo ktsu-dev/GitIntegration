@@ -981,7 +981,7 @@ public sealed class GitExecutableNotFoundException : GitException
 public class GitCommandException : GitException
 {
 	/// <summary>Gets the exit code git returned.</summary>
-	public int ExitCode { get; }
+	public int ExitCode { get; } = -1;
 
 	/// <summary>Gets the argument vector that produced the failure.</summary>
 	public IReadOnlyList<string> Arguments { get; } = [];
@@ -1072,10 +1072,15 @@ public sealed record GitCommandError
 /// The outcome of a git command that was allowed to fail without throwing.
 /// </summary>
 /// <typeparam name="T">The parsed result type on success.</typeparam>
-public readonly record struct GitResult<T>
+public sealed record GitResult<T>
 {
+	private GitResult() { }
+
 	/// <summary>Gets a value indicating whether the command succeeded.</summary>
-	public bool Success { get; private init; }
+	/// <remarks>
+	/// Derived from <see cref="Error"/> rather than stored, so the two can never disagree.
+	/// </remarks>
+	public bool Success => Error is null;
 
 	/// <summary>Gets the parsed result, or <see langword="null"/> when the command failed.</summary>
 	public T? Value { get; private init; }
@@ -1086,12 +1091,16 @@ public readonly record struct GitResult<T>
 	/// <summary>Creates a successful result.</summary>
 	/// <param name="value">The parsed result.</param>
 	/// <returns>A successful result carrying <paramref name="value"/>.</returns>
-	public static GitResult<T> FromValue(T value) => new() { Success = true, Value = value };
+	public static GitResult<T> FromValue(T value) => new() { Value = value };
 
 	/// <summary>Creates a failed result.</summary>
 	/// <param name="error">The failure detail.</param>
 	/// <returns>A failed result carrying <paramref name="error"/>.</returns>
-	public static GitResult<T> FromError(GitCommandError error) => new() { Success = false, Error = error };
+	public static GitResult<T> FromError(GitCommandError error)
+	{
+		Ensure.NotNull(error);
+		return new() { Error = error };
+	}
 }
 ```
 
