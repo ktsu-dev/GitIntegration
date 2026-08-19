@@ -27,13 +27,13 @@ public interface IGitDiffBuilder : IGitCommandBuilder<IReadOnlyList<GitDiffEntry
 	/// <summary>
 	/// Compares two revisions. Replaces any previous revision selection.
 	/// </summary>
-	/// <param name="from">The revision to compare from.</param>
-	/// <param name="target">The revision to compare to.</param>
+	/// <param name="fromRevision">The revision to compare from.</param>
+	/// <param name="toRevision">The revision to compare to.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException">
-	/// <paramref name="from"/> or <paramref name="target"/> is <see langword="null"/>.
+	/// <paramref name="fromRevision"/> or <paramref name="toRevision"/> is <see langword="null"/>.
 	/// </exception>
-	public IGitDiffBuilder Between(GitRefName from, GitRefName target);
+	public IGitDiffBuilder Between(GitRefName fromRevision, GitRefName toRevision);
 
 	/// <summary>Reports a delete and an add of similar content as a rename.</summary>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -81,9 +81,9 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	}
 
 	/// <inheritdoc />
-	public IGitDiffBuilder Between(GitRefName from, GitRefName target)
+	public IGitDiffBuilder Between(GitRefName fromRevision, GitRefName toRevision)
 	{
-		_revisions = [Ensure.NotNull(from).WeakString, Ensure.NotNull(target).WeakString];
+		_revisions = [Ensure.NotNull(fromRevision).WeakString, Ensure.NotNull(toRevision).WeakString];
 		return this;
 	}
 
