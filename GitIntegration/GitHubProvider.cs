@@ -3,7 +3,7 @@
 namespace ktsu.GitIntegration;
 
 using ktsu.CredentialCache;
-using ktsu.Extensions;
+using ktsu.Semantics.Strings;
 
 using Octokit;
 

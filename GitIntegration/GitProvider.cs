@@ -5,20 +5,6 @@ namespace ktsu.GitIntegration;
 using System.Collections.Concurrent;
 
 using ktsu.CredentialCache;
-using ktsu.StrongStrings;
-
-/// <summary>
-/// A strongly-typed identifier for a Git provider.
-/// </summary>
-public sealed record class GitProviderGUID : StrongStringAbstract<GitProviderGUID> { }
-/// <summary>
-/// A strongly-typed name for a Git provider (e.g. GitHub, GitLab, etc.).
-/// </summary>
-public sealed record class GitProviderName : StrongStringAbstract<GitProviderName> { }
-/// <summary>
-/// A strongly-typed identifier for the owner of repositories in a Git provider.
-/// </summary>
-public sealed record class GitProviderOwner : StrongStringAbstract<GitProviderOwner> { }
 
 /// <summary>
 /// Represents a Git service provider that hosts repositories.

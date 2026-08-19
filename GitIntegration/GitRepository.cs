@@ -2,21 +2,7 @@
 
 namespace ktsu.GitIntegration;
 
-using ktsu.StrongPaths;
-using ktsu.StrongStrings;
-
-/// <summary>
-/// Represents a strongly-typed name for a Git repository.
-/// </summary>
-public sealed record class GitRepositoryName : StrongStringAbstract<GitRepositoryName> { }
-/// <summary>
-/// Represents a strongly-typed web URI for a Git repository.
-/// </summary>
-public sealed record class GitRepositoryWebURI : StrongStringAbstract<GitRepositoryWebURI> { }
-/// <summary>
-/// Represents a strongly-typed remote path for a Git repository.
-/// </summary>
-public sealed record class GitRepositoryRemotePath : StrongStringAbstract<GitRepositoryRemotePath> { }
+using ktsu.Semantics.Paths;
 
 /// <summary>
 /// Represents a Git repository with its associated metadata and functionality.
