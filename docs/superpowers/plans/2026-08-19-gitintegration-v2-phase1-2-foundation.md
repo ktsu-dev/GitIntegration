@@ -1312,7 +1312,7 @@ git commit -m "[minor] Add RunCommand-backed git process runner"
 - Consumes: `IGitProcessRunner`, `GitProcessResult`, `GitResult<T>`, `GitCommandError`, `GitCommandException`, `GitRepositoryNotFoundException` from Tasks 4–5.
 - Produces, relied on by every verb builder in Phases 3–5:
   - `IGitCommandBuilder<TResult>` with `IReadOnlyList<string> BuildArguments()`, `Task<TResult> ExecuteAsync(CancellationToken)`, `Task<GitResult<TResult>> TryExecuteAsync(CancellationToken)`
-  - `abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)` with abstract `protected abstract void AppendVerbArguments(List<string> arguments);` and abstract `protected abstract TResult ParseResult(GitProcessResult result);`
+  - `abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)` with abstract `protected abstract void AppendVerbArguments(ICollection<string> arguments);` and abstract `protected abstract TResult ParseResult(GitProcessResult result);`
   - `RecordingGitProcessRunner` test fake with `IReadOnlyList<string>? LastArguments`, and settable `StandardOutput`, `StandardError`, `ExitCode`
 
 - [ ] **Step 1: Write the failing test**
@@ -1377,7 +1377,7 @@ public class GitCommandBuilderTests
 	private sealed class EchoBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)
 		: GitCommandBuilder<string>(runner, repositoryPath)
 	{
-		protected override void AppendVerbArguments(List<string> arguments) => arguments.Add("status");
+		protected override void AppendVerbArguments(ICollection<string> arguments) => arguments.Add("status");
 
 		protected override string ParseResult(GitProcessResult result) => result.StandardOutput;
 	}
@@ -1571,7 +1571,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	/// Appends the verb and its options to the argument vector, after the global arguments.
 	/// </summary>
 	/// <param name="arguments">The vector being assembled.</param>
-	protected abstract void AppendVerbArguments(List<string> arguments);
+	protected abstract void AppendVerbArguments(ICollection<string> arguments);
 
 	/// <summary>
 	/// Turns a successful invocation's output into the result type.
