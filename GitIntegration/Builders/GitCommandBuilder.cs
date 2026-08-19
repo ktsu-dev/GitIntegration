@@ -22,7 +22,16 @@ using ktsu.Semantics.Paths;
 public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)
 	: IGitCommandBuilder<TResult>
 {
-	private IGitProcessRunner Runner { get; } = Ensure.NotNull(runner);
+	/// <summary>
+	/// Gets the runner this builder executes through.
+	/// </summary>
+	/// <remarks>
+	/// Exposed to derived builders because not every git operation is one invocation of one
+	/// argument vector. <c>Commit</c> runs <c>commit</c> and then <c>log -1</c> to read back what
+	/// was written, and <c>Fetch</c> assembles a vector that depends on a runtime probe of the
+	/// installed git version. Neither is expressible through <see cref="BuildArguments"/> alone.
+	/// </remarks>
+	protected IGitProcessRunner Runner { get; } = Ensure.NotNull(runner);
 
 	/// <summary>
 	/// Gets the repository this command is scoped to, if any.
@@ -95,10 +104,11 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	}
 
 	/// <inheritdoc />
-	public async Task<TResult> ExecuteAsync(CancellationToken cancellationToken = default)
+	public virtual async Task<TResult> ExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		IReadOnlyList<string> arguments = BuildArguments();
-		GitProcessResult result = await Runner.RunAsync(arguments, cancellationToken).ConfigureAwait(false);
+		GitProcessResult result = await Runner.RunAsync(
+			new GitProcessRequest { Arguments = BuildArguments() },
+			cancellationToken).ConfigureAwait(false);
 
 		if (!result.Success)
 		{
@@ -109,10 +119,11 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	}
 
 	/// <inheritdoc />
-	public async Task<GitResult<TResult>> TryExecuteAsync(CancellationToken cancellationToken = default)
+	public virtual async Task<GitResult<TResult>> TryExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		IReadOnlyList<string> arguments = BuildArguments();
-		GitProcessResult result = await Runner.RunAsync(arguments, cancellationToken).ConfigureAwait(false);
+		GitProcessResult result = await Runner.RunAsync(
+			new GitProcessRequest { Arguments = BuildArguments() },
+			cancellationToken).ConfigureAwait(false);
 
 		return result.Success
 			? GitResult<TResult>.FromValue(ParseResult(result))
@@ -124,12 +135,32 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 			});
 	}
 
-	private static GitCommandException CreateException(GitProcessResult result)
+	/// <summary>
+	/// Classifies a failed invocation into an exception type.
+	/// </summary>
+	/// <remarks>
+	/// Virtual so a derived builder can recognise the failures specific to its own verb — a
+	/// <c>rev-parse</c> builder seeing "unknown revision", for instance — and fall back to
+	/// <c>base.CreateException</c> for everything else.
+	/// </remarks>
+	/// <param name="result">The failed invocation outcome.</param>
+	/// <returns>The exception to throw.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="result"/> is <see langword="null"/>.</exception>
+	protected virtual GitCommandException CreateException(GitProcessResult result)
 	{
+		Ensure.NotNull(result);
+
 		string message = $"git exited with code {result.ExitCode}: {result.StandardError.Trim()}";
 
 		// Git reports a missing working tree with a stable phrase and exit code 128. Surfacing it
 		// as a distinct type lets callers distinguish "wrong directory" from "command failed".
+		//
+		// The phrase match assumes an English git. ktsu.RunCommand cannot set environment
+		// variables (upstream ktsu-dev/RunCommand issue #40), so LC_ALL=C cannot be forced; on a
+		// machine with git's translation catalogs installed and a non-English locale active, the
+		// match silently misses and the failure degrades to a generic GitCommandException rather
+		// than GitRepositoryNotFoundException. That is a lossy but safe degradation: the exit code,
+		// arguments, and stderr are still carried.
 		return result.StandardError.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
 			? new GitRepositoryNotFoundException(message, result.ExitCode, result.Arguments, result.StandardError)
 			: new GitCommandException(message, result.ExitCode, result.Arguments, result.StandardError);

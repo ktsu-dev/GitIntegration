@@ -18,19 +18,39 @@ using ktsu.RunCommand;
 /// <param name="options">Configures the executable location and the per-invocation timeout.</param>
 public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcessRunner
 {
-	private GitOptions Options { get; } = Ensure.NotNull(options);
+	// Snapshotted at construction rather than read per invocation. GitOptions is registered as a
+	// mutable singleton, so any consumer that resolves it and sets a property would otherwise
+	// change the behaviour of every other consumer mid-flight. The properties cannot simply be
+	// made init-only: the Action<GitOptions> configure delegate receives an already-constructed
+	// instance, and init accessors are settable only during object initialization.
+	private readonly string _executablePath = Ensure.NotNull(options).ExecutablePath;
+	private readonly TimeSpan? _timeout = Ensure.NotNull(options).Timeout;
 
 	/// <inheritdoc />
-	public async Task<GitProcessResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
+	public async Task<GitProcessResult> RunAsync(GitProcessRequest request, CancellationToken cancellationToken = default)
 	{
-		Ensure.NotNull(arguments);
+		Ensure.NotNull(request);
+
+		IReadOnlyList<string> arguments = request.Arguments;
+		IProgress<string>? progress = request.Progress;
 
 		StringBuilder standardOutput = new();
 		StringBuilder standardError = new();
 
+		// Chunks are reported to the progress sink as ktsu.RunCommand delivers them, which is what
+		// makes push and fetch observable while they are still running, rather than only after the
+		// process exits.
 		OutputHandler outputHandler = new(
-			onStandardOutput: chunk => standardOutput.Append(chunk),
-			onStandardError: chunk => standardError.Append(chunk));
+			onStandardOutput: chunk =>
+			{
+				standardOutput.Append(chunk);
+				progress?.Report(chunk);
+			},
+			onStandardError: chunk =>
+			{
+				standardError.Append(chunk);
+				progress?.Report(chunk);
+			});
 
 		using CancellationTokenSource linked = CreateLinkedTokenSource(cancellationToken);
 
@@ -41,7 +61,7 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 			// `ktsu.RunCommand` and the static class `ktsu.RunCommand.RunCommand`, so the short
 			// form is ambiguous to read even where it compiles.
 			exitCode = await ktsu.RunCommand.RunCommand.ExecuteAsync(
-				Options.ExecutablePath,
+				_executablePath,
 				arguments,
 				outputHandler,
 				Elevation.Default,
@@ -51,16 +71,16 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 		{
 			// Thrown when the executable cannot be found or started at all.
 			throw new GitExecutableNotFoundException(
-				$"Could not start the git executable '{Options.ExecutablePath}'. Is git installed and on PATH?",
+				$"Could not start the git executable '{_executablePath}'. Is git installed and on PATH?",
 				ex);
 		}
-		catch (OperationCanceledException ex) when (Options.Timeout is not null && !cancellationToken.IsCancellationRequested)
+		catch (OperationCanceledException ex) when (_timeout is not null && !cancellationToken.IsCancellationRequested)
 		{
 			// The caller's own token was not signalled, so this cancellation can only have come from
 			// the internal timer started in CreateLinkedTokenSource.
 			throw new GitTimeoutException(
-				$"git did not complete within {Options.Timeout.Value}.",
-				Options.Timeout.Value,
+				$"git did not complete within {_timeout.Value}.",
+				_timeout.Value,
 				ex);
 		}
 
@@ -73,7 +93,7 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			if (Options.Timeout is TimeSpan timeout)
+			if (_timeout is TimeSpan timeout)
 			{
 				throw new GitTimeoutException(
 					$"git did not complete within {timeout}.",
@@ -97,7 +117,7 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 	{
 		CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-		if (Options.Timeout is TimeSpan timeout)
+		if (_timeout is TimeSpan timeout)
 		{
 			linked.CancelAfter(timeout);
 		}

@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,7 +17,7 @@ public class RunCommandGitProcessRunnerTests
 		// require git to be installed.
 		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = "dotnet" });
 
-		GitProcessResult result = await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		GitProcessResult result = await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.AreEqual(0, result.ExitCode);
 		Assert.IsTrue(result.Success);
@@ -28,7 +29,7 @@ public class RunCommandGitProcessRunnerTests
 	{
 		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = "dotnet" });
 
-		GitProcessResult result = await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		GitProcessResult result = await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		string[] expectedArguments = ["--version"];
 		CollectionAssert.AreEqual(expectedArguments, result.Arguments.ToArray());
@@ -43,7 +44,7 @@ public class RunCommandGitProcessRunnerTests
 		});
 
 		await Assert.ThrowsExactlyAsync<GitExecutableNotFoundException>(
-			async () => await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+			async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
 	}
 
 	[TestMethod]
@@ -52,7 +53,7 @@ public class RunCommandGitProcessRunnerTests
 		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = "dotnet" });
 
 		GitProcessResult result = await runner.RunAsync(
-			["--this-flag-does-not-exist"],
+			new GitProcessRequest { Arguments = ["--this-flag-does-not-exist"] },
 			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.AreNotEqual(0, result.ExitCode);
@@ -74,7 +75,7 @@ public class RunCommandGitProcessRunnerTests
 		await alreadyCancelled.CancelAsync().ConfigureAwait(false);
 
 		OperationCanceledException exception = await Assert.ThrowsExactlyAsync<OperationCanceledException>(
-			async () => await runner.RunAsync(["--version"], alreadyCancelled.Token).ConfigureAwait(false)).ConfigureAwait(false);
+			async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, alreadyCancelled.Token).ConfigureAwait(false)).ConfigureAwait(false);
 
 		Assert.IsNotInstanceOfType<GitTimeoutException>(exception);
 	}
@@ -96,7 +97,7 @@ public class RunCommandGitProcessRunnerTests
 		});
 
 		GitTimeoutException exception = await Assert.ThrowsExactlyAsync<GitTimeoutException>(
-			async () => await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+			async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
 
 		Assert.AreEqual(timeout, exception.Timeout);
 	}
@@ -118,9 +119,96 @@ public class RunCommandGitProcessRunnerTests
 		for (int iteration = 0; iteration < 20; iteration++)
 		{
 			await Assert.ThrowsExactlyAsync<GitTimeoutException>(
-				async () => await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+				async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
 		}
 	}
 
+	[TestMethod]
+	public async Task ProgressReceivesOutputWhileTheProcessIsStillRunningAsync()
+	{
+		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = "dotnet" });
+
+		int returned = 0;
+		bool reportedAfterReturn = false;
+		StringBuilder reported = new();
+
+		// A synchronous sink rather than System.Progress<T>, which marshals its callback onto the
+		// thread pool and would make the ordering this test asserts non-deterministic.
+		SynchronousProgress progress = new(chunk =>
+		{
+			if (Volatile.Read(ref returned) != 0)
+			{
+				reportedAfterReturn = true;
+			}
+
+			lock (reported)
+			{
+				reported.Append(chunk);
+			}
+		});
+
+		GitProcessResult result = await runner.RunAsync(
+			new GitProcessRequest { Arguments = ["--info"], Progress = progress },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Volatile.Write(ref returned, 1);
+
+		string reportedText = reported.ToString();
+
+		Assert.IsFalse(string.IsNullOrEmpty(reportedText));
+
+		// Every report landed before RunAsync returned, which is what "incremental" means here:
+		// output is surfaced as git produces it, not replayed once the process has exited.
+		Assert.IsFalse(reportedAfterReturn);
+
+		// And nothing was reported that was not also accumulated, nor vice versa.
+		Assert.AreEqual(result.StandardOutput.Length + result.StandardError.Length, reportedText.Length);
+	}
+
+	[TestMethod]
+	public async Task NoProgressSinkIsNotAnErrorAsync()
+	{
+		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = "dotnet" });
+
+		GitProcessResult result = await runner.RunAsync(
+			new GitProcessRequest { Arguments = ["--version"] },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(result.Success);
+	}
+
+	[TestMethod]
+	public async Task RejectsNullRequestAsync()
+	{
+		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = "dotnet" });
+
+		await Assert.ThrowsExactlyAsync<ArgumentNullException>(
+			async () => await runner.RunAsync(null!, TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task MutatingOptionsAfterConstructionDoesNotChangeBehaviourAsync()
+	{
+		GitOptions options = new() { ExecutablePath = "dotnet" };
+		RunCommandGitProcessRunner runner = new(options);
+
+		// GitOptions is a mutable singleton in the container, so a consumer resolving it and
+		// setting a property must not be able to redirect an already-constructed runner.
+		options.ExecutablePath = "definitely-not-a-real-executable-9f3a2b";
+		options.Timeout = TimeSpan.FromMilliseconds(1);
+
+		GitProcessResult result = await runner.RunAsync(
+			new GitProcessRequest { Arguments = ["--version"] },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(result.Success);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
+
+	/// <summary>An <see cref="IProgress{T}"/> that invokes its callback on the reporting thread.</summary>
+	private sealed class SynchronousProgress(Action<string> onReport) : IProgress<string>
+	{
+		public void Report(string value) => onReport(value);
+	}
 }
