@@ -2,52 +2,53 @@
 
 namespace ktsu.GitIntegration;
 
+using System.Diagnostics;
+
 using ktsu.Semantics.Paths;
 
 /// <summary>
-/// Represents a Git repository with its associated metadata and functionality.
+/// Represents a git repository: where its working copy is, and what is known about the host it
+/// came from.
 /// </summary>
 public class GitRepository
 {
 	/// <summary>
-	/// Gets the name of the Git repository.
+	/// Gets the local filesystem path where the repository is, or is intended to be, cloned.
 	/// </summary>
-	public GitRepositoryName Name { get; init; } = new();
+	public required AbsoluteDirectoryPath LocalPath { get; init; }
 
 	/// <summary>
-	/// Gets the web URI for accessing the Git repository through a browser.
+	/// Gets the repository name, or <see langword="null"/> when it is not known.
 	/// </summary>
-	public GitRepositoryWebURI WebURI { get; init; } = new();
+	public GitRepositoryName? Name { get; init; }
 
 	/// <summary>
-	/// Gets the remote path of the Git repository.
+	/// Gets the browser-facing URI, or <see langword="null"/> when it is not known.
 	/// </summary>
-	public GitRepositoryRemotePath RemotePath { get; init; } = new();
+	public GitRepositoryWebURI? WebURI { get; init; }
 
 	/// <summary>
-	/// Gets the local file system path where the Git repository is or will be cloned.
+	/// Gets the remote path, or <see langword="null"/> when it is not known.
 	/// </summary>
-	public AbsoluteDirectoryPath LocalPath { get; init; } = new();
+	public GitRepositoryRemotePath? RemotePath { get; init; }
 
 	/// <summary>
-	/// Gets a value indicating whether the repository has been cloned locally.
-	/// </summary>
-	/// <remarks>
-	/// Currently only checks if the directory exists. Future implementations should verify it's a valid Git repository.
-	/// </remarks>
-	public bool IsCloned => Directory.Exists(LocalPath); //TODO: Implement this properly by checking if it is a valid clone
-
-	/// <summary>
-	/// Opens the repository in the default web browser.
+	/// Opens <see cref="WebURI"/> in the default browser. Does nothing when it is
+	/// <see langword="null"/>.
 	/// </summary>
 	public void OpenWebClient()
 	{
-		_ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo()
+		if (WebURI is null)
 		{
-			FileName = "explorer",
-			Arguments = WebURI,
+			return;
+		}
+
+		// UseShellExecute with the URI as FileName is the portable form. The previous
+		// implementation hardcoded "explorer", which does not exist on Linux or macOS.
+		_ = Process.Start(new ProcessStartInfo
+		{
+			FileName = WebURI.WeakString,
 			UseShellExecute = true,
-			Verb = "open",
 		});
 	}
 }
