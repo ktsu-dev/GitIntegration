@@ -16,7 +16,7 @@
 
 Every task's requirements implicitly include this section.
 
-- **Indentation is tabs**, not spaces, in all `.cs` files. Line endings CRLF.
+- **Indentation is tabs**, not spaces, in all `.cs` files. Line endings **LF** for `.cs`: this repo's `.gitattributes` sets `* text=auto eol=lf`, overriding the CRLF default, and reserves CRLF for `*.sln`, `*.cmd`, and `*.bat` only.
 - **File-scoped namespaces**, and `using` directives go **inside** the namespace, after the namespace line. This matches every existing file in this repo.
 - **Every file starts with** `// Copyright (c) 2023-2026 ktsu-dev contributors` as the first line.
 - **Nullable reference types enabled; warnings are errors.** The build fails on any warning.
