@@ -2,7 +2,9 @@
 
 namespace ktsu.GitIntegration;
 
+using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 using ktsu.Semantics.Paths;
 
@@ -33,12 +35,20 @@ public class GitRepository
 	public GitRepositoryRemotePath? RemotePath { get; init; }
 
 	/// <summary>
-	/// Opens <see cref="WebURI"/> in the default browser. Does nothing when it is
-	/// <see langword="null"/>.
+	/// Opens <see cref="WebURI"/> in the default browser.
 	/// </summary>
+	/// <remarks>
+	/// Only an absolute <c>http</c> or <c>https</c> URI is launched. Anything else — a
+	/// <see langword="null"/> <see cref="WebURI"/>, a <c>file:</c> URI, a bare filesystem path, a
+	/// relative string, or any other registered handler scheme — is silently ignored. The check is
+	/// deliberate rather than defensive: the launch runs through <c>UseShellExecute</c>, so without
+	/// it any non-blank string would be handed to the shell as something to execute, and
+	/// <see cref="GitRepositoryWebURI"/> only guarantees that the value is not blank. The value is
+	/// expected to be populated from a hosting provider's API response, which is remote data.
+	/// </remarks>
 	public void OpenWebClient()
 	{
-		if (WebURI is null)
+		if (!IsBrowsableUri(WebURI?.WeakString, out Uri? uri))
 		{
 			return;
 		}
@@ -47,8 +57,34 @@ public class GitRepository
 		// implementation hardcoded "explorer", which does not exist on Linux or macOS.
 		_ = Process.Start(new ProcessStartInfo
 		{
-			FileName = WebURI.WeakString,
+			FileName = uri.AbsoluteUri,
 			UseShellExecute = true,
 		});
+	}
+
+	/// <summary>
+	/// Decides whether a value is safe to hand to the shell as something to open.
+	/// </summary>
+	/// <remarks>
+	/// Separate from <see cref="OpenWebClient"/> so the decision can be asserted in tests without
+	/// the side effect of actually launching a browser.
+	/// </remarks>
+	/// <param name="value">The candidate value, which may be <see langword="null"/>.</param>
+	/// <param name="uri">The parsed absolute http or https URI, when the value is accepted.</param>
+	/// <returns>
+	/// <see langword="true"/> when <paramref name="value"/> is an absolute <c>http</c> or
+	/// <c>https</c> URI; otherwise, <see langword="false"/>.
+	/// </returns>
+	internal static bool IsBrowsableUri(string? value, [NotNullWhen(true)] out Uri? uri)
+	{
+		if (value is null ||
+			!Uri.TryCreate(value, UriKind.Absolute, out uri) ||
+			(uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+		{
+			uri = null;
+			return false;
+		}
+
+		return true;
 	}
 }

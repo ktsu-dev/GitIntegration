@@ -63,6 +63,56 @@ public class SemanticTypeTests
 	}
 
 	[TestMethod]
+	[DataRow("-f")]
+	[DataRow("--upload-pack=calc.exe")]
+	[DataRow("-")]
+	public void GitBranchNameRejectsLeadingDash(string value)
+	{
+		Assert.IsFalse(GitBranchName.TryCreate(value, out GitBranchName? result));
+		Assert.IsNull(result);
+	}
+
+	[TestMethod]
+	[DataRow("-f")]
+	[DataRow("--upload-pack=calc.exe")]
+	public void GitRefNameRejectsLeadingDash(string value)
+	{
+		Assert.IsFalse(GitRefName.TryCreate(value, out GitRefName? result));
+		Assert.IsNull(result);
+	}
+
+	[TestMethod]
+	[DataRow("-f")]
+	[DataRow("--upload-pack=calc.exe")]
+	public void GitRemoteNameRejectsLeadingDash(string value)
+	{
+		Assert.IsFalse(GitRemoteName.TryCreate(value, out GitRemoteName? result));
+		Assert.IsNull(result);
+	}
+
+	[TestMethod]
+	[DataRow("-f")]
+	[DataRow("--upload-pack=calc.exe")]
+	public void GitRepositoryRemotePathRejectsLeadingDash(string value)
+	{
+		Assert.IsFalse(GitRepositoryRemotePath.TryCreate(value, out GitRepositoryRemotePath? result));
+		Assert.IsNull(result);
+	}
+
+	[TestMethod]
+	public void LeadingDashRejectionDoesNotAffectOrdinaryValues()
+	{
+		Assert.IsTrue(GitBranchName.TryCreate("feature/git-v2", out GitBranchName? branch));
+		Assert.IsNotNull(branch);
+		Assert.IsTrue(GitRefName.TryCreate("HEAD~1", out GitRefName? reference));
+		Assert.IsNotNull(reference);
+		Assert.IsTrue(GitRemoteName.TryCreate("origin", out GitRemoteName? remote));
+		Assert.IsNotNull(remote);
+		Assert.IsTrue(GitRepositoryRemotePath.TryCreate("https://github.com/ktsu-dev/GitIntegration.git", out GitRepositoryRemotePath? remotePath));
+		Assert.IsNotNull(remotePath);
+	}
+
+	[TestMethod]
 	[SuppressMessage("Assertions", "MSTEST0065:Do not assert on IEnumerable<T> with AreEqual/AreNotEqual", Justification = "The <object> type argument is deliberate: this checks reference/value inequality between two distinct semantic string types, not element-wise sequence content.")]
 	public void SemanticTypesAreDistinctAtCompileTime()
 	{

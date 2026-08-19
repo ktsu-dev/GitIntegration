@@ -42,6 +42,32 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	/// <returns>The parsed result.</returns>
 	protected abstract TResult ParseResult(GitProcessResult result);
 
+	/// <summary>
+	/// Appends caller-supplied operands after an end-of-options marker, so a value beginning with a
+	/// dash cannot be reinterpreted by git as an option.
+	/// </summary>
+	/// <param name="arguments">The vector being assembled.</param>
+	/// <param name="operands">The operands to append.</param>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="arguments"/> or <paramref name="operands"/> is <see langword="null"/>.
+	/// </exception>
+	protected static void AppendOperands(ICollection<string> arguments, params string[] operands)
+	{
+		Ensure.NotNull(arguments);
+		Ensure.NotNull(operands);
+
+		// Everything after --end-of-options is an operand, whatever it starts with. This is the
+		// second layer behind NotAnOptionAttribute: the attribute stops a dash-leading value being
+		// constructed at all, and this stops any that reaches the vector another way from being
+		// parsed as a flag.
+		arguments.Add("--end-of-options");
+
+		foreach (string operand in operands)
+		{
+			arguments.Add(operand);
+		}
+	}
+
 	/// <inheritdoc />
 	public IReadOnlyList<string> BuildArguments()
 	{

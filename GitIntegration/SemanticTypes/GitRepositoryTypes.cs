@@ -21,4 +21,5 @@ public sealed record GitRepositoryWebURI : SemanticString<GitRepositoryWebURI> {
 /// local filesystem path.
 /// </summary>
 [HasNonWhitespaceContent]
+[NotAnOption]
 public sealed record GitRepositoryRemotePath : SemanticString<GitRepositoryRemotePath> { }

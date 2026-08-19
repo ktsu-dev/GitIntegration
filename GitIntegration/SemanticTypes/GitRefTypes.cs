@@ -10,18 +10,21 @@ using ktsu.Semantics.Strings;
 /// A strongly-typed git branch name, such as <c>main</c> or <c>feature/git-v2</c>.
 /// </summary>
 [HasNonWhitespaceContent]
+[NotAnOption]
 public sealed record GitBranchName : SemanticString<GitBranchName> { }
 
 /// <summary>
 /// A strongly-typed git remote name, such as <c>origin</c>.
 /// </summary>
 [HasNonWhitespaceContent]
+[NotAnOption]
 public sealed record GitRemoteName : SemanticString<GitRemoteName> { }
 
 /// <summary>
 /// A strongly-typed git reference, which may be a branch, tag, SHA, or revision expression.
 /// </summary>
 [HasNonWhitespaceContent]
+[NotAnOption]
 public sealed record GitRefName : SemanticString<GitRefName> { }
 
 /// <summary>

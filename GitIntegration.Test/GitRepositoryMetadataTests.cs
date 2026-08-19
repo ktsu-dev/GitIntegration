@@ -37,15 +37,63 @@ public class GitRepositoryMetadataTests
 	}
 
 	[TestMethod]
-	public void OpenWebClientDoesNothingWhenWebUriIsNull()
+	public void OpenWebClientTolerablyReturnsWhenWebUriIsNull()
 	{
 		GitRepository repository = new()
 		{
 			LocalPath = TestPaths.Root,
 		};
 
-		// Must not throw, and must not launch anything.
+		// This verifies the null guard returns rather than dereferencing. It cannot observe
+		// whether anything was launched; IsBrowsableUri is asserted directly for that.
 		repository.OpenWebClient();
+	}
+
+	[TestMethod]
+	[DataRow("file:///C:/Windows/System32/calc.exe")]
+	[DataRow(@"C:\Windows\System32\calc.exe")]
+	[DataRow("./relative/path")]
+	[DataRow("ktsu-dev/GitIntegration")]
+	public void OpenWebClientReturnsWithoutLaunchingForRejectedValue(string value)
+	{
+		GitRepository repository = new()
+		{
+			LocalPath = TestPaths.Root,
+			WebURI = value.As<GitRepositoryWebURI>(),
+		};
+
+		// The gate rejects the value, so this must return rather than shell-executing it.
+		Assert.IsFalse(GitRepository.IsBrowsableUri(value, out Uri? _));
+		repository.OpenWebClient();
+	}
+
+	[TestMethod]
+	[DataRow("http://github.com/ktsu-dev/GitIntegration")]
+	[DataRow("https://github.com/ktsu-dev/GitIntegration")]
+	public void BrowsableUriAcceptsHttpAndHttps(string value)
+	{
+		Assert.IsTrue(GitRepository.IsBrowsableUri(value, out Uri? uri));
+		Assert.IsNotNull(uri);
+	}
+
+	[TestMethod]
+	[DataRow("file:///C:/Windows/System32/calc.exe")]
+	[DataRow(@"C:\Windows\System32\calc.exe")]
+	[DataRow("/usr/bin/xterm")]
+	[DataRow("./relative/path")]
+	[DataRow("ktsu-dev/GitIntegration")]
+	[DataRow("ms-settings:privacy")]
+	public void BrowsableUriRejectsEverythingElse(string value)
+	{
+		Assert.IsFalse(GitRepository.IsBrowsableUri(value, out Uri? uri));
+		Assert.IsNull(uri);
+	}
+
+	[TestMethod]
+	public void BrowsableUriRejectsNull()
+	{
+		Assert.IsFalse(GitRepository.IsBrowsableUri(null, out Uri? uri));
+		Assert.IsNull(uri);
 	}
 }
 

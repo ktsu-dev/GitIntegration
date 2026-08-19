@@ -19,6 +19,50 @@ public class GitCommandBuilderTests
 		protected override string ParseResult(GitProcessResult result) => result.StandardOutput;
 	}
 
+	/// <summary>A builder that routes caller-supplied values through the operand helper.</summary>
+	private sealed class OperandBuilder(IGitProcessRunner runner, params string[] operands)
+		: GitCommandBuilder<string>(runner, repositoryPath: null)
+	{
+		protected override void AppendVerbArguments(ICollection<string> arguments)
+		{
+			arguments.Add("log");
+			AppendOperands(arguments, operands);
+		}
+
+		protected override string ParseResult(GitProcessResult result) => result.StandardOutput;
+	}
+
+	[TestMethod]
+	public void AppendOperandsEmitsEndOfOptionsMarkerBeforeOperands()
+	{
+		RecordingGitProcessRunner runner = new();
+		OperandBuilder builder = new(runner, "-f", "main");
+
+		IReadOnlyList<string> arguments = builder.BuildArguments();
+
+		string[] expectedArguments =
+		[
+			"--no-pager",
+			"-c", "core.quotepath=false",
+			"-c", "color.ui=false",
+			"log",
+			"--end-of-options",
+			"-f", "main",
+		];
+		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
+	}
+
+	[TestMethod]
+	public void AppendOperandsEmitsTheMarkerEvenWithNoOperands()
+	{
+		RecordingGitProcessRunner runner = new();
+		OperandBuilder builder = new(runner);
+
+		IReadOnlyList<string> arguments = builder.BuildArguments();
+
+		Assert.AreEqual("--end-of-options", arguments[^1]);
+	}
+
 	[TestMethod]
 	public void InjectsGlobalArgumentsBeforeTheVerb()
 	{
