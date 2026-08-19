@@ -242,6 +242,12 @@ public class GitException : Exception { }
 /// <summary>The git binary could not be started. Carries no exit code, because nothing ran.</summary>
 public sealed class GitExecutableNotFoundException : GitException { }
 
+/// <summary>Git exceeded GitOptions.Timeout and was terminated. Distinct from a caller's cancellation.</summary>
+public sealed class GitTimeoutException : GitException
+{
+    public TimeSpan Timeout { get; }
+}
+
 /// <summary>Git ran and exited non-zero.</summary>
 public class GitCommandException : GitException
 {
@@ -590,7 +596,7 @@ hosting work and could proceed in parallel if desired.
 |---|---|
 | git output format drift between versions | Parse only documented machine formats; pin with fixtures; assert a minimum git version |
 | `fetch --porcelain` requires git ≥ 2.41 | Detect version once via `GetVersionAsync`; fall back to stderr parsing below that |
-| Remote operations block on an auth prompt | `GitOptions.Timeout` plus caller `CancellationToken`; RunCommand kills the process tree |
+| Remote operations block on an auth prompt | `GitOptions.Timeout` plus caller `CancellationToken`; RunCommand kills the process tree. The timeout surfaces as `GitTimeoutException`, never as a bare `OperationCanceledException`, so a caller can tell "git hung" (retryable) from "I cancelled" (not) |
 | Azure DevOps client packages are large and `netstandard2.0` | Acceptable; the same pair is already used by `ktsu.BuildMonitor` |
 | Merged `GitRepository` mixes local and hosting concerns | Metadata is nullable rather than blank; `RemotePath` back-filled from `origin`; verbs fail with a specific exception type |
 

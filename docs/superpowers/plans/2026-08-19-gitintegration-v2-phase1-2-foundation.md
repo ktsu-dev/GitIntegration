@@ -737,6 +737,7 @@ Goal: an `IGitProcessRunner` backed by `ktsu.RunCommand`, the exception and resu
   - `GitProcessResult` with `int ExitCode`, `string StandardOutput`, `string StandardError`, `IReadOnlyList<string> Arguments`, `bool Success`
   - `IGitProcessRunner.RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)` returning `Task<GitProcessResult>`
   - `GitException` → `GitCommandException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)` → `GitRepositoryNotFoundException`; and `GitExecutableNotFoundException(string message, Exception innerException)`
+  - `GitTimeoutException(string message, TimeSpan timeout, Exception innerException)`, deriving from `GitException` and exposing `TimeSpan Timeout` — added in Task 5's fix round so a timeout is distinguishable from a caller's cancellation
   - `GitResult<T>` with `bool Success`, `T? Value`, `GitCommandError? Error`, plus `GitResult<T>.FromValue(T)` and `GitResult<T>.FromError(GitCommandError)`
   - `GitCommandError` with `int ExitCode`, `IReadOnlyList<string> Arguments`, `string StandardError`
 
