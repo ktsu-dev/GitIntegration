@@ -651,3 +651,6 @@ Temporary Items
 
 # ImGui.ini files
 imgui.ini
+
+# Superpowers SDD scratch workspace
+.superpowers/
