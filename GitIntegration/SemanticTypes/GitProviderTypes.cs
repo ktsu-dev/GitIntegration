@@ -5,12 +5,6 @@ namespace ktsu.GitIntegration;
 using ktsu.Semantics.Strings;
 
 /// <summary>
-/// A strongly-typed identifier for a git hosting provider.
-/// </summary>
-[HasNonWhitespaceContent]
-public sealed record GitProviderGUID : SemanticString<GitProviderGUID> { }
-
-/// <summary>
 /// A strongly-typed name for a git hosting provider, such as <c>GitHub</c> or <c>AzureDevOps</c>.
 /// </summary>
 [HasNonWhitespaceContent]

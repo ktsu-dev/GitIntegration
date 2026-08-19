@@ -10,13 +10,10 @@
     <PackageReference Include="ktsu.CredentialCache" />
     <PackageReference Include="ktsu.Essentials" />
     <PackageReference Include="ktsu.Essentials.FileSystemProviders.Native" />
-    <PackageReference Include="ktsu.Extensions" />
     <PackageReference Include="ktsu.RunCommand" />
     <PackageReference Include="ktsu.Semantics.Paths" />
     <PackageReference Include="ktsu.Semantics.Strings" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.TeamFoundationServer.Client" />
-    <PackageReference Include="Microsoft.VisualStudio.Services.Client" />
     <PackageReference Include="Octokit" />
     <PackageReference Include="Polyfill" PrivateAssets="all" />
   </ItemGroup>
