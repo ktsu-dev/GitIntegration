@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 [TestClass]
 public class GitStatusBuilderTests
 {
-	private const string Nul = "\0";
+	private const string Nul = "\u0000";
 
 	[TestMethod]
 	public void BuildsTheDefaultStatusVector()
