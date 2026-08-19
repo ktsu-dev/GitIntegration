@@ -54,6 +54,15 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 				$"Could not start the git executable '{Options.ExecutablePath}'. Is git installed and on PATH?",
 				ex);
 		}
+		catch (OperationCanceledException ex) when (Options.Timeout is not null && !cancellationToken.IsCancellationRequested)
+		{
+			// The caller's own token was not signalled, so this cancellation can only have come from
+			// the internal timer started in CreateLinkedTokenSource.
+			throw new GitTimeoutException(
+				$"git did not complete within {Options.Timeout.Value}.",
+				Options.Timeout.Value,
+				ex);
+		}
 
 		return new GitProcessResult
 		{

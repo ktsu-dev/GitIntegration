@@ -2,6 +2,8 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 [TestClass]
@@ -55,6 +57,48 @@ public class RunCommandGitProcessRunnerTests
 
 		Assert.AreNotEqual(0, result.ExitCode);
 		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
+	public async Task CallerCancellationSurfacesAsOperationCanceledAsync()
+	{
+		// A generous timeout, so that only the caller's own cancellation can be responsible for
+		// whatever exception surfaces.
+		RunCommandGitProcessRunner runner = new(new GitOptions
+		{
+			ExecutablePath = "dotnet",
+			Timeout = TimeSpan.FromMinutes(5),
+		});
+
+		using CancellationTokenSource alreadyCancelled = new();
+		await alreadyCancelled.CancelAsync().ConfigureAwait(false);
+
+		OperationCanceledException exception = await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+			async () => await runner.RunAsync(["--version"], alreadyCancelled.Token).ConfigureAwait(false)).ConfigureAwait(false);
+
+		Assert.IsNotInstanceOfType<GitTimeoutException>(exception);
+	}
+
+	[TestMethod]
+	public async Task TimeoutSurfacesAsGitTimeoutExceptionAsync()
+	{
+		// 50ms rather than the tightest possible bound: at 1ms the timer can fire before
+		// ktsu.RunCommand starts the process, which races a different, non-throwing internal path
+		// that returns exit code -1 without ever surfacing a cancellation. 50ms is comfortably
+		// shorter than a `dotnet --version` invocation while reliably landing on the code path
+		// that cancels the awaited task, so this test is deterministic. See task-5-report.md for
+		// the measurements behind this choice.
+		TimeSpan timeout = TimeSpan.FromMilliseconds(50);
+		RunCommandGitProcessRunner runner = new(new GitOptions
+		{
+			ExecutablePath = "dotnet",
+			Timeout = timeout,
+		});
+
+		GitTimeoutException exception = await Assert.ThrowsExactlyAsync<GitTimeoutException>(
+			async () => await runner.RunAsync(["--version"], TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+
+		Assert.AreEqual(timeout, exception.Timeout);
 	}
 
 	public TestContext TestContext { get; set; } = null!;

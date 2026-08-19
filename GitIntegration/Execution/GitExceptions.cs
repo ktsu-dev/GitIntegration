@@ -89,6 +89,40 @@ public class GitCommandException : GitException
 }
 
 /// <summary>
+/// Git did not complete within <see cref="GitOptions.Timeout"/> and was terminated.
+/// </summary>
+/// <remarks>
+/// Distinct from <see cref="OperationCanceledException"/>, which means the caller cancelled. The
+/// distinction matters because a timeout is a candidate for retry while a caller's cancellation is
+/// not, and because <c>ktsu.RunCommand</c> cannot set <c>GIT_TERMINAL_PROMPT=0</c>, so a remote
+/// operation blocking on a credential prompt reaches the caller as a timeout.
+/// </remarks>
+public sealed class GitTimeoutException : GitException
+{
+	/// <summary>Gets the bound that was exceeded.</summary>
+	public TimeSpan Timeout { get; }
+
+	/// <summary>Initializes a new instance of the <see cref="GitTimeoutException"/> class.</summary>
+	public GitTimeoutException() { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitTimeoutException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	public GitTimeoutException(string message) : base(message) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitTimeoutException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="innerException">The underlying failure.</param>
+	public GitTimeoutException(string message, Exception innerException) : base(message, innerException) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitTimeoutException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="timeout">The bound that was exceeded.</param>
+	/// <param name="innerException">The cancellation that terminated the process.</param>
+	public GitTimeoutException(string message, TimeSpan timeout, Exception innerException)
+		: base(message, innerException) => Timeout = timeout;
+}
+
+/// <summary>
 /// The path given is not inside a git working tree.
 /// </summary>
 public sealed class GitRepositoryNotFoundException : GitCommandException
