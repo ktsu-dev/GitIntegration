@@ -1,0 +1,92 @@
+name: Cross-Platform Tests
+
+# The repository-wide `dotnet.yml` is synced from a shared template and runs only on
+# windows-latest, where it also owns versioning, SonarCloud, and publishing. This workflow is
+# deliberately separate and repo-local: a template sync would overwrite any edit made to
+# `dotnet.yml`, and duplicating its release steps across platforms would publish twice.
+#
+# It exists because this library shells out to the `git` binary and multi-targets net9.0 and
+# net10.0, so a Windows-only suite leaves the POSIX path unverified. Several behaviours are
+# genuinely platform-specific: `RelativeFilePath` accepts a control character in a path on Linux
+# and rejects it on Windows, path separators are canonicalised differently, and the integration
+# tests' cleanup helper clears read-only attributes to work around a Windows-only refusal to
+# delete git's object files.
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      ["**.md", ".github/ISSUE_TEMPLATE/**", ".github/pull_request_template.md"]
+  pull_request:
+    paths-ignore:
+      ["**.md", ".github/ISSUE_TEMPLATE/**", ".github/pull_request_template.md"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0"
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      # One platform failing should not cancel the others: knowing whether a failure is
+      # Linux-only or universal is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Setup .NET SDK ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            **/Directory.Packages.props
+            **/global.json
+
+      # Every GitHub-hosted runner ships git, so this is a guard against a future image change
+      # rather than an expectation of failure. It runs before the tests so a missing binary is
+      # reported as its own step rather than as a wall of test failures.
+      - name: Verify git is present
+        run: |
+          git --version
+          echo "KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1" >> "$GITHUB_ENV"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      # KTSU_GIT_INTEGRATION_TESTS_REQUIRED is set above, so the tier-3 tests fail rather than
+      # self-skip if git is unavailable. Without it a runner missing git would report a green
+      # suite having exercised nothing.
+      - name: Test
+        env:
+          KTSU_GIT_INTEGRATION_TESTS_REQUIRED: "1"
+        run: dotnet test --no-build --configuration Release
+
+      # Asserted separately so the log states the count plainly. If the tier-3 layer ever goes
+      # inert — a filter typo, a category rename — this step reports zero and fails, where the
+      # full-suite run above would still be green.
+      - name: Confirm the integration tests actually ran
+        env:
+          KTSU_GIT_INTEGRATION_TESTS_REQUIRED: "1"
+        run: dotnet test --no-build --configuration Release --filter "TestCategory=Integration"
