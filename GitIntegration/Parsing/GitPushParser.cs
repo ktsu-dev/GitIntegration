@@ -34,8 +34,10 @@ internal static class GitPushParser
 		{
 			string record = line.TrimEnd('\r');
 
-			// A record always carries two tabs. Nothing else git prints on this stream does, which
-			// is what lets the header, the trailer, and the tracking notice be skipped by shape.
+			// Every record carries a tab and nothing else git prints on this stream does, which is
+			// what lets the header, the trailer, and the tracking notice be skipped by shape. A
+			// line that has a tab but not the fields a record needs is left to ReadUpdate, which
+			// rejects it rather than dropping it silently.
 			if (record.Length == 0 || !record.Contains('\t', StringComparison.Ordinal))
 			{
 				continue;
@@ -88,9 +90,11 @@ internal static class GitPushParser
 	/// Pulls the object ids out of a summary that carries a commit range.
 	/// </summary>
 	/// <remarks>
-	/// Push reports object ids only inside the summary, abbreviated, as <c>66afe49..7c85857</c>.
+	/// Push reports object ids only inside the summary, abbreviated, as <c>66afe49..7c85857</c> for
+	/// an ordinary update and <c>8fabc01...e60966f (forced update)</c> for a non-fast-forward one.
 	/// Every other summary git writes there is bracketed prose, so anything without the separator
-	/// simply has no range to report.
+	/// simply has no range to report, and reading the two halves with <c>TryCreate</c> keeps prose
+	/// that happens to contain dots from throwing.
 	/// </remarks>
 	private static (GitCommitSha? OldSha, GitCommitSha? NewSha) ReadShaRange(string summary)
 	{
@@ -102,7 +106,21 @@ internal static class GitPushParser
 		}
 
 		string before = summary[..separator];
-		string after = summary[(separator + 2)..];
+
+		// A non-fast-forward update writes three dots rather than two and appends
+		// " (forced update)", so the separator is consumed run-length rather than assumed to be two
+		// characters, and the trailing id stops at the first space rather than at the end of the
+		// summary. Assuming either left both ids unparseable on exactly the pushes where knowing
+		// which commits were overwritten matters most.
+		int afterStart = separator;
+
+		while (afterStart < summary.Length && summary[afterStart] == '.')
+		{
+			afterStart++;
+		}
+
+		int end = summary.IndexOf(' ', afterStart);
+		string after = end < 0 ? summary[afterStart..] : summary[afterStart..end];
 
 		return GitCommitSha.TryCreate(before, out GitCommitSha? oldSha) &&
 			GitCommitSha.TryCreate(after, out GitCommitSha? newSha)

@@ -233,5 +233,21 @@ public class GitPullBuilderTests
 			result.Error?.StandardError);
 	}
 
+	[TestMethod]
+	public async Task ForwardsProgressToTheRequestAsync()
+	{
+		// A pull writes its fetch phase's transfer progress to standard error as it runs, so the
+		// sink has to reach the request rather than being accepted and dropped.
+		RecordingGitProcessRunner runner = new();
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+		Progress<string> progress = new(static _ => { });
+
+		_ = builder.ReportingProgress(progress);
+		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsNotNull(runner.LastRequest);
+		Assert.AreSame(progress, runner.LastRequest.Progress);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

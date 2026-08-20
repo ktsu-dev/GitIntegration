@@ -94,8 +94,9 @@ public class GitCommandException : GitException
 /// <remarks>
 /// Distinct from <see cref="OperationCanceledException"/>, which means the caller cancelled. The
 /// distinction matters because a timeout is a candidate for retry while a caller's cancellation is
-/// not, and because <c>ktsu.RunCommand</c> cannot set <c>GIT_TERMINAL_PROMPT=0</c>, so a remote
-/// operation blocking on a credential prompt reaches the caller as a timeout.
+/// not. A credential prompt is not among the causes: every invocation runs with
+/// <c>GIT_TERMINAL_PROMPT=0</c>, so a remote operation needing credentials it does not have fails
+/// immediately and says so, rather than waiting out the bound with nothing to report.
 /// </remarks>
 public sealed class GitTimeoutException : GitException
 {

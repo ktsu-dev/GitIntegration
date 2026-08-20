@@ -43,6 +43,22 @@ public class GitPushParserTests
 	}
 
 	[TestMethod]
+	public void ReadsAForcedUpdateAndItsThreeDotShaRange()
+	{
+		// Captured from git 2.50.1: a non-fast-forward update separates the ids with THREE dots and
+		// appends " (forced update)". Reading two dots and taking the rest of the summary left the
+		// trailing id as ".e60966f (forced update)", which is not a valid object id, so both ids
+		// came back null on exactly the push where knowing what was overwritten matters most.
+		GitPushResult result = GitPushParser.Parse(
+			To + Record("+", "refs/heads/main:refs/heads/main", "8fabc01...e60966f (forced update)") + Done);
+
+		GitRefUpdate update = result.Updates[0];
+		Assert.AreEqual(GitRefUpdateKind.Forced, update.Kind);
+		Assert.AreEqual("8fabc01".As<GitCommitSha>(), update.OldSha);
+		Assert.AreEqual("e60966f".As<GitCommitSha>(), update.NewSha);
+	}
+
+	[TestMethod]
 	public void ReadsAnUpToDateRefWithNoShaRange()
 	{
 		GitPushResult result = GitPushParser.Parse(

@@ -221,11 +221,19 @@ public class GitFetchBuilderTests
 	{
 		ScriptedGitProcessRunner runner = RunnerOn("2.50.1", PorcelainOutput);
 		GitFetchBuilder builder = new(runner, TestPaths.Root);
+		Progress<string> progress = new(static _ => { });
 
-		_ = builder.ReportingProgress(new Progress<string>(static _ => { }));
+		_ = builder.ReportingProgress(progress);
 		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(2, runner.Invocations.Count);
+		Assert.AreEqual(2, runner.Requests.Count);
+
+		// The version probe runs without the caller's sink on purpose: it is an implementation
+		// detail of the fetch, and reporting "git version 2.50.1" into a stream the caller asked to
+		// be about transfer progress would be noise. Asserting the fetch request alone would leave
+		// that deliberate asymmetry unpinned.
+		Assert.IsNull(runner.Requests[0].Progress);
+		Assert.AreSame(progress, runner.Requests[1].Progress);
 	}
 
 	public TestContext TestContext { get; set; } = null!;
