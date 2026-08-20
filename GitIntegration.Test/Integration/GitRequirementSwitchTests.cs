@@ -20,23 +20,23 @@ public class GitRequirementSwitchTests
 {
 	[TestMethod]
 	public void TreatsAnAbsentVariableAsNotRequired() =>
-		Assert.IsFalse(GitRoundTripTests.IsGitRequired(null));
+		Assert.IsFalse(IntegrationGitFixture.IsGitRequired(null));
 
 	[TestMethod]
 	public void TreatsAnEmptyOrBlankVariableAsNotRequired()
 	{
 		// GitHub Actions writes an empty string for a variable that is declared but unset, so this
 		// is the shape a misconfigured workflow actually produces.
-		Assert.IsFalse(GitRoundTripTests.IsGitRequired(string.Empty));
-		Assert.IsFalse(GitRoundTripTests.IsGitRequired("   "));
+		Assert.IsFalse(IntegrationGitFixture.IsGitRequired(string.Empty));
+		Assert.IsFalse(IntegrationGitFixture.IsGitRequired("   "));
 	}
 
 	[TestMethod]
 	public void TreatsExplicitFalsehoodAsNotRequired()
 	{
-		Assert.IsFalse(GitRoundTripTests.IsGitRequired("0"));
-		Assert.IsFalse(GitRoundTripTests.IsGitRequired("false"));
-		Assert.IsFalse(GitRoundTripTests.IsGitRequired("FALSE"));
+		Assert.IsFalse(IntegrationGitFixture.IsGitRequired("0"));
+		Assert.IsFalse(IntegrationGitFixture.IsGitRequired("false"));
+		Assert.IsFalse(IntegrationGitFixture.IsGitRequired("FALSE"));
 	}
 
 	[TestMethod]
@@ -44,8 +44,8 @@ public class GitRequirementSwitchTests
 	{
 		// Deliberately permissive: a workflow that spells it "1", "true", or "yes" all mean the
 		// same thing to whoever wrote it, and guessing wrong here would silently disable the guard.
-		Assert.IsTrue(GitRoundTripTests.IsGitRequired("1"));
-		Assert.IsTrue(GitRoundTripTests.IsGitRequired("true"));
-		Assert.IsTrue(GitRoundTripTests.IsGitRequired("yes"));
+		Assert.IsTrue(IntegrationGitFixture.IsGitRequired("1"));
+		Assert.IsTrue(IntegrationGitFixture.IsGitRequired("true"));
+		Assert.IsTrue(IntegrationGitFixture.IsGitRequired("yes"));
 	}
 }

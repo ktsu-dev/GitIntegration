@@ -87,6 +87,24 @@ public class GitPushBuilderTests
 	}
 
 	[TestMethod]
+	public void PutsTheRemoteAloneBehindTheEndOfOptionsMarkerWhenNoBranchIsGiven()
+	{
+		// The remote-only refspec path: distinct from remote+branch (marker followed by two operands)
+		// and from neither (no marker at all).
+		RecordingGitProcessRunner runner = new();
+		GitPushBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ToRemote("origin".As<GitRemoteName>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int marker = Array.IndexOf(arguments, "--end-of-options");
+
+		Assert.AreNotEqual(-1, marker);
+		Assert.AreEqual("origin", arguments[marker + 1]);
+		Assert.AreEqual(marker + 2, arguments.Length);
+	}
+
+	[TestMethod]
 	public void EmitsNoMarkerWhenNeitherRemoteNorBranchIsGiven()
 	{
 		RecordingGitProcessRunner runner = new();

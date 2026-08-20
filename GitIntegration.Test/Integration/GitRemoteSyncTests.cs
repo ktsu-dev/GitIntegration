@@ -2,13 +2,11 @@
 
 namespace ktsu.GitIntegration.Test;
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using ktsu.Essentials.FileSystemProviders.Native;
 using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
@@ -29,29 +27,12 @@ public class GitRemoteSyncTests
 	private static readonly GitRemoteName Origin = "origin".As<GitRemoteName>();
 	private static readonly GitBranchName Main = "main".As<GitBranchName>();
 
-	private static GitClient CreateClient() =>
-		new(new RunCommandGitProcessRunner(new GitOptions()), new NativeFileSystemProvider());
-
-	private static async Task RequireGitAsync(CancellationToken cancellationToken)
-	{
-		try
-		{
-			_ = await CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
-		}
-		catch (GitExecutableNotFoundException) when (
-			!GitRoundTripTests.IsGitRequired(
-				Environment.GetEnvironmentVariable(GitRoundTripTests.RequiredEnvironmentVariable)))
-		{
-			Assert.Inconclusive("git is not on PATH, so the integration tests were skipped.");
-		}
-	}
-
 	/// <summary>Creates a bare repository that can stand in for a remote.</summary>
 	private static async Task<AbsoluteDirectoryPath> CreateBareRemoteAsync(
 		TemporaryRepository temporary,
 		CancellationToken cancellationToken)
 	{
-		GitInitResult init = await CreateClient()
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
 			.Init(temporary.Root)
 			.Bare()
 			.WithInitialBranch(Main)
@@ -70,36 +51,15 @@ public class GitRemoteSyncTests
 		AbsoluteDirectoryPath remote,
 		CancellationToken cancellationToken)
 	{
-		GitInitResult init = await CreateClient()
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
 			.Init(temporary.Root)
 			.WithInitialBranch(Main)
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		GitRepository repository = init.Repository;
-		IGitProcessRunner runner = repository.ProcessRunner!;
 
-		// Written into this repository's own config, never globally: the tests must not depend on
-		// the host having an identity, nor disturb the one it has. Signing is disabled for the same
-		// reason — a developer with commit.gpgsign set globally would otherwise fail every commit.
-		//
-		// pull.rebase is pinned for the same reason, and it is the one entry here whose absence a
-		// Windows run cannot catch: git refuses to pull divergent branches at all unless a
-		// reconciliation strategy is configured, and Git for Windows ships pull.rebase=false in its
-		// system config while stock Linux and macOS git ship no default at all. Left unpinned, the
-		// conflicting-pull test merges on Windows and dies with "Need to specify how to reconcile
-		// divergent branches" everywhere else. Merge, not rebase, because a conflict mid-merge is
-		// the state these tests inspect.
-		foreach ((string key, string value) in new[]
-		{
-			("user.name", AuthorName.WeakString),
-			("user.email", AuthorEmail.WeakString),
-			("commit.gpgsign", "false"),
-			("pull.rebase", "false"),
-		})
-		{
-			_ = await new GitTextBuilder(runner, repository.LocalPath, "config", key, value)
-				.ExecuteAsync(cancellationToken).ConfigureAwait(false);
-		}
+		await IntegrationGitFixture.ConfigureIdentityAsync(repository, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
 
 		_ = await repository
 			.AddRemote(Origin, remote.WeakString.As<GitRepositoryRemotePath>())
@@ -129,15 +89,16 @@ public class GitRemoteSyncTests
 	public async Task PushCreatesTheBranchOnTheRemoteAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository readerDirectory = new();
 
 		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
 		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
 
-		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+		GitCommit committed = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
 
 		GitPushResult result = await repository.Push()
 			.ToRemote(Origin)
@@ -149,21 +110,33 @@ public class GitRemoteSyncTests
 		Assert.AreEqual(1, result.Updates.Count);
 		Assert.AreEqual(GitRefUpdateKind.Created, result.Updates[0].Kind);
 		Assert.AreEqual("refs/heads/main".As<GitRefName>(), result.Updates[0].Reference);
+
+		// Independent confirmation, following FetchReportsTheUpdatedRemoteTrackingBranchAsync and
+		// PullBringsTheOtherRepositorysCommitAcrossAsync: a second repository reads the branch back
+		// out of the bare remote rather than trusting push's own parsed porcelain output alone.
+		GitRepository reader = await CreateWorkingCopyAsync(readerDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await reader.Pull().FromRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> history = await reader.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, history.Count);
+		Assert.AreEqual(committed.Sha, history[0].Sha);
 	}
 
 	[TestMethod]
 	public async Task PushingTwiceReportsUpToDateAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository readerDirectory = new();
 
 		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
 		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
 
-		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+		GitCommit committed = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
 		_ = await repository.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		GitPushResult second = await repository.Push()
@@ -172,6 +145,16 @@ public class GitRemoteSyncTests
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.AreEqual(GitRefUpdateKind.UpToDate, second.Updates[0].Kind);
+
+		// Independent confirmation that the remote actually holds the branch and its commit, not
+		// only that the second push reported it as up to date.
+		GitRepository reader = await CreateWorkingCopyAsync(readerDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await reader.Pull().FromRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> history = await reader.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, history.Count);
+		Assert.AreEqual(committed.Sha, history[0].Sha);
 	}
 
 	[TestMethod]
@@ -180,7 +163,7 @@ public class GitRemoteSyncTests
 		// The behaviour the whole push design exists for: git exits non-zero and still reports
 		// exactly which reference it refused and why.
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository firstDirectory = new();
@@ -192,7 +175,8 @@ public class GitRemoteSyncTests
 		_ = await CommitFileAsync(first, firstDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
 		_ = await first.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		// A second clone advances the remote, so the first repository's next push is behind.
+		// A second repository — created independently and pulling before it commits — advances the
+		// remote, so the first repository's next push is behind.
 		GitRepository second = await CreateWorkingCopyAsync(secondDirectory, remote, cancellationToken).ConfigureAwait(false);
 		_ = await second.Pull().FromRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		_ = await CommitFileAsync(second, secondDirectory, "b.txt", "two\n", "c2", cancellationToken).ConfigureAwait(false);
@@ -215,7 +199,7 @@ public class GitRemoteSyncTests
 	{
 		// The deliberate divergence between the two entry points, exercised against real git.
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository firstDirectory = new();
@@ -248,7 +232,7 @@ public class GitRemoteSyncTests
 	public async Task FetchReportsTheUpdatedRemoteTrackingBranchAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository firstDirectory = new();
@@ -285,7 +269,7 @@ public class GitRemoteSyncTests
 	public async Task FetchingTwiceReportsNothingTheSecondTimeAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository firstDirectory = new();
@@ -316,7 +300,7 @@ public class GitRemoteSyncTests
 	public async Task PullBringsTheOtherRepositorysCommitAcrossAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository firstDirectory = new();
@@ -348,7 +332,7 @@ public class GitRemoteSyncTests
 		// The one pull outcome with its own type, and the reason it has one: the repository is left
 		// mid-merge, and Status() is how a caller finds out what needs attention.
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
-		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
 		using TemporaryRepository firstDirectory = new();
@@ -367,8 +351,13 @@ public class GitRemoteSyncTests
 
 		_ = await CommitFileAsync(first, firstDirectory, "c.txt", "line1\nMINE\n", "mine", cancellationToken).ConfigureAwait(false);
 
+		// .Merge() states this pull's own intent rather than leaning on the pull.rebase pinned into
+		// each repository's config by CreateWorkingCopyAsync to supply it implicitly — the library
+		// expressing what it wants is better than a test reaching around it. The config pin stays
+		// regardless: the other pulls in this file must not depend on host state either, and this is
+		// simply the one pull that actually diverges to prove it.
 		await Assert.ThrowsExactlyAsync<GitPullConflictException>(
-			async () => await first.Pull().FromRemote(Origin).WithBranch(Main)
+			async () => await first.Pull().FromRemote(Origin).WithBranch(Main).Merge()
 				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
 			.ConfigureAwait(false);
 
