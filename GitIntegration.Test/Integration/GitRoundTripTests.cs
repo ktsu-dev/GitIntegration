@@ -2,6 +2,7 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,8 +15,10 @@ using ktsu.Semantics.Strings;
 /// Exercises the verbs against a real git binary, in a throwaway repository per test.
 /// </summary>
 /// <remarks>
-/// Marked as integration tests and skipped when git is not on PATH, so a machine or a CI job
-/// without git still reports a green suite rather than a wall of failures.
+/// Marked as integration tests and skipped when git is not on PATH, so a contributor who has not
+/// installed git still sees a green suite rather than a wall of failures. Setting
+/// <see cref="RequiredEnvironmentVariable"/> reverses that and makes a missing git a hard failure,
+/// which is what CI does — a runner without git must not report success having tested nothing.
 /// </remarks>
 [TestClass]
 [TestCategory("Integration")]
@@ -28,18 +31,57 @@ public class GitRoundTripTests
 		new(new RunCommandGitProcessRunner(new GitOptions()), new NativeFileSystemProvider());
 
 	/// <summary>
-	/// Skips the calling test when no usable git binary is present.
+	/// The environment variable that turns a missing git binary from a skip into a failure.
 	/// </summary>
+	/// <remarks>
+	/// Set it in any environment where git is supposed to be present. Without it these tests skip
+	/// when git is absent, which is right for a contributor who has not installed git but wrong for
+	/// CI: a runner missing git would otherwise report a green suite while testing nothing at all.
+	/// </remarks>
+	internal const string RequiredEnvironmentVariable = "KTSU_GIT_INTEGRATION_TESTS_REQUIRED";
+
+	/// <summary>
+	/// Decides whether a value read from the environment means "git is required".
+	/// </summary>
+	/// <remarks>
+	/// A pure function of the string rather than a reader of the environment, so it can be tested
+	/// without mutating process-wide state that other tests running in parallel would see. Any
+	/// non-empty value other than <c>0</c> or <c>false</c> counts as set, so the variable behaves
+	/// the way a reader expects however a CI system happens to spell "yes".
+	/// </remarks>
+	/// <param name="value">The raw environment variable value, which may be absent.</param>
+	/// <returns><see langword="true"/> when a missing git binary should fail rather than skip.</returns>
+	internal static bool IsGitRequired(string? value) =>
+		!string.IsNullOrWhiteSpace(value) &&
+		!string.Equals(value, "0", StringComparison.Ordinal) &&
+		!string.Equals(value, "false", StringComparison.OrdinalIgnoreCase);
+
+	private static bool GitIsRequired() =>
+		IsGitRequired(Environment.GetEnvironmentVariable(RequiredEnvironmentVariable));
+
+	/// <summary>
+	/// Skips the calling test when no usable git binary is present — unless git is required.
+	/// </summary>
+	/// <param name="cancellationToken">Cancels the version probe.</param>
+	/// <exception cref="GitExecutableNotFoundException">
+	/// git is not on <c>PATH</c> and <see cref="RequiredEnvironmentVariable"/> is set.
+	/// </exception>
 	private static async Task RequireGitAsync(CancellationToken cancellationToken)
 	{
 		try
 		{
 			_ = await CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
 		}
-		catch (GitExecutableNotFoundException)
+		catch (GitExecutableNotFoundException) when (!GitIsRequired())
 		{
-			Assert.Inconclusive("git is not on PATH, so the integration tests were skipped.");
+			Assert.Inconclusive(
+				$"git is not on PATH, so the integration tests were skipped. Set {RequiredEnvironmentVariable} " +
+				"to make this a failure instead, which is what CI does.");
 		}
+
+		// When the variable is set the exception filter above declines to catch, so
+		// GitExecutableNotFoundException propagates and the test fails loudly. That is deliberate:
+		// a CI runner without git must not report a green suite having tested nothing.
 	}
 
 	/// <summary>

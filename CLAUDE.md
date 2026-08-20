@@ -163,19 +163,42 @@ across the builder and repository tests.
 A third, slower tier lives under `GitIntegration.Test/Integration/` (e.g. `GitRoundTripTests`),
 marked `[TestCategory("Integration")]`. These run a real git binary against a throwaway repository
 per test rather than a fake runner, and self-skip with `Assert.Inconclusive` when git is not found
-on `PATH`, so a machine or CI job without git still reports a green suite instead of a wall of
+on `PATH`, so a contributor who has not installed git still sees a green suite instead of a wall of
 failures. Run this tier alone with:
 
 ```bash
 dotnet test --filter "TestCategory=Integration"
 ```
 
+Self-skipping is right for a contributor and wrong for CI, where a runner missing git would report
+success having exercised nothing. Setting `KTSU_GIT_INTEGRATION_TESTS_REQUIRED` reverses the
+behaviour and makes an absent git a hard failure:
+
+```bash
+KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 dotnet test --filter "TestCategory=Integration"
+```
+
+Any value other than empty, `0`, or `false` counts as set.
+
 **Remember:** plain `dotnet test`, never `dotnet test --nologo` — see Build Commands above.
 
 ## CI/CD
 
-Uses `scripts/PSBuild.psm1` PowerShell module for CI pipeline. Version increments are controlled by
-commit message tags: `[major]`, `[minor]`, `[patch]`, `[pre]`.
+Two workflows, deliberately separate:
+
+- **`.github/workflows/dotnet.yml`** is **synced from a shared ktsu-dev template** — its history is
+  a run of `Sync .github\workflows\dotnet.yml` commits. Editing it here is pointless: the next sync
+  overwrites the change. It runs on `windows-latest` only and owns versioning, SonarCloud, releases,
+  and NuGet publishing.
+- **`.github/workflows/cross-platform-tests.yml`** is repo-local and not templated. It builds and
+  tests on `ubuntu-latest` and `macos-latest` with `KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1`, so the
+  POSIX path is actually exercised. It releases nothing — duplicating the release steps per platform
+  would publish more than once.
+
+If a change belongs in the shared pipeline, it goes upstream to the template, not into this repo's
+copy of `dotnet.yml`.
+
+Version increments are controlled by commit message tags: `[major]`, `[minor]`, `[patch]`, `[pre]`.
 
 ## Code Quality
 
