@@ -14,10 +14,11 @@
 
 `ktsu.GitIntegration` is a two-layer library. The **local layer** wraps the `git` executable found
 on `PATH` behind a fluent, strongly-typed interface: open or discover a repository, then build and
-run `status`, `log`, `diff`, `branches`, `remotes`, and `rev-parse` commands without shelling out or
-hand-parsing porcelain output yourself. The **hosting layer** — the original half of this library —
-unifies access to hosted Git providers behind a `GitProvider` abstraction, with a `GitHubProvider`
-implementation built on Octokit.
+run both read-only commands (`status`, `log`, `diff`, `branches`, `remotes`, `rev-parse`) and
+mutating commands (`init`, `clone`, `add`, `commit`, branch creation and deletion, `checkout`, and
+remote management) without shelling out or hand-parsing porcelain output yourself. The **hosting
+layer** — the original half of this library — unifies access to hosted Git providers behind a
+`GitProvider` abstraction, with a `GitHubProvider` implementation built on Octokit.
 
 Every value that would otherwise be a bare `string` — a branch name, a commit SHA, a remote name, an
 author email — is instead a validated semantic type built on `ktsu.Semantics`, so a `GitBranchName`
@@ -30,13 +31,17 @@ which carries a known high-severity advisory, as a direct dependency of the publ
 ## Features
 
 - **Local Git Client**: `IGitClient`/`GitClient` finds and opens repositories — `GetVersionAsync`,
-  `IsRepositoryAsync`, `OpenAsync`, `DiscoverAsync` — by delegating every invocation to
-  `ktsu.RunCommand`.
+  `IsRepositoryAsync`, `OpenAsync`, `DiscoverAsync` — and creates new ones — `Init(...)`,
+  `Clone(...)` — by delegating every invocation to `ktsu.RunCommand`.
 - **Fluent Verb Builders**: `GitRepository` exposes one builder per read-only verb — `Status()`,
-  `Log()`, `Diff()`, `Branches()`, `Remotes()`, `RevParse(...)` — each configurable via chained
-  method calls and run with `ExecuteAsync` or the non-throwing `TryExecuteAsync`.
-- **Strongly-Typed Results**: `GitStatus`, `GitCommit`, `GitBranch`, `GitRemote`, `GitDiffEntry`, and
-  `GitVersion` records replace ad-hoc porcelain parsing with typed models.
+  `Log()`, `Diff()`, `Branches()`, `Remotes()`, `RevParse(...)` — and one per mutating verb —
+  `Add()`, `Commit(...)`, `CreateBranch(...)`, `DeleteBranch(...)`, `Checkout(...)`,
+  `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)` — each configurable via chained method
+  calls and run with `ExecuteAsync` or the non-throwing `TryExecuteAsync`.
+- **Strongly-Typed Results**: `GitStatus`, `GitCommit`, `GitBranch`, `GitRemote`, `GitDiffEntry`,
+  `GitVersion`, `GitInitResult`, and `GitCompleted` records replace ad-hoc porcelain parsing with
+  typed models — `GitCompleted` is the shared result for mutating verbs whose only outcome is
+  success.
 - **Reproducible Failures**: every command is scoped with `git -C <path>` instead of a process
   working directory, so a failing invocation's exact argument vector can be read off a
   `GitCommandException` and rerun verbatim.
@@ -129,6 +134,120 @@ IReadOnlyList<GitDiffEntry> changes = await repository.Diff()
     .Staged()
     .DetectRenames()
     .ExecuteAsync();
+```
+
+### Initializing or Cloning a Repository
+
+`Init` probes the target path before running `git init`, so `GitInitResult.AlreadyExisted` can tell
+a caller whether a repository was already there — `git init` is idempotent and silently ignores
+`--initial-branch` when re-initialising, so a caller that asked for a particular initial branch and
+got `AlreadyExisted == true` did not get the branch it asked for:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
+
+AbsoluteDirectoryPath target = Environment.CurrentDirectory.As<AbsoluteDirectoryPath>();
+
+GitInitResult init = await client.Init(target)
+    .WithInitialBranch("main".As<GitBranchName>())
+    .ExecuteAsync();
+
+GitRepository repository = init.Repository;
+```
+
+`Clone` builds `git clone`. Its destination pre-check is advisory only — git enforces the same rule
+itself, so the check exists solely to fail a doomed clone before it pays its network cost, and it is
+deliberately racy:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
+
+GitRepositoryRemotePath source = "https://github.com/ktsu-dev/GitIntegration.git".As<GitRepositoryRemotePath>();
+AbsoluteDirectoryPath destination = Environment.CurrentDirectory.As<AbsoluteDirectoryPath>();
+
+GitRepository cloned = await client.Clone(source, destination)
+    .WithDepth(1)
+    .ReportingProgress(new Progress<string>(line => Console.WriteLine(line)))
+    .ExecuteAsync();
+```
+
+### Staging and Committing Changes
+
+`Commit` runs git twice: `git commit` itself, then `git log -1` with this library's pinned format,
+because `commit`'s own output is a human summary carrying only an abbreviated object id, with no
+machine-readable alternative:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+await repository.Add().All().ExecuteAsync();
+
+GitCommit commit = await repository.Commit("Add feature X".As<GitCommitMessage>())
+    .WithBody("Longer explanation of the change.")
+    .WithAuthor("Ada Lovelace".As<GitAuthorName>(), "ada@example.com".As<GitAuthorEmail>())
+    .ExecuteAsync();
+
+Console.WriteLine(commit.Sha.WeakString);
+```
+
+Committing with nothing staged throws `GitNothingToCommitException`, a `GitCommandException`
+specialization, rather than the generic base type — the one `commit` failure that is an ordinary
+program state rather than a fault:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+try
+{
+    await repository.Commit("Nothing changed".As<GitCommitMessage>()).ExecuteAsync();
+}
+catch (GitNothingToCommitException)
+{
+    Console.WriteLine("Nothing was staged; skipping this commit.");
+}
+```
+
+### Creating Branches and Switching
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+await repository.CreateBranch("feature/new-thing".As<GitBranchName>())
+    .StartingAt("main".As<GitRefName>())
+    .ExecuteAsync();
+
+await repository.Checkout("feature/new-thing".As<GitRefName>()).ExecuteAsync();
+
+// Later, once the branch is no longer needed:
+await repository.DeleteBranch("feature/new-thing".As<GitBranchName>())
+    .Force()
+    .ExecuteAsync();
+```
+
+### Managing Remotes
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+GitRepositoryRemotePath url = "https://github.com/example/repo.git".As<GitRepositoryRemotePath>();
+
+await repository.AddRemote("upstream".As<GitRemoteName>(), url)
+    .WithFetch()
+    .ExecuteAsync();
+
+await repository.SetRemoteUrl("upstream".As<GitRemoteName>(), url)
+    .ForPushOnly()
+    .ExecuteAsync();
+
+await repository.RemoveRemote("upstream".As<GitRemoteName>()).ExecuteAsync();
 ```
 
 ### Resolving a Revision Without Throwing
@@ -241,6 +360,9 @@ The entry point to the local layer: finds and opens repositories, and reports on
 | `IsRepositoryAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<bool>` | Decides whether a path is inside a git working tree. Never throws for a non-repository path. |
 | `OpenAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<GitRepository>` | Opens the repository containing a path. Throws `GitRepositoryNotFoundException` when there is none. |
 | `DiscoverAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<GitRepository?>` | Opens the repository containing a path, returning `null` instead of throwing when there is none. |
+| `Init(AbsoluteDirectoryPath)` | `IGitInitBuilder` | Creates a repository at a path. Probes first, so the result's `AlreadyExisted` can tell a caller whether one was already there. |
+| `Clone(GitRepositoryRemotePath, AbsoluteDirectoryPath)` | `IGitCloneBuilder` | Clones a repository into a local working copy. |
+| `Clone(GitRepository)` | `IGitCloneBuilder` | Clones the repository a hosting provider described, using its `RemotePath` and intended `LocalPath`. |
 
 ### `GitRepository`
 
@@ -266,6 +388,14 @@ Carries `LocalPath` plus optional hosting metadata, and exposes one builder fact
 | `Branches()` | `IGitBranchListBuilder` | Builds `git for-each-ref` over the branch namespaces. |
 | `Remotes()` | `IGitRemoteListBuilder` | Builds `git remote -v`. |
 | `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision. |
+| `Add()` | `IGitAddBuilder` | Builds `git add`. |
+| `Commit(GitCommitMessage)` | `IGitCommitBuilder` | Builds `git commit`, then reads the new commit back with `git log -1`. |
+| `CreateBranch(GitBranchName)` | `IGitBranchCreateBuilder` | Builds `git branch <name> [<start-point>]`. |
+| `DeleteBranch(GitBranchName)` | `IGitBranchDeleteBuilder` | Builds `git branch --delete <name>`. |
+| `Checkout(GitRefName)` | `IGitCheckoutBuilder` | Builds `git checkout`. |
+| `AddRemote(GitRemoteName, GitRepositoryRemotePath)` | `IGitRemoteAddBuilder` | Builds `git remote add <name> <url>`. |
+| `RemoveRemote(GitRemoteName)` | `IGitRemoteRemoveBuilder` | Builds `git remote remove <name>`. |
+| `SetRemoteUrl(GitRemoteName, GitRepositoryRemotePath)` | `IGitRemoteSetUrlBuilder` | Builds `git remote set-url <name> <url>`. |
 | `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree. |
 | `OpenWebClient()` | `void` | Opens `WebURI` in the default browser, when it is an absolute `http`/`https` URI. |
 
@@ -291,6 +421,16 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `IGitBranchListBuilder` | `LocalOnly()`, `RemoteOnly()` | `IReadOnlyList<GitBranch>` |
 | `IGitRemoteListBuilder` | *(none)* | `IReadOnlyList<GitRemote>` |
 | `IGitRevParseBuilder` | *(none — revision supplied via `GitRepository.RevParse`)* | `GitCommitSha` |
+| `IGitInitBuilder` | `Bare()`, `WithInitialBranch(GitBranchName)` | `GitInitResult` |
+| `IGitCloneBuilder` | `WithBranch(GitBranchName)`, `WithDepth(int)`, `Bare()`, `ReportingProgress(IProgress<string>)` | `GitRepository` |
+| `IGitAddBuilder` | `ForPath(RelativeFilePath)`, `All()`, `UpdateTrackedOnly()` | `GitCompleted` |
+| `IGitCommitBuilder` | `WithBody(string)`, `AllowEmpty()`, `StageTrackedFiles()`, `WithAuthor(GitAuthorName, GitAuthorEmail)` | `GitCommit` |
+| `IGitBranchCreateBuilder` | `StartingAt(GitRefName)`, `Force()` | `GitCompleted` |
+| `IGitBranchDeleteBuilder` | `Force()` | `GitCompleted` |
+| `IGitCheckoutBuilder` | `CreatingBranch()`, `Force()`, `Detach()` | `GitCompleted` |
+| `IGitRemoteAddBuilder` | `WithFetch()` | `GitCompleted` |
+| `IGitRemoteRemoveBuilder` | *(none)* | `GitCompleted` |
+| `IGitRemoteSetUrlBuilder` | `ForPushOnly()` | `GitCompleted` |
 
 ### Result and Execution Models
 
@@ -311,6 +451,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitParseException` | Git succeeded but produced output the parser could not interpret. |
 | `GitCommandException` | Git ran and exited non-zero. Carries `ExitCode`, `Arguments`, and `StandardError`. |
 | `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree. |
+| `GitNothingToCommitException` | A `GitCommandException` specialization: `git commit` was run with nothing staged. The one `commit` failure that is an ordinary program state rather than a fault. |
 
 ### Result Models
 
@@ -327,6 +468,8 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitFileState` | Enum: `Unmodified`, `Modified`, `Added`, `Deleted`, `Renamed`, `Copied`, `Untracked`, `Ignored`, `Unmerged`, `TypeChanged`. |
 | `GitChangeKind` | Enum: `Added`, `Copied`, `Deleted`, `Modified`, `Renamed`, `TypeChanged`, `Unmerged`, `Unknown`. |
 | `GitUntrackedFilesMode` | Enum: `No`, `Normal`, `All`. |
+| `GitCompleted` | The result of a mutating verb whose only outcome is success — `add`, `checkout`, branch creation/deletion, and the remote commands. Carries `Arguments`. |
+| `GitInitResult` | `Repository`, `AlreadyExisted` — the outcome of `IGitClient.Init`. |
 
 ### `GitProvider`
 
