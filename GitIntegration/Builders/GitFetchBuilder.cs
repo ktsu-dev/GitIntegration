@@ -191,12 +191,21 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	/// A separate invocation rather than something <c>BuildArguments</c> could do, because that
 	/// method is documented as a pure computation with no I/O — it is what makes the emitted
 	/// command inspectable in a test without running anything.
+	///
+	/// Goes through <see cref="IGitCommandBuilder{TResult}.TryExecuteAsync"/> rather than
+	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/>, and the same way regardless of which
+	/// of this builder's own two entry points is running: a failed probe means the version genuinely
+	/// could not be established, and degrading to unsupported is the truthful answer, not a guess —
+	/// <see cref="GitFetchResult.DetailAvailable"/> already exists to say exactly that. Mirroring
+	/// each caller's own strictness would make <see cref="ExecuteAsync"/> throw a version exception
+	/// for what is really a fetch problem; letting the probe degrade instead means a genuinely broken
+	/// git still fails loudly, moments later, at the fetch itself and in each entry point's own idiom.
 	/// </remarks>
 	private async Task ProbeVersionAsync(CancellationToken cancellationToken)
 	{
-		GitVersion version = await new GitVersionBuilder(Runner)
-			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitResult<GitVersion> probe = await new GitVersionBuilder(Runner)
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		_porcelainSupported = version.AtLeast(PorcelainMajor, PorcelainMinor);
+		_porcelainSupported = probe.Success && probe.Value!.AtLeast(PorcelainMajor, PorcelainMinor);
 	}
 }

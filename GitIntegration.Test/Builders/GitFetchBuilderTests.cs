@@ -12,9 +12,16 @@ public class GitFetchBuilderTests
 {
 	private const string OldSha = "7c85857fc85452150652c289fc94f1f912b96c40";
 	private const string NewSha = "6702dd1957dedc4e0f54245bda65f3ddc5f37e64";
+	private const string UpdatedReference = "refs/remotes/origin/main";
 
-	private const string PorcelainOutput =
-		" " + OldSha + " " + NewSha + " refs/remotes/origin/main\n";
+	// A record is <flag><separator-space><old-id> <new-id> <local-ref>. Built through Record, as
+	// GitFetchParserTests does, so the flag and its separator are both present — writing the
+	// leading space by hand would shift every field one character left, letting a fast-forward
+	// record's object ids silently parse one digit short while a count-only assertion still passed.
+	private static string Record(string flag, string oldSha, string newSha, string reference) =>
+		flag + " " + oldSha + " " + newSha + " " + reference + "\n";
+
+	private static readonly string PorcelainOutput = Record(" ", OldSha, NewSha, UpdatedReference);
 
 	private static ScriptedGitProcessRunner RunnerOn(string version, string fetchOutput) =>
 		new ScriptedGitProcessRunner()
@@ -102,6 +109,13 @@ public class GitFetchBuilderTests
 		Assert.IsTrue(result.DetailAvailable);
 		Assert.AreEqual(1, result.Updates.Count);
 
+		// Asserted on the parsed fields, not just the count: a fixture or parser that shifted a
+		// field by one character would still produce exactly one update and pass a count-only check.
+		GitRefUpdate update = result.Updates[0];
+		Assert.AreEqual(UpdatedReference.As<GitRefName>(), update.Reference);
+		Assert.AreEqual(OldSha.As<GitCommitSha>(), update.OldSha);
+		Assert.AreEqual(NewSha.As<GitCommitSha>(), update.NewSha);
+
 		Assert.AreEqual(2, runner.Invocations.Count);
 		CollectionAssert.Contains(runner.Invocations[0].ToArray(), "--version");
 		CollectionAssert.Contains(runner.Invocations[1].ToArray(), "--porcelain");
@@ -180,6 +194,26 @@ public class GitFetchBuilderTests
 
 		Assert.IsFalse(result.Success);
 		Assert.AreEqual(128, result.Error?.ExitCode);
+	}
+
+	[TestMethod]
+	public async Task TryExecuteDegradesToUnsupportedWhenTheVersionProbeFailsAsync()
+	{
+		// The probe goes through TryExecuteAsync so a broken git here cannot throw a version
+		// exception out from under a caller that chose the non-throwing entry point. A failed probe
+		// means the version is genuinely unknown, so degrading to unsupported is the truthful
+		// answer, and the fetch itself still runs immediately after.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardError: "fatal: could not determine version\n", exitCode: 1)
+			.Then(standardOutput: string.Empty);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitResult<GitFetchResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(result.Success);
+		Assert.IsFalse(result.Value!.DetailAvailable);
+		CollectionAssert.DoesNotContain(runner.Invocations[1].ToArray(), "--porcelain");
 	}
 
 	[TestMethod]
