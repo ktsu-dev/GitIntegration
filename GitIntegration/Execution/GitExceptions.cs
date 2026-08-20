@@ -147,3 +147,28 @@ public sealed class GitRepositoryNotFoundException : GitCommandException
 	public GitRepositoryNotFoundException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)
 		: base(message, exitCode, arguments, standardError) { }
 }
+
+/// <summary>
+/// Git ran successfully but produced output this library could not interpret.
+/// </summary>
+/// <remarks>
+/// Distinct from <see cref="GitCommandException"/>, which means git itself reported a failure.
+/// This means the invocation succeeded and the output did not match the machine-readable format
+/// the parser was written against — a git version emitting a shape we do not know, or a value git
+/// permits that the corresponding <c>ktsu.Semantics</c> type refuses, such as a path containing a
+/// newline on Windows.
+/// </remarks>
+public sealed class GitParseException : GitException
+{
+	/// <summary>Initializes a new instance of the <see cref="GitParseException"/> class.</summary>
+	public GitParseException() { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitParseException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	public GitParseException(string message) : base(message) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitParseException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="innerException">The underlying failure.</param>
+	public GitParseException(string message, Exception innerException) : base(message, innerException) { }
+}

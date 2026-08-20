@@ -37,7 +37,8 @@ public interface IGitProcessRunner
 	/// candidate for retry while the caller's own cancellation is not.
 	/// </exception>
 	/// <exception cref="OperationCanceledException">
-	/// <paramref name="cancellationToken"/> was signalled by the caller.
+	/// <paramref name="cancellationToken"/> was signalled and git did not exit successfully.
+	/// If git completes with exit code 0 before the token is observed, the result is returned normally.
 	/// </exception>
 	public Task<GitProcessResult> RunAsync(GitProcessRequest request, CancellationToken cancellationToken = default);
 }

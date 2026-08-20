@@ -49,8 +49,15 @@ public static class ServiceCollectionExtensions
 		services.TryAddSingleton<IGitProcessRunner>(static provider =>
 			provider.GetRequiredService<RunCommandGitProcessRunner>());
 
-		// Filesystem access goes through an injected abstraction so that discovery, clone, and
-		// init can be tested without touching disk.
+		// Registered by concrete type first and then projected onto the interface, so both
+		// resolutions return the same singleton rather than two independently-constructed clients.
+		services.TryAddSingleton<GitClient>();
+		services.TryAddSingleton<IGitClient>(static provider => provider.GetRequiredService<GitClient>());
+
+		// Registered for Phase 4's Init and Clone, which act on a destination where no repository
+		// exists yet to be asked. Discovery itself resolves the working-tree root via
+		// `git rev-parse --show-toplevel`, which does the upward walk inside git — see GitClient's
+		// remarks — so it needs no filesystem abstraction of its own.
 		services.AddNativeFileSystemProvider();
 
 		return services;

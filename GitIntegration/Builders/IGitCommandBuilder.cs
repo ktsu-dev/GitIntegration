@@ -35,20 +35,22 @@ public interface IGitCommandBuilder<TResult>
 	/// <exception cref="GitCommandException">Git exited with a non-zero code.</exception>
 	/// <exception cref="GitExecutableNotFoundException">The git executable could not be started.</exception>
 	/// <exception cref="GitTimeoutException">Git did not complete within the configured bound.</exception>
-	/// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+	/// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled and git did not exit successfully. If git completes with exit code 0 before the token is observed, the result is returned normally.</exception>
 	public Task<TResult> ExecuteAsync(CancellationToken cancellationToken = default);
 
 	/// <summary>Runs the command, reporting a non-zero exit as a result rather than an exception.</summary>
 	/// <remarks>
 	/// Only a non-zero exit code is suppressed. Everything that prevents git from producing an
 	/// exit code at all still throws: the executable not being found, the configured timeout
-	/// elapsing, and the caller's own cancellation. A <see cref="GitResult{T}"/> reporting failure
-	/// therefore always means "git ran and said no", never "git never ran".
+	/// elapsing, and the caller's cancellation when git did not exit successfully. If git completes
+	/// with exit code 0 before the cancellation token is observed, the result is returned normally.
+	/// A <see cref="GitResult{T}"/> reporting failure therefore always means "git ran and said no",
+	/// never "git never ran".
 	/// </remarks>
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns>The parsed result, or the failure detail.</returns>
 	/// <exception cref="GitExecutableNotFoundException">The git executable could not be started.</exception>
 	/// <exception cref="GitTimeoutException">Git did not complete within the configured bound.</exception>
-	/// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+	/// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled and git did not exit successfully. If git completes with exit code 0 before the token is observed, the result is returned normally.</exception>
 	public Task<GitResult<TResult>> TryExecuteAsync(CancellationToken cancellationToken = default);
 }

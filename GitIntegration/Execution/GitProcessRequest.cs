@@ -22,5 +22,9 @@ public sealed record GitProcessRequest
 	/// Gets an optional sink for incremental output, reported as git produces it rather than
 	/// after the process exits. Used by long-running remote operations.
 	/// </summary>
+	/// <remarks>
+	/// The sink may be entered concurrently by the standard-output and standard-error readers.
+	/// Implementations must be thread-safe.
+	/// </remarks>
 	public IProgress<string>? Progress { get; init; }
 }
