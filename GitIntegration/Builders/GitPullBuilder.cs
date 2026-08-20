@@ -45,7 +45,8 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// Cannot be combined with <see cref="Rebase"/>: the two mean opposite things about history —
 	/// refuse to merge, versus rewrite to avoid needing one. A caller may set both in either order,
 	/// so only the finished configuration can detect the contradiction; <c>BuildArguments</c> throws
-	/// <see cref="InvalidOperationException"/> when both are set.
+	/// <see cref="InvalidOperationException"/> when both are set. Combining with <see cref="Merge"/>
+	/// is fine: reconcile by merging, but only accept a fast-forward.
 	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPullBuilder FastForwardOnly();
@@ -54,12 +55,30 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// Replays local commits on top of the fetched ones instead of merging.
 	/// </summary>
 	/// <remarks>
-	/// Cannot be combined with <see cref="FastForwardOnly"/>, for the same reason:
-	/// <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when both are set, since
-	/// only the finished configuration can detect the contradiction.
+	/// Cannot be combined with <see cref="FastForwardOnly"/> or <see cref="Merge"/>, for the same
+	/// reason in each case: <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when
+	/// either pair is set together, since only the finished configuration can detect the
+	/// contradiction.
 	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPullBuilder Rebase();
+
+	/// <summary>
+	/// Reconciles by creating a merge commit when needed, regardless of any <c>pull.rebase</c> the
+	/// host has configured.
+	/// </summary>
+	/// <remarks>
+	/// Emits <c>--no-rebase</c>, git's own counterpart to <see cref="Rebase"/>. Without either flag,
+	/// a host with no <c>pull.rebase</c> configured refuses to pull divergent branches at all; this
+	/// is the way to express merge semantics through the library instead of reaching around it to
+	/// configure git directly. Cannot be combined with <see cref="Rebase"/>: <c>BuildArguments</c>
+	/// throws <see cref="InvalidOperationException"/> when both are set, since only the finished
+	/// configuration can detect the contradiction. Combining with <see cref="FastForwardOnly"/> is
+	/// fine — <c>git pull --no-rebase --ff-only</c> reconciles by merging but only accepts a
+	/// fast-forward, so the pair is coherent rather than contradictory.
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitPullBuilder Merge();
 
 	/// <summary>Deletes remote-tracking branches whose counterparts are gone, as part of the fetch.</summary>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -84,6 +103,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private GitBranchName? _branch;
 	private bool _fastForwardOnly;
 	private bool _rebase;
+	private bool _merge;
 	private bool _prune;
 
 	/// <inheritdoc />
@@ -111,6 +131,13 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	public IGitPullBuilder Rebase()
 	{
 		_rebase = true;
+		return this;
+	}
+
+	/// <inheritdoc />
+	public IGitPullBuilder Merge()
+	{
+		_merge = true;
 		return this;
 	}
 
@@ -143,11 +170,26 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 				"the other rewrites history to avoid needing one.");
 		}
 
+		// Same trap, same fix: git accepts --rebase --no-rebase too and lets one quietly win. They
+		// are opposite values of the same reconciliation switch, so asking for both is a bug worth
+		// reporting rather than a preference worth guessing.
+		if (_rebase && _merge)
+		{
+			throw new InvalidOperationException(
+				"Rebase and Merge cannot both be requested: one rewrites history to avoid a merge, " +
+				"the other insists on making one.");
+		}
+
 		arguments.Add("pull");
 
 		if (_fastForwardOnly)
 		{
 			arguments.Add("--ff-only");
+		}
+
+		if (_merge)
+		{
+			arguments.Add("--no-rebase");
 		}
 
 		if (_rebase)

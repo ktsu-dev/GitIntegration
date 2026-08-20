@@ -79,6 +79,20 @@ public class GitFetchBuilderTests
 	}
 
 	[TestMethod]
+	public void RejectsAskingForBothAllRemotesAndFromRemote()
+	{
+		// Real git dies at the remote with "fatal: fetch --all does not take a repository argument"
+		// (exit 128) rather than rejecting this at parse time. Pull rejects its own equivalent
+		// contradiction before spawning a process, and fetch should be no less consistent.
+		RecordingGitProcessRunner runner = new();
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.AllRemotes().FromRemote("origin".As<GitRemoteName>());
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+	}
+
+	[TestMethod]
 	public void RejectsANonPositiveDepth()
 	{
 		RecordingGitProcessRunner runner = new();

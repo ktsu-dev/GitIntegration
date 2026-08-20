@@ -65,6 +65,64 @@ public class GitPullBuilderTests
 	}
 
 	[TestMethod]
+	public void MergeEmitsNoRebaseImmediatelyAfterThePullVerb()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Merge();
+
+		string[] expectedArguments =
+		[
+			"-C", TestPaths.Root.WeakString,
+			"--no-pager",
+			"-c", "core.quotepath=false",
+			"-c", "color.ui=false",
+			"pull",
+			"--no-rebase",
+		];
+		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
+	}
+
+	[TestMethod]
+	public void RejectsAskingForBothRebaseAndMerge()
+	{
+		// Opposite values of the same reconciliation switch, and git accepts both at parse time and
+		// lets one silently win — exactly the trap FastForwardOnly and Rebase share.
+		RecordingGitProcessRunner runner = new();
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Rebase().Merge();
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+	}
+
+	[TestMethod]
+	public void MergeAndFastForwardOnlyAreCompatibleAndBothEmitted()
+	{
+		// git pull --no-rebase --ff-only is coherent: reconcile by merging, but only accept a
+		// fast-forward. Asserted as the exact vector, not merely that the call did not throw, so a
+		// regression that silently dropped one flag — or reordered the two — would still fail this
+		// test.
+		RecordingGitProcessRunner runner = new();
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Merge().FastForwardOnly();
+
+		string[] expectedArguments =
+		[
+			"-C", TestPaths.Root.WeakString,
+			"--no-pager",
+			"-c", "core.quotepath=false",
+			"-c", "color.ui=false",
+			"pull",
+			"--ff-only",
+			"--no-rebase",
+		];
+		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
+	}
+
+	[TestMethod]
 	public void PutsTheRemoteAndBranchBehindTheMarkerInOrder()
 	{
 		RecordingGitProcessRunner runner = new();

@@ -16,12 +16,23 @@ using ktsu.Semantics.Paths;
 public interface IGitFetchBuilder : IGitCommandBuilder<GitFetchResult>
 {
 	/// <summary>Fetches from this remote instead of the branch's configured upstream.</summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="AllRemotes"/>: git rejects a repository argument alongside
+	/// <c>--all</c> outright. A caller may set both in either order, so only the finished
+	/// configuration can detect the contradiction; <c>BuildArguments</c> throws
+	/// <see cref="InvalidOperationException"/> when both are set, before a process is even spawned.
+	/// </remarks>
 	/// <param name="name">The remote to fetch from.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
 	public IGitFetchBuilder FromRemote(GitRemoteName name);
 
 	/// <summary>Fetches from every configured remote.</summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="FromRemote"/>, for the same reason:
+	/// <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when both are set, since
+	/// only the finished configuration can detect the contradiction.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitFetchBuilder AllRemotes();
 
@@ -121,6 +132,17 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
+
+		// Real git dies at the remote with "fatal: fetch --all does not take a repository argument"
+		// (exit 128) rather than rejecting this at parse time, so the contradiction would otherwise
+		// go undetected until a process was already spawned. Pull rejects the equivalent contradiction
+		// before spawning a process, and fetch should be no less consistent.
+		if (_allRemotes && _remote is not null)
+		{
+			throw new InvalidOperationException(
+				"AllRemotes and FromRemote cannot both be requested: fetch --all does not take a " +
+				"repository argument.");
+		}
 
 		arguments.Add("fetch");
 
