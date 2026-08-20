@@ -149,6 +149,38 @@ public sealed class GitRepositoryNotFoundException : GitCommandException
 }
 
 /// <summary>
+/// <c>git commit</c> was run with nothing staged.
+/// </summary>
+/// <remarks>
+/// Given its own type because it is the one <c>commit</c> failure that is an ordinary program state
+/// rather than a fault — a caller that commits on a timer, or after a no-op edit, hits it routinely
+/// and wants to carry on. The alternative is matching on exit code 1, which <c>commit</c> shares
+/// with other failures, or on git's English prose, which every caller would then have to duplicate.
+/// </remarks>
+public sealed class GitNothingToCommitException : GitCommandException
+{
+	/// <summary>Initializes a new instance of the <see cref="GitNothingToCommitException"/> class.</summary>
+	public GitNothingToCommitException() { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitNothingToCommitException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	public GitNothingToCommitException(string message) : base(message) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitNothingToCommitException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="innerException">The underlying failure.</param>
+	public GitNothingToCommitException(string message, Exception innerException) : base(message, innerException) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitNothingToCommitException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	public GitNothingToCommitException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)
+		: base(message, exitCode, arguments, standardError) { }
+}
+
+/// <summary>
 /// Git ran successfully but produced output this library could not interpret.
 /// </summary>
 /// <remarks>

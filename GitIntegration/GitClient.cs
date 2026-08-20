@@ -6,6 +6,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+using ktsu.Essentials;
+using ktsu.Essentials.FileSystemProviders.Native;
 using ktsu.Semantics.Paths;
 
 /// <summary>
@@ -20,9 +22,24 @@ using ktsu.Semantics.Paths;
 /// a destination where no repository exists yet to be asked.
 /// </remarks>
 /// <param name="runner">Runs every command this client issues.</param>
-public sealed class GitClient(IGitProcessRunner runner) : IGitClient
+/// <param name="fileSystem">Checks a clone destination before the clone starts.</param>
+public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider fileSystem) : IGitClient
 {
 	private readonly IGitProcessRunner _runner = Ensure.NotNull(runner);
+	private readonly IFileSystemProvider _fileSystem = Ensure.NotNull(fileSystem);
+
+	/// <summary>
+	/// Initializes a new instance of the <see cref="GitClient"/> class over the real filesystem.
+	/// </summary>
+	/// <remarks>
+	/// Kept because this signature shipped in 2.1.0, before <c>Clone</c> needed a filesystem.
+	/// Adding a required parameter to it would be a source-breaking change.
+	/// </remarks>
+	/// <param name="runner">Runs every command this client issues.</param>
+	public GitClient(IGitProcessRunner runner)
+		: this(runner, new NativeFileSystemProvider())
+	{
+	}
 
 	/// <inheritdoc />
 	public Task<GitVersion> GetVersionAsync(CancellationToken cancellationToken = default) =>
@@ -54,15 +71,8 @@ public sealed class GitClient(IGitProcessRunner runner) : IGitClient
 		return DiscoverCoreAsync(startingPath, cancellationToken);
 	}
 
-	private async Task<bool> IsRepositoryCoreAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken)
-	{
-		GitResult<string> result = await new GitTextBuilder(_runner, path, "rev-parse", "--is-inside-work-tree")
-			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
-
-		// TryExecuteAsync rather than ExecuteAsync: "not a git repository" and "cannot change to
-		// that directory" both exit 128, and both mean no rather than failure.
-		return result.Success && string.Equals(result.Value, "true", StringComparison.Ordinal);
-	}
+	private Task<bool> IsRepositoryCoreAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken) =>
+		GitProbes.IsWorkTreeAsync(_runner, path, cancellationToken);
 
 	private async Task<GitRepository> OpenCoreAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken)
 	{
@@ -113,5 +123,28 @@ public sealed class GitClient(IGitProcessRunner runner) : IGitClient
 			GitRepositoryRemotePath.TryCreate(originUrl.Value, out GitRepositoryRemotePath? remotePath)
 				? remotePath
 				: null;
+	}
+
+	/// <inheritdoc />
+	public IGitInitBuilder Init(AbsoluteDirectoryPath path) =>
+		new GitInitBuilder(_runner, Ensure.NotNull(path));
+
+	/// <inheritdoc />
+	public IGitCloneBuilder Clone(GitRepositoryRemotePath source, AbsoluteDirectoryPath destination) =>
+		new GitCloneBuilder(_runner, _fileSystem, Ensure.NotNull(source), Ensure.NotNull(destination));
+
+	/// <inheritdoc />
+	public IGitCloneBuilder Clone(GitRepository repository)
+	{
+		Ensure.NotNull(repository);
+
+		// Reported at the call rather than left to fail inside git, where an empty source argument
+		// produces a message about the destination instead.
+		GitRepositoryRemotePath source = repository.RemotePath
+			?? throw new ArgumentException(
+				"The repository has no RemotePath, so there is nothing to clone from.",
+				nameof(repository));
+
+		return Clone(source, repository.LocalPath);
 	}
 }

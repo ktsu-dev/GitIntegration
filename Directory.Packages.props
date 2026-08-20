@@ -19,5 +19,7 @@
     <PackageVersion Include="Microsoft.Testing.Extensions.HangDump" Version="1.7.2" />
     <PackageVersion Include="Microsoft.Testing.Extensions.HotReload" Version="1.7.2" />
     <PackageVersion Include="Microsoft.Testing.Extensions.Retry" Version="1.7.2" />
+    <PackageVersion Include="Testably.Abstractions.FileSystem.Interface" Version="10.3.0" />
+    <PackageVersion Include="Testably.Abstractions.Testing" Version="7.0.2" />
   </ItemGroup>
 </Project>
