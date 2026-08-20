@@ -2729,6 +2729,7 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private readonly AbsoluteDirectoryPath _targetPath = Ensure.NotNull(targetPath);
 	private GitBranchName? _initialBranch;
 	private bool _bare;
+	private bool _alreadyExisted;
 
 	/// <inheritdoc />
 	public IGitInitBuilder Bare()
@@ -2765,50 +2766,48 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	}
 
 	/// <summary>
-	/// Not used: <see cref="ExecuteAsync"/> is overridden because the result depends on a probe
-	/// taken before <c>init</c> runs, which no single invocation's output can supply.
+	/// Builds the result, taking the already-existed answer from the probe run just before.
 	/// </summary>
-	/// <param name="result">The invocation outcome.</param>
-	/// <returns>Never returns.</returns>
-	/// <exception cref="NotSupportedException">Always.</exception>
-	protected override GitInitResult ParseResult(GitProcessResult result) =>
-		throw new NotSupportedException(
-			"Init's result comes from a probe taken before init runs, not from init's own output.");
+	/// <remarks>
+	/// The probe's answer arrives through a field rather than through <paramref name="result"/>,
+	/// because it is not in <c>init</c>'s output — it cannot be, which is the whole reason the probe
+	/// exists. Holding it in a field is safe: a builder is single-use and not thread-safe by
+	/// contract, and both entry points set it immediately before delegating to the base.
+	/// </remarks>
+	/// <param name="result">The invocation outcome, which carries nothing this result needs.</param>
+	/// <returns>The initialised repository and whether it was already there.</returns>
+	protected override GitInitResult ParseResult(GitProcessResult result)
+	{
+		Ensure.NotNull(result);
+
+		return new GitInitResult
+		{
+			Repository = new GitRepository
+			{
+				LocalPath = _targetPath,
+				ProcessRunner = Runner,
+			},
+			AlreadyExisted = _alreadyExisted,
+		};
+	}
 
 	/// <inheritdoc />
 	public override async Task<GitInitResult> ExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		bool alreadyExisted = await ProbeAsync(cancellationToken).ConfigureAwait(false);
+		// Probe first, then let the base run init and call ParseResult exactly as it does for every
+		// other verb. Reimplementing the run-and-classify flow here would duplicate the base's
+		// failure handling for no gain.
+		_alreadyExisted = await ProbeAsync(cancellationToken).ConfigureAwait(false);
 
-		GitProcessResult result = await Runner.RunAsync(
-			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
-			cancellationToken).ConfigureAwait(false);
-
-		if (!result.Success)
-		{
-			throw CreateException(result);
-		}
-
-		return BuildResult(alreadyExisted);
+		return await base.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	/// <inheritdoc />
 	public override async Task<GitResult<GitInitResult>> TryExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		bool alreadyExisted = await ProbeAsync(cancellationToken).ConfigureAwait(false);
+		_alreadyExisted = await ProbeAsync(cancellationToken).ConfigureAwait(false);
 
-		GitProcessResult result = await Runner.RunAsync(
-			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
-			cancellationToken).ConfigureAwait(false);
-
-		return result.Success
-			? GitResult<GitInitResult>.FromValue(BuildResult(alreadyExisted))
-			: GitResult<GitInitResult>.FromError(new GitCommandError
-			{
-				ExitCode = result.ExitCode,
-				Arguments = result.Arguments,
-				StandardError = result.StandardError,
-			});
+		return await base.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	private async Task<bool> ProbeAsync(CancellationToken cancellationToken)
@@ -2820,16 +2819,6 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 
 		return probe.Success && string.Equals(probe.Value, "true", StringComparison.Ordinal);
 	}
-
-	private GitInitResult BuildResult(bool alreadyExisted) => new()
-	{
-		Repository = new GitRepository
-		{
-			LocalPath = _targetPath,
-			ProcessRunner = Runner,
-		},
-		AlreadyExisted = alreadyExisted,
-	};
 }
 ```
 
@@ -3764,7 +3753,9 @@ public sealed class GitClient : IGitClient
 	}
 ```
 
-The rest of the class body is unchanged — it already reads `_runner`. Add these using directives inside the namespace: `using ktsu.Essentials;` and `using ktsu.Essentials.FileSystemProviders.Native;`.
+**Read the existing file before editing.** `GitClient` currently uses a primary constructor and declares its field as `private readonly IGitProcessRunner _runner = Ensure.NotNull(runner);` — an initializer that must be **removed**, because the field is now assigned in the constructor body. Leaving the initializer in place is a compile error once the primary constructor's `runner` parameter is gone. Everything below the constructors is unchanged: the existing methods already read `_runner`.
+
+Add these using directives inside the namespace: `using ktsu.Essentials;` (for `IFileSystemProvider`) and `using ktsu.Essentials.FileSystemProviders.Native;` (for `NativeFileSystemProvider`).
 
 Then add the three members:
 
