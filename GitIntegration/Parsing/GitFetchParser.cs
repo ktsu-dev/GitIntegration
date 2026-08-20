@@ -10,8 +10,7 @@ using System.Collections.Generic;
 /// <remarks>
 /// Each record is <c>&lt;flag&gt;&lt;space&gt;&lt;old-id&gt; &lt;new-id&gt; &lt;local-ref&gt;</c>.
 /// Unlike push, the object ids are full and explicit and there is no summary field. Available only
-/// on git 2.41 and above; the fetch builder (added in a later task) decides whether this parser
-/// runs at all.
+/// on git 2.41 and above; <see cref="GitFetchBuilder"/> decides whether this parser runs at all.
 /// </remarks>
 internal static class GitFetchParser
 {
