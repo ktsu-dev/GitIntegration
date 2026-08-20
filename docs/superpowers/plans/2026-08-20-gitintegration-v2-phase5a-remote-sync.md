@@ -1006,10 +1006,15 @@ public class GitFetchParserTests
 	[TestMethod]
 	public void ToleratesCarriageReturnLineEndings()
 	{
+		// Built through Record so the flag and its separator are both present. Writing the leading
+		// space by hand would shift every field one character left: the object ids would silently
+		// parse one digit short while the assertion on Reference still passed.
 		GitFetchResult result = GitFetchParser.Parse(
-			" " + OldSha + " " + NewSha + " refs/remotes/origin/main\r\n");
+			Record(" ", OldSha, NewSha, "refs/remotes/origin/main").TrimEnd('\n') + "\r\n");
 
 		Assert.AreEqual("refs/remotes/origin/main".As<GitRefName>(), result.Updates[0].Reference);
+		Assert.AreEqual(OldSha.As<GitCommitSha>(), result.Updates[0].OldSha);
+		Assert.AreEqual(NewSha.As<GitCommitSha>(), result.Updates[0].NewSha);
 	}
 
 	[TestMethod]
