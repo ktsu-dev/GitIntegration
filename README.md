@@ -15,10 +15,11 @@
 `ktsu.GitIntegration` is a two-layer library. The **local layer** wraps the `git` executable found
 on `PATH` behind a fluent, strongly-typed interface: open or discover a repository, then build and
 run both read-only commands (`status`, `log`, `diff`, `branches`, `remotes`, `rev-parse`) and
-mutating commands (`init`, `clone`, `add`, `commit`, branch creation and deletion, `checkout`, and
-remote management) without shelling out or hand-parsing porcelain output yourself. The **hosting
-layer** — the original half of this library — unifies access to hosted Git providers behind a
-`GitProvider` abstraction, with a `GitHubProvider` implementation built on Octokit.
+mutating commands (`init`, `clone`, `add`, `commit`, branch creation and deletion, `checkout`,
+remote management, and remote sync via `fetch`, `pull`, and `push`) without shelling out or
+hand-parsing porcelain output yourself. The **hosting layer** — the original half of this library —
+unifies access to hosted Git providers behind a `GitProvider` abstraction, with a `GitHubProvider`
+implementation built on Octokit.
 
 Every value that would otherwise be a bare `string` — a branch name, a commit SHA, a remote name, an
 author email — is instead a validated semantic type built on `ktsu.Semantics`, so a `GitBranchName`
@@ -36,12 +37,18 @@ which carries a known high-severity advisory, as a direct dependency of the publ
 - **Fluent Verb Builders**: `GitRepository` exposes one builder per read-only verb — `Status()`,
   `Log()`, `Diff()`, `Branches()`, `Remotes()`, `RevParse(...)` — and one per mutating verb —
   `Add()`, `Commit(...)`, `CreateBranch(...)`, `DeleteBranch(...)`, `Checkout(...)`,
-  `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)` — each configurable via chained method
-  calls and run with `ExecuteAsync` or the non-throwing `TryExecuteAsync`.
+  `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()` — each
+  configurable via chained method calls and run with `ExecuteAsync` or the non-throwing
+  `TryExecuteAsync`.
+- **Remote Sync**: `Fetch()` downloads objects and refs without touching the working tree,
+  `Pull()` fetches and integrates into the current branch, and `Push()` sends local commits —
+  `fetch` and `push` report a machine-readable, per-reference account of what happened via
+  `GitFetchResult`/`GitPushResult`, and a rejected push is the one place in this library where
+  `ExecuteAsync` and `TryExecuteAsync` diverge in more than exception-versus-result.
 - **Strongly-Typed Results**: `GitStatus`, `GitCommit`, `GitBranch`, `GitRemote`, `GitDiffEntry`,
-  `GitVersion`, `GitInitResult`, and `GitCompleted` records replace ad-hoc porcelain parsing with
-  typed models — `GitCompleted` is the shared result for mutating verbs whose only outcome is
-  success.
+  `GitVersion`, `GitInitResult`, `GitCompleted`, `GitFetchResult`, `GitPushResult`, and
+  `GitRefUpdate` records replace ad-hoc porcelain parsing with typed models — `GitCompleted` is the
+  shared result for mutating verbs whose only outcome is success.
 - **Reproducible Failures**: every command is scoped with `git -C <path>` instead of a process
   working directory, so a failing invocation's exact argument vector can be read off a
   `GitCommandException` and rerun verbatim.
@@ -250,6 +257,122 @@ await repository.SetRemoteUrl("upstream".As<GitRemoteName>(), url)
 await repository.RemoveRemote("upstream".As<GitRemoteName>()).ExecuteAsync();
 ```
 
+### Fetching
+
+`fetch --porcelain` is only available from git 2.41 onward, so `Fetch()` probes the installed git's
+version first. Below that threshold the fetch still runs and still succeeds, but
+`GitFetchResult.DetailAvailable` is false and `Updates` is empty — check `DetailAvailable` before
+trusting an empty `Updates` as "nothing changed":
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+GitFetchResult fetched = await repository.Fetch()
+    .FromRemote("origin".As<GitRemoteName>())
+    .Prune()
+    .WithTags()
+    .ExecuteAsync();
+
+if (fetched.DetailAvailable)
+{
+    Console.WriteLine(fetched.IsUpToDate
+        ? "Already up to date."
+        : $"{fetched.Updates.Count} reference(s) updated.");
+}
+else
+{
+    Console.WriteLine("Fetch completed, but this git is older than 2.41 so no per-reference detail is available.");
+}
+```
+
+### Pulling
+
+`Pull()` returns `GitCompleted` rather than a parsed result, because everything `git pull` prints is
+human prose with no porcelain form. Use `Status()` and `Log()` afterwards to learn what changed. A
+merge conflict is the one outcome with its own exception, `GitPullConflictException`, because it
+leaves the repository mid-merge:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+try
+{
+    await repository.Pull()
+        .FromRemote("origin".As<GitRemoteName>())
+        .WithBranch("main".As<GitBranchName>())
+        .FastForwardOnly()
+        .ExecuteAsync();
+}
+catch (GitPullConflictException)
+{
+    GitStatus status = await repository.Status().ExecuteAsync();
+    IEnumerable<GitStatusEntry> unmerged = status.Entries.Where(e => e.IndexState == GitFileState.Unmerged);
+
+    Console.WriteLine($"Pull left {unmerged.Count()} unmerged path(s); resolve them and commit.");
+}
+```
+
+`FastForwardOnly()` and `Rebase()` are mutually exclusive — combining them throws
+`InvalidOperationException` when the argument vector is built, since they mean opposite things about
+history.
+
+### Pushing — Why `ExecuteAsync` and `TryExecuteAsync` Disagree
+
+`push` is the one verb in this library where the two entry points mean genuinely different things,
+not just exception-versus-result. A rejected push exits non-zero from git *and* prints a complete
+porcelain record of every reference — git got far enough to talk about them and refused some. A
+caller who does not know this will get it wrong by assuming `TryExecuteAsync` returning `Success`
+means the push landed:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+// ExecuteAsync stays strict: a rejection throws, and the exception carries the full parsed result.
+try
+{
+    GitPushResult pushed = await repository.Push()
+        .ToRemote("origin".As<GitRemoteName>())
+        .WithBranch("main".As<GitBranchName>())
+        .SettingUpstream()
+        .ExecuteAsync();
+}
+catch (GitPushRejectedException ex)
+{
+    // ex.Result is the same GitPushResult a successful push would have returned.
+    foreach (GitRefUpdate update in ex.Result!.Updates.Where(u => u.IsRejected))
+    {
+        Console.WriteLine($"{update.Reference.WeakString}: {update.Summary}");
+    }
+}
+```
+
+`TryExecuteAsync` does **not** throw for a rejection — git ran and reported exactly what happened,
+so that report comes back as a successful `GitResult`. Always check `HasRejections`, not just
+`Success`:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+GitResult<GitPushResult> result = await repository.Push()
+    .ToRemote("origin".As<GitRemoteName>())
+    .WithBranch("main".As<GitBranchName>())
+    .TryExecuteAsync();
+
+if (result.Success && result.Value!.HasRejections)
+{
+    // This is still result.Success == true: TryExecuteAsync only fails when git never reached
+    // the remote at all. A rejection is reported as data, not as GitResult failure.
+    Console.WriteLine("Push ran but at least one reference was rejected — check result.Value.Updates.");
+}
+```
+
+`ForceWithLease()` wins over `Force()` when both are set, being the safer of the two — it refuses if
+the remote moved since it was last fetched.
+
 ### Resolving a Revision Without Throwing
 
 `TryExecuteAsync` reports a non-zero exit as a result instead of an exception — useful when "no such
@@ -396,6 +519,9 @@ Carries `LocalPath` plus optional hosting metadata, and exposes one builder fact
 | `AddRemote(GitRemoteName, GitRepositoryRemotePath)` | `IGitRemoteAddBuilder` | Builds `git remote add <name> <url>`. |
 | `RemoveRemote(GitRemoteName)` | `IGitRemoteRemoveBuilder` | Builds `git remote remove <name>`. |
 | `SetRemoteUrl(GitRemoteName, GitRepositoryRemotePath)` | `IGitRemoteSetUrlBuilder` | Builds `git remote set-url <name> <url>`. |
+| `Fetch()` | `IGitFetchBuilder` | Builds `git fetch`, with `--porcelain` where the installed git supports it. |
+| `Pull()` | `IGitPullBuilder` | Builds `git pull`. |
+| `Push()` | `IGitPushBuilder` | Builds `git push --porcelain`. |
 | `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree. |
 | `OpenWebClient()` | `void` | Opens `WebURI` in the default browser, when it is an absolute `http`/`https` URI. |
 
@@ -431,6 +557,9 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `IGitRemoteAddBuilder` | `WithFetch()` | `GitCompleted` |
 | `IGitRemoteRemoveBuilder` | *(none)* | `GitCompleted` |
 | `IGitRemoteSetUrlBuilder` | `ForPushOnly()` | `GitCompleted` |
+| `IGitFetchBuilder` | `FromRemote(GitRemoteName)`, `AllRemotes()`, `Prune()`, `WithTags()`, `WithDepth(int)`, `ReportingProgress(IProgress<string>)` | `GitFetchResult` |
+| `IGitPullBuilder` | `FromRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `FastForwardOnly()`, `Rebase()`, `Prune()`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
+| `IGitPushBuilder` | `ToRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `SettingUpstream()`, `Force()`, `ForceWithLease()`, `DeletingRemoteBranch()`, `DryRun()`, `ReportingProgress(IProgress<string>)` | `GitPushResult` |
 
 ### Result and Execution Models
 
@@ -452,6 +581,8 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitCommandException` | Git ran and exited non-zero. Carries `ExitCode`, `Arguments`, and `StandardError`. |
 | `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree. |
 | `GitNothingToCommitException` | A `GitCommandException` specialization: `git commit` was run with nothing staged. The one `commit` failure that is an ordinary program state rather than a fault. |
+| `GitPushRejectedException` | A `GitCommandException` specialization: git refused at least one reference during `push`. Carries the parsed `Result` (`GitPushResult`) so the rejection detail is not lost. |
+| `GitPullConflictException` | A `GitCommandException` specialization: `pull` left conflicts in the working tree. Use `Status()` to see which paths are unmerged. |
 
 ### Result Models
 
@@ -468,8 +599,12 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitFileState` | Enum: `Unmodified`, `Modified`, `Added`, `Deleted`, `Renamed`, `Copied`, `Untracked`, `Ignored`, `Unmerged`, `TypeChanged`. |
 | `GitChangeKind` | Enum: `Added`, `Copied`, `Deleted`, `Modified`, `Renamed`, `TypeChanged`, `Unmerged`, `Unknown`. |
 | `GitUntrackedFilesMode` | Enum: `No`, `Normal`, `All`. |
-| `GitCompleted` | The result of a mutating verb whose only outcome is success — `add`, `checkout`, branch creation/deletion, and the remote commands. Carries `Arguments`. |
+| `GitCompleted` | The result of a mutating verb whose only outcome is success — `add`, `checkout`, branch creation/deletion, remote commands, and `pull`. Carries `Arguments`. |
 | `GitInitResult` | `Repository`, `AlreadyExisted` — the outcome of `IGitClient.Init`. |
+| `GitFetchResult` | `Updates`, `DetailAvailable`, `IsUpToDate` — the outcome of `Fetch()`. `IsUpToDate` is gated on `DetailAvailable` so an empty `Updates` from a pre-2.41 git is never mistaken for "nothing changed". |
+| `GitPushResult` | `Updates`, `HasRejections` — the outcome of `Push()`. |
+| `GitRefUpdate` | `Kind`, `Reference`, `Source`, `OldSha`, `NewSha`, `Summary`, `IsRejected` — one reference changed by a fetch or a push. |
+| `GitRefUpdateKind` | Enum: `FastForward`, `Forced`, `Removed`, `Created`, `Rejected`, `UpToDate`, `TagUpdate`, `Unknown`. |
 
 ### `GitProvider`
 
