@@ -2104,7 +2104,7 @@ public class GitCommitBuilderTests
 	}
 
 	[TestMethod]
-	public async Task TheReadBackUsesThePinnedLogFormatAndAskesForOneCommitAsync()
+	public async Task TheReadBackUsesThePinnedLogFormatAndAsksForOneCommitAsync()
 	{
 		// Asserted literally so a change to the shared format constant fails here rather than
 		// silently returning a differently-shaped commit.
@@ -2471,7 +2471,7 @@ internal sealed class GitCommitBuilder(
 
 Run: `dotnet test --filter "FullyQualifiedName~GitCommitBuilderTests"`
 
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Verify the fixture bytes**
 
