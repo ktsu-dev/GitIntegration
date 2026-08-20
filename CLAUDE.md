@@ -217,6 +217,26 @@ KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 dotnet test --filter "TestCategory=Integra
 
 Any value other than empty, `0`, or `false` counts as set.
 
+### A green Windows run does not mean the POSIX runners will pass
+
+Git for Windows ships a **system-level** config at `C:/Program Files/Git/etc/gitconfig` that stock
+Linux and macOS git do not have — it sets `pull.rebase=false`, among other things. An integration
+test that depends on such a default passes on Windows and fails on both POSIX runners. This has
+already happened once: `git pull` refuses divergent branches outright unless a reconciliation
+strategy is configured, so the conflicting-pull test merged on Windows and died with
+`fatal: Need to specify how to reconcile divergent branches` everywhere else.
+
+`GIT_CONFIG_NOSYSTEM=1` makes git ignore that system file, which reproduces the POSIX environment
+closely enough to catch this class of bug from Windows before pushing:
+
+```bash
+KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 GIT_CONFIG_NOSYSTEM=1 dotnet test --filter "TestCategory=Integration"
+```
+
+The durable fix is for each test to pin whatever host config it depends on into the throwaway
+repository itself, the way `GitRemoteSyncTests.CreateWorkingCopyAsync` pins `user.name`,
+`user.email`, `commit.gpgsign`, and `pull.rebase`.
+
 **Remember:** plain `dotnet test`, never `dotnet test --nologo` — see Build Commands above.
 
 ## CI/CD

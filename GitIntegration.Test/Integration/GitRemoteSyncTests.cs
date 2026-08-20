@@ -81,11 +81,20 @@ public class GitRemoteSyncTests
 		// Written into this repository's own config, never globally: the tests must not depend on
 		// the host having an identity, nor disturb the one it has. Signing is disabled for the same
 		// reason — a developer with commit.gpgsign set globally would otherwise fail every commit.
+		//
+		// pull.rebase is pinned for the same reason, and it is the one entry here whose absence a
+		// Windows run cannot catch: git refuses to pull divergent branches at all unless a
+		// reconciliation strategy is configured, and Git for Windows ships pull.rebase=false in its
+		// system config while stock Linux and macOS git ship no default at all. Left unpinned, the
+		// conflicting-pull test merges on Windows and dies with "Need to specify how to reconcile
+		// divergent branches" everywhere else. Merge, not rebase, because a conflict mid-merge is
+		// the state these tests inspect.
 		foreach ((string key, string value) in new[]
 		{
 			("user.name", AuthorName.WeakString),
 			("user.email", AuthorEmail.WeakString),
 			("commit.gpgsign", "false"),
+			("pull.rebase", "false"),
 		})
 		{
 			_ = await new GitTextBuilder(runner, repository.LocalPath, "config", key, value)
