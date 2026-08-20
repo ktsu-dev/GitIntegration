@@ -3037,12 +3037,13 @@ public class GitCloneBuilderTests
 	public async Task ForwardsProgressToTheRequestAsync()
 	{
 		// git clone writes its entire progress stream to standard error, so a caller that wants to
-		// watch a long clone needs the sink wired through to the request.
-		List<string> reported = [];
+		// watch a long clone needs the sink wired through to the request. The assertion is on the
+		// request rather than on what the sink received: Progress<T> marshals its callback through the
+		// synchronization context, so a received-chunks assertion would race the report.
 		RecordingGitProcessRunner runner = new() { StandardError = "Receiving objects: 100%\n" };
 		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
 
-		_ = builder.ReportingProgress(new Progress<string>(reported.Add));
+		_ = builder.ReportingProgress(new Progress<string>(static _ => { }));
 		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.IsNotNull(runner.LastRequest);
