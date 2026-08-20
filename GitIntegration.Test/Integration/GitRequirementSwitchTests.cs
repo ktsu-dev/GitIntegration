@@ -11,6 +11,10 @@ namespace ktsu.GitIntegration.Test;
 /// assert the decision function directly rather than setting the real environment variable, which
 /// is process-wide state that parallel tests would race.
 /// </remarks>
+/// <remarks>
+/// Deliberately not marked <c>[TestCategory("Integration")]</c> despite living beside the tests it
+/// guards: it needs no git binary and must keep running when the integration filter is not applied.
+/// </remarks>
 [TestClass]
 public class GitRequirementSwitchTests
 {

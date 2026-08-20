@@ -31,9 +31,6 @@ public class GitRoundTripTests
 		new(new RunCommandGitProcessRunner(new GitOptions()), new NativeFileSystemProvider());
 
 	/// <summary>
-	/// Skips the calling test when no usable git binary is present.
-	/// </summary>
-	/// <summary>
 	/// The environment variable that turns a missing git binary from a skip into a failure.
 	/// </summary>
 	/// <remarks>
@@ -62,6 +59,13 @@ public class GitRoundTripTests
 	private static bool GitIsRequired() =>
 		IsGitRequired(Environment.GetEnvironmentVariable(RequiredEnvironmentVariable));
 
+	/// <summary>
+	/// Skips the calling test when no usable git binary is present — unless git is required.
+	/// </summary>
+	/// <param name="cancellationToken">Cancels the version probe.</param>
+	/// <exception cref="GitExecutableNotFoundException">
+	/// git is not on <c>PATH</c> and <see cref="RequiredEnvironmentVariable"/> is set.
+	/// </exception>
 	private static async Task RequireGitAsync(CancellationToken cancellationToken)
 	{
 		try
