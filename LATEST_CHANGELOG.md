@@ -1,4 +1,25 @@
-## v2.0.0
+## v2.1.0 (minor)
 
-No significant changes detected since v2.0.0.
+Changes since v2.0.0:
+
+- [patch] Rewrite docs for the two-layer local git client + hosting provider library ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Apply final whole-branch review fixes ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add IGitClient, GitClient, and the read-only repository verbs ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the rev-parse verb and the fixed-vector text builder ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the remote listing verb ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the branch listing verb ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Rename Between parameters to fromRevision and toRevision ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the diff verb builder ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the name-status diff parser ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the log verb builder ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the log parser ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Fix NUL escape format to match Task 3 convention ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the status verb builder ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the porcelain v2 status parser ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the git --version verb ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add read-only result models and parsing primitives ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Correct the documented cancellation contract ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Document that the progress sink must be thread-safe ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Fix two plan defects found in the pre-flight cross-task scan ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Add the Phase 3 read-only verbs implementation plan ([@matt-edmondson](https://github.com/matt-edmondson))
 
