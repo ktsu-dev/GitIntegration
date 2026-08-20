@@ -189,5 +189,49 @@ public class GitPullBuilderTests
 		StringAssert.Contains(result.Error?.StandardError ?? string.Empty, "CONFLICT");
 	}
 
+	[TestMethod]
+	public async Task TryExecuteJoinsStandardErrorAndStandardOutputWithASingleNewlineAsync()
+	{
+		// The join itself is what the correction was about: two present parts must land separated
+		// by exactly one newline, not concatenated raw. Asserting only that both substrings appear
+		// would still pass if the join regressed to plain concatenation, so this checks the exact
+		// joined string instead.
+		const string FetchProgress = "From C:/dev/origin\n * branch main -> FETCH_HEAD\n";
+		RecordingGitProcessRunner runner = new()
+		{
+			ExitCode = 128,
+			StandardOutput = ConflictOutput,
+			StandardError = FetchProgress,
+		};
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		GitResult<GitCompleted> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		string expected = "From C:/dev/origin\n * branch main -> FETCH_HEAD" + "\n" + ConflictOutput;
+		Assert.AreEqual(expected, result.Error?.StandardError);
+	}
+
+	[TestMethod]
+	public async Task TryExecuteReportsStandardErrorAloneWithNoTrailingNewlineAsync()
+	{
+		// The common plain failure: standard output is empty, so joining unconditionally would leave
+		// a trailing blank line after the trimmed standard error, defeating the trim's own purpose.
+		RecordingGitProcessRunner runner = new()
+		{
+			ExitCode = 128,
+			StandardOutput = string.Empty,
+			StandardError = "fatal: 'nosuch' does not appear to be a git repository\n",
+		};
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		GitResult<GitCompleted> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(
+			"fatal: 'nosuch' does not appear to be a git repository",
+			result.Error?.StandardError);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

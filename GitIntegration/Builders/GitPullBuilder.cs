@@ -227,11 +227,15 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		// Pull is the second verb whose diagnostic lands on standard output, so an error built only
 		// from standard error would carry the fetch progress and say nothing about the conflict. The
 		// two are joined on a single newline, with the trailing newline trimmed from standard error
-		// first, so the result reads as two legible lines rather than a run-on string.
+		// first, so the result reads as two legible lines rather than a run-on string. Only the parts
+		// that are actually present are joined: a stderr-only failure (the common plain "fatal: ..."
+		// case) must not gain a trailing blank line from an empty standard output.
 		string standardError = result.StandardError.TrimEnd('\n', '\r');
 		string diagnostic = standardError.Length == 0
 			? result.StandardOutput
-			: standardError + "\n" + result.StandardOutput;
+			: result.StandardOutput.Length == 0
+				? standardError
+				: standardError + "\n" + result.StandardOutput;
 
 		return GitResult<GitCompleted>.FromError(new GitCommandError
 		{
