@@ -1,7 +1,4 @@
-## v2.4.0 (minor)
+## v2.4.0
 
-Changes since v2.3.0:
-
-- [patch] Say why --no-rebase sits beside --rebase ([@matt-edmondson](https://github.com/matt-edmondson))
-- [minor] Add Merge() to pull, reject contradictory fetch config, dedupe integration helpers ([@matt-edmondson](https://github.com/matt-edmondson))
+No significant changes detected since v2.4.0.
 
