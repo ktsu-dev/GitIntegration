@@ -73,6 +73,13 @@ public class GitRoundTripTests
 			repository.ProcessRunner!, repository.LocalPath, "config", "user.email", AuthorEmail.WeakString)
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
+		// A developer with commit.gpgsign=true set globally would otherwise have every commit here
+		// blocked waiting on a signing key or prompt. Setting it false in the repository's own config
+		// overrides that without touching the host's global configuration.
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "commit.gpgsign", "false")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
 		return repository;
 	}
 

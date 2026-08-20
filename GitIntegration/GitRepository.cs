@@ -65,14 +65,8 @@ public class GitRepository
 		return IsClonedCoreAsync(runner, cancellationToken);
 	}
 
-	private async Task<bool> IsClonedCoreAsync(IGitProcessRunner runner, CancellationToken cancellationToken)
-	{
-		GitResult<string> result = await new GitTextBuilder(
-			runner, LocalPath, "rev-parse", "--is-inside-work-tree")
-			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
-
-		return result.Success && string.Equals(result.Value, "true", StringComparison.Ordinal);
-	}
+	private Task<bool> IsClonedCoreAsync(IGitProcessRunner runner, CancellationToken cancellationToken) =>
+		GitProbes.IsWorkTreeAsync(runner, LocalPath, cancellationToken);
 
 	/// <summary>Reports the working tree and index state.</summary>
 	/// <returns>A fresh builder.</returns>

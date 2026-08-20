@@ -130,7 +130,9 @@ public class ServiceCollectionExtensionsTests
 	public void TheRegisteredClientCanBuildACloneBuilder()
 	{
 		// Clone needs an IFileSystemProvider, which AddGitIntegration has registered since Phase 2
-		// but nothing consumed until now. This proves the two-argument constructor resolves.
+		// but nothing consumed until now. This proves the registered client can build a clone
+		// builder, which exercises the filesystem dependency being present — it does not pin which
+		// GitClient constructor resolves, since Clone(...) succeeds under either.
 		ServiceCollection services = new();
 		_ = services.AddGitIntegration();
 

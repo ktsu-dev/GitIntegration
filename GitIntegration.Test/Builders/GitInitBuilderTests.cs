@@ -84,7 +84,7 @@ public class GitInitBuilderTests
 		Assert.IsNotNull(result.Repository.ProcessRunner);
 
 		Assert.AreEqual(2, runner.Invocations.Count);
-		CollectionAssert.Contains(runner.Invocations[0].ToArray(), "--is-inside-work-tree");
+		CollectionAssert.Contains(runner.Invocations[0].ToArray(), "--git-dir");
 		CollectionAssert.Contains(runner.Invocations[1].ToArray(), "init");
 	}
 
@@ -92,9 +92,10 @@ public class GitInitBuilderTests
 	public async Task ReportsAnExistingRepositoryAsAlreadyExistingAsync()
 	{
 		// git init on an existing repository exits 0 and only says "Reinitialized" in prose, so the
-		// probe is the sole machine-readable signal.
+		// probe is the sole machine-readable signal. ".git" is what --git-dir prints for a non-bare
+		// repository at exactly this path.
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
-			.Then(standardOutput: "true\n")
+			.Then(standardOutput: ".git\n")
 			.Then(standardOutput: "Reinitialized existing Git repository in /dev/new-repo/.git/\n");
 		GitInitBuilder builder = new(runner, Target);
 
@@ -108,7 +109,7 @@ public class GitInitBuilderTests
 	{
 		// The probe reports, it does not gate: git init is idempotent and running it is harmless.
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
-			.Then(standardOutput: "true\n")
+			.Then(standardOutput: ".git\n")
 			.Then(standardOutput: "Reinitialized existing Git repository\n");
 		GitInitBuilder builder = new(runner, Target);
 
@@ -116,6 +117,38 @@ public class GitInitBuilderTests
 
 		Assert.AreEqual(2, runner.Invocations.Count);
 		CollectionAssert.Contains(runner.Invocations[1].ToArray(), "init");
+	}
+
+	[TestMethod]
+	public async Task ReportsAFreshRepositoryWhenTheProbeFindsOnlyAnAncestorRepositoryAsync()
+	{
+		// --git-dir prints an absolute path when the target is inside a repository rooted somewhere
+		// above it: a real repository exists, but not at this path, so init here creates a new one
+		// nested inside it. That must not be reported as AlreadyExisted.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: (OperatingSystem.IsWindows() ? @"C:\dev\.git" : "/dev/.git") + "\n")
+			.Then(standardOutput: "Initialized empty Git repository in /dev/new-repo/sub/.git/\n");
+		GitInitBuilder builder = new(runner, Target);
+
+		GitInitResult result = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsFalse(result.AlreadyExisted);
+	}
+
+	[TestMethod]
+	public async Task ReportsABareRepositoryAtTheTargetAsAlreadyExistingAsync()
+	{
+		// --git-dir prints "." for a bare repository at exactly this path — the case
+		// --is-inside-work-tree got backwards, since a bare repository has no working tree to be
+		// inside.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: ".\n")
+			.Then(standardOutput: "Reinitialized existing Git repository in /dev/new-repo/\n");
+		GitInitBuilder builder = new(runner, Target);
+
+		GitInitResult result = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(result.AlreadyExisted);
 	}
 
 	[TestMethod]

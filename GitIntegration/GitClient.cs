@@ -71,15 +71,8 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 		return DiscoverCoreAsync(startingPath, cancellationToken);
 	}
 
-	private async Task<bool> IsRepositoryCoreAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken)
-	{
-		GitResult<string> result = await new GitTextBuilder(_runner, path, "rev-parse", "--is-inside-work-tree")
-			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
-
-		// TryExecuteAsync rather than ExecuteAsync: "not a git repository" and "cannot change to
-		// that directory" both exit 128, and both mean no rather than failure.
-		return result.Success && string.Equals(result.Value, "true", StringComparison.Ordinal);
-	}
+	private Task<bool> IsRepositoryCoreAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken) =>
+		GitProbes.IsWorkTreeAsync(_runner, path, cancellationToken);
 
 	private async Task<GitRepository> OpenCoreAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken)
 	{

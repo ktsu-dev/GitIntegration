@@ -129,11 +129,21 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 
 	private async Task<bool> ProbeAsync(CancellationToken cancellationToken)
 	{
+		// Asks "is there a repository at exactly this path", via --git-dir, deliberately not via
+		// GitProbes.IsWorkTreeAsync's --is-inside-work-tree: that answers a different question,
+		// whether the path is inside *some* working tree. That wrongly reports AlreadyExisted =
+		// true for a plain subdirectory of an existing repository (git init there creates a
+		// nested repository), and wrongly reports AlreadyExisted = false for an existing bare
+		// repository (git init there only prints a re-init warning). --git-dir discriminates all
+		// four cases: ".git" (a non-bare repository at exactly this path), "." (a bare repository
+		// at exactly this path), an absolute path (a repository exists, but as an ancestor, not
+		// here), or a non-zero exit (no repository, or the directory does not exist).
+		//
 		// TryExecuteAsync, because failure is the expected answer: the directory may hold no
 		// repository, or may not exist at all, and both exit 128 and both mean "not yet".
-		GitResult<string> probe = await new GitTextBuilder(Runner, _targetPath, "rev-parse", "--is-inside-work-tree")
+		GitResult<string> probe = await new GitTextBuilder(Runner, _targetPath, "rev-parse", "--git-dir")
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		return probe.Success && string.Equals(probe.Value, "true", StringComparison.Ordinal);
+		return probe.Success && probe.Value is ".git" or ".";
 	}
 }

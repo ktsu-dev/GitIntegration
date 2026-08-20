@@ -85,4 +85,19 @@ public class GitRepositoryMutatingVerbTests
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.SetRemoteUrl(null!, Url));
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.SetRemoteUrl(Origin, null!));
 	}
+
+	[TestMethod]
+	public void ANullArgumentIsReportedBeforeAMissingProcessRunner()
+	{
+		// A metadata-only repository has no runner, so RequireRunner() would throw
+		// InvalidOperationException. Pairing that with a null argument pins the documented ordering:
+		// argument validation runs first, so the caller learns what they got wrong rather than being
+		// told the repository has no runner.
+		GitRepository repository = new() { LocalPath = TestPaths.Root };
+
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.Commit(null!));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.CreateBranch(null!));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.Checkout(null!));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.AddRemote(null!, Url));
+	}
 }

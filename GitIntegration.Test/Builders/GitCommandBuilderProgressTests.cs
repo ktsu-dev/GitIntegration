@@ -24,11 +24,12 @@ public class GitCommandBuilderProgressTests
 	{
 		// RecordingGitProcessRunner replays its canned output through request.Progress, exactly as
 		// the real runner streams chunks as git produces them. Before this seam existed no builder
-		// could observe a long-running command's output until it exited.
-		List<string> reported = [];
+		// could observe a long-running command's output until it exited. The assertion is on the
+		// request rather than on what the sink received: Progress<T> marshals its callback through the
+		// synchronization context, so a received-chunks assertion would race the report.
 		RecordingGitProcessRunner runner = new() { StandardOutput = "Cloning into 'x'..." };
 		ProgressBuilder builder = new(runner);
-		builder.SetProgress(new Progress<string>(reported.Add));
+		builder.SetProgress(new Progress<string>(static _ => { }));
 
 		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 

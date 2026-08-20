@@ -191,7 +191,14 @@ internal sealed class GitCommitBuilder(
 			{
 				ExitCode = result.ExitCode,
 				Arguments = result.Arguments,
-				StandardError = result.StandardError,
+				// Commit is the one verb whose diagnostic lands on standard output rather than
+				// standard error — "nothing to commit" is git's headline finding here, and
+				// CreateException already special-cases it. Falling back to StandardOutput keeps that
+				// same text reachable on the non-throwing path, instead of handing the caller an empty
+				// string.
+				StandardError = string.IsNullOrWhiteSpace(result.StandardError)
+					? result.StandardOutput
+					: result.StandardError,
 			});
 	}
 
@@ -203,7 +210,9 @@ internal sealed class GitCommitBuilder(
 	/// commit" on standard <em>output</em>, leaving standard error empty. Both of git's phrasings
 	/// are matched: the tree may be clean, or it may hold only untracked files, and neither message
 	/// contains the other. The match depends on the <c>LC_ALL=C</c> that
-	/// <c>RunCommandGitProcessRunner</c> forces on every invocation.
+	/// <c>RunCommandGitProcessRunner</c> forces on every invocation. A failing pre-commit hook whose
+	/// own standard output happened to contain one of these phrases would be misclassified as
+	/// <see cref="GitNothingToCommitException"/>; that risk is accepted as narrow.
 	/// </remarks>
 	/// <param name="result">The failed invocation outcome.</param>
 	/// <returns>The exception to throw.</returns>

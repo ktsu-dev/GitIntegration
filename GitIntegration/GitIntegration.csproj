@@ -21,7 +21,13 @@
          inherits System.IO.Abstractions.IFileSystem straight from Testably.Abstractions.FileSystem
          .Interface. GitCloneBuilder's destination pre-check calls members declared on that base
          interface (Directory.Exists, Directory.GetFileSystemEntries), which the KTSU0006 analyzer
-         treats as direct use of a transitively-referenced package requiring its own reference. -->
-    <PackageReference Include="Testably.Abstractions.FileSystem.Interface" PrivateAssets="all" />
+         treats as direct use of a transitively-referenced package requiring its own reference.
+         VersionOverride pins this reference to 10.0.0 rather than letting central transitive pinning
+         apply the repo-wide 10.3.0: ktsu.Essentials 2.0.0's own nuspec pins 10.0.0, and CoreCLR only
+         rolls assembly binds forward, never backward. A consumer resolves whichever version
+         ktsu.Essentials pins, so this library must compile against the lowest version any consumer
+         could resolve — a higher reference here cannot bind against a lower assembly at runtime and
+         would throw FileNotFoundException for every consumer. -->
+    <PackageReference Include="Testably.Abstractions.FileSystem.Interface" VersionOverride="10.0.0" PrivateAssets="all" />
   </ItemGroup>
 </Project>

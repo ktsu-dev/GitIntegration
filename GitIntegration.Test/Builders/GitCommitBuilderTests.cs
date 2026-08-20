@@ -213,6 +213,12 @@ public class GitCommitBuilderTests
 		Assert.IsFalse(result.Success);
 		Assert.AreEqual(1, result.Error?.ExitCode);
 
+		// Commit reports "nothing to commit" on standard output with standard error empty, so a
+		// failed TryExecuteAsync must fall back to standard output for its diagnostic text — an empty
+		// StandardError here would mean the exact caller this result type exists for gets nothing.
+		Assert.IsNotNull(result.Error);
+		StringAssert.Contains(result.Error.StandardError, "nothing to commit");
+
 		// The readback must not run when the commit itself failed.
 		Assert.AreEqual(1, runner.Invocations.Count);
 	}
