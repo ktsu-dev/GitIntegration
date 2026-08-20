@@ -1439,6 +1439,12 @@ public interface IGitPushBuilder : IGitCommandBuilder<GitPushResult>
 	/// <summary>
 	/// Pushes this branch. Requires a remote, which git reads as the first positional operand.
 	/// </summary>
+	/// <remarks>
+	/// The requirement is checked when the argument vector is built, not here: a caller may set the
+	/// branch before the remote, so only the finished configuration knows whether the pair is
+	/// complete. <c>BuildArguments</c> therefore throws <see cref="InvalidOperationException"/> for
+	/// a branch with no remote — a configuration error, not I/O, so its purity is intact.
+	/// </remarks>
 	/// <param name="name">The branch to push.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
@@ -2409,6 +2415,13 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	public IGitPullBuilder FromRemote(GitRemoteName name);
 
 	/// <summary>Pulls this branch. Requires a remote, which git reads as the first operand.</summary>
+	/// <remarks>
+	/// Checked when the argument vector is built rather than here, because a caller may set the
+	/// branch before the remote and only the finished configuration knows whether the pair is
+	/// complete. The same applies to asking for both <see cref="FastForwardOnly"/> and
+	/// <see cref="Rebase"/>. Both raise <see cref="InvalidOperationException"/> from
+	/// <c>BuildArguments</c>, which is a configuration error rather than I/O.
+	/// </remarks>
 	/// <param name="name">The branch to pull.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
@@ -2595,9 +2608,14 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		{
 			ExitCode = result.ExitCode,
 			Arguments = result.Arguments,
+			// Both streams, newline-separated so they stay readable: the fetch progress lands on
+			// standard error while the conflict itself lands on standard output, and a caller
+			// diagnosing a failed pull wants each of them.
 			StandardError = string.IsNullOrWhiteSpace(result.StandardError)
 				? result.StandardOutput
-				: result.StandardError + result.StandardOutput,
+				: result.StandardError.TrimEnd('
+') + "
+" + result.StandardOutput,
 		});
 	}
 }
