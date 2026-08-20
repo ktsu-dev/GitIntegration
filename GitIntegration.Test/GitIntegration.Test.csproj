@@ -17,5 +17,12 @@
          project needs the concrete DI container (ServiceProvider, BuildServiceProvider), not just
          the Microsoft.Extensions.DependencyInjection.Abstractions the library project depends on. -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+
+    <!-- Phase 4's Init and Clone take an IFileSystemProvider so their destination checks can be
+         tested without touching disk. MockFileSystem is the in-memory IFileSystem this wraps.
+         Note the vendor: ktsu.Essentials builds on Testably.Abstractions, not the similarly named
+         TestableIO.System.IO.Abstractions, and Testably's testing package is versioned lower than
+         its abstractions package. Both facts look like mistakes and are not. -->
+    <PackageReference Include="Testably.Abstractions.Testing" />
   </ItemGroup>
 </Project>

@@ -39,6 +39,18 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	protected AbsoluteDirectoryPath? RepositoryPath { get; } = repositoryPath;
 
 	/// <summary>
+	/// Gets or sets an optional sink for git's incremental output.
+	/// </summary>
+	/// <remarks>
+	/// Forwarded into every <see cref="GitProcessRequest"/> this builder issues. Only the
+	/// long-running verbs have any use for it — <c>clone</c> writes its whole progress stream to
+	/// standard error, and Phase 5's <c>fetch</c> and <c>push</c> will do the same — so most
+	/// builders leave it null and the request carries no sink at all. The sink may be invoked
+	/// concurrently by the standard-output and standard-error readers and must be thread-safe.
+	/// </remarks>
+	protected IProgress<string>? Progress { get; set; }
+
+	/// <summary>
 	/// Appends the verb and its options to the argument vector, after the global arguments.
 	/// </summary>
 	/// <param name="arguments">The vector being assembled.</param>
@@ -107,7 +119,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	public virtual async Task<TResult> ExecuteAsync(CancellationToken cancellationToken = default)
 	{
 		GitProcessResult result = await Runner.RunAsync(
-			new GitProcessRequest { Arguments = BuildArguments() },
+			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
 			cancellationToken).ConfigureAwait(false);
 
 		if (!result.Success)
@@ -122,7 +134,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	public virtual async Task<GitResult<TResult>> TryExecuteAsync(CancellationToken cancellationToken = default)
 	{
 		GitProcessResult result = await Runner.RunAsync(
-			new GitProcessRequest { Arguments = BuildArguments() },
+			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
 			cancellationToken).ConfigureAwait(false);
 
 		return result.Success
