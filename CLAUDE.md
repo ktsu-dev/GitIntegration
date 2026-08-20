@@ -40,22 +40,26 @@ GitHub, via Octokit). The solution uses:
   exposes one builder factory per read-only verb (`Status()`, `Log()`, `Diff()`, `Branches()`,
   `Remotes()`, `RevParse(...)`) and per mutating verb (`Add()`, `Commit(...)`, `CreateBranch(...)`,
   `DeleteBranch(...)`, `Checkout(...)`, `AddRemote(...)`, `RemoveRemote(...)`,
-  `SetRemoteUrl(...)`), plus `IsClonedAsync` and `OpenWebClient`.
-- `GitIntegration/Builders/` — public verb-builder interfaces and their internal implementations,
-  including the mutating verbs added in Phase 4 (`GitInitBuilder`, `GitCloneBuilder`,
-  `GitAddBuilder`, `GitCommitBuilder`, `GitBranchCreateBuilder`, `GitBranchDeleteBuilder`,
-  `GitCheckoutBuilder`, `GitRemoteAddBuilder`, `GitRemoteRemoveBuilder`, `GitRemoteSetUrlBuilder`).
-  `IGitVersionBuilder` and every concrete `Git*Builder` class are `internal` — not part of the
-  public API surface. Only the `IGit*Builder` interfaces are public.
+  `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()`), plus `IsClonedAsync` and `OpenWebClient`.
+- `GitIntegration/Builders/` — public verb-builder interfaces and their internal implementations:
+  `GitInitBuilder`, `GitCloneBuilder`, `GitAddBuilder`, `GitCommitBuilder`,
+  `GitBranchCreateBuilder`, `GitBranchDeleteBuilder`, `GitCheckoutBuilder`, `GitRemoteAddBuilder`,
+  `GitRemoteRemoveBuilder`, `GitRemoteSetUrlBuilder`, `GitFetchBuilder`, `GitPullBuilder`, and
+  `GitPushBuilder`. `IGitVersionBuilder` and every concrete `Git*Builder` class are `internal` —
+  not part of the public API surface. Only the `IGit*Builder` interfaces are public.
 - `GitIntegration/Models/` — result records and enums: `GitStatus`, `GitStatusEntry`, `GitCommit`,
   `GitSignature`, `GitBranch`, `GitRemote`, `GitDiffEntry`, `GitVersion`, `GitFileState`,
-  `GitChangeKind`, `GitUntrackedFilesMode`, `GitInitResult`, and `GitCompleted` — the shared "unit"
-  result for mutating verbs whose only outcome is success (C# has no generic `void`).
+  `GitChangeKind`, `GitUntrackedFilesMode`, `GitInitResult`, `GitCompleted` — the shared "unit"
+  result for mutating verbs whose only outcome is success (C# has no generic `void`) — and the
+  remote-sync models `GitRefUpdate`, `GitRefUpdateKind`, `GitFetchResult` (`Updates`,
+  `DetailAvailable`, `IsUpToDate`), and `GitPushResult` (`Updates`, `HasRejections`).
 - `GitIntegration/Execution/` — `GitOptions`, `IGitProcessRunner`, `RunCommandGitProcessRunner`,
   `GitResult<T>`, and the exception hierarchy (`GitException` → `GitExecutableNotFoundException`,
   `GitTimeoutException`, `GitParseException`, `GitCommandException` → `GitRepositoryNotFoundException`,
-  `GitNothingToCommitException`).
-- `GitIntegration/Parsing/` — internal parsers turning raw git output into the `Models/` records.
+  `GitNothingToCommitException`, `GitPushRejectedException`, `GitPullConflictException`).
+- `GitIntegration/Parsing/` — internal parsers turning raw git output into the `Models/` records,
+  including `GitFetchParser` and `GitPushParser` for the two porcelain formats `fetch --porcelain`
+  and `push --porcelain` emit.
 - `GitIntegration/SemanticTypes/` — the 13 `ktsu.Semantics` wrapper types for git identifiers.
 - `GitIntegration/GitProvider.cs`, `GitIntegration/GitHubProvider.cs` — the hosting layer.
 - `GitIntegration/ServiceCollectionExtensions.cs` — `AddGitIntegration()` DI registration.
@@ -132,6 +136,37 @@ Two non-obvious, load-bearing design points:
    a directory can appear between the check and the clone, so git's own refusal is the authority,
    not this check.
 
+6. **`Push` makes `ExecuteAsync` and `TryExecuteAsync` mean different things.** Every other verb's
+   two entry points differ only in exception-versus-result; `push` is the one place they diverge in
+   more than that. A rejected push exits non-zero *and* prints a complete porcelain record of every
+   reference — git got far enough to talk about them and refused some. `ExecuteAsync` stays strict
+   and throws `GitPushRejectedException`, which carries the parsed `GitPushResult` so nothing is
+   lost. `TryExecuteAsync` returns that same result as a value and leaves the caller to check
+   `GitPushResult.HasRejections` — git ran and said exactly what happened, which is what "try"
+   should surface rather than forcing a caller to catch an exception for an outcome git already
+   described in full.
+
+7. **`Fetch` degrades below git 2.41 rather than parsing human output.** `fetch --porcelain` exists
+   only from that version onward, so the builder probes the installed git's version before building
+   the command. Below the threshold the fetch still runs and still succeeds, but
+   `GitFetchResult.DetailAvailable` is false and `Updates` is empty — so an empty list is never
+   mistaken for "nothing changed"; `IsUpToDate` is gated on `DetailAvailable` for exactly that
+   reason, rather than trusting an empty `Updates` on its own. The probe deliberately goes through
+   the *result-based* `TryExecuteAsync` rather than the throwing `ExecuteAsync`, and the same way
+   regardless of which of `Fetch`'s own two entry points is running: a failed probe means the
+   version genuinely could not be established, and degrading to unsupported is the truthful answer,
+   not a guess — `DetailAvailable` already exists to say exactly that. A genuinely broken git still
+   fails loudly moments later, at the fetch itself, in whichever entry point's own idiom.
+
+8. **`Pull` returns `GitCompleted`, not a parsed result.** Everything `git pull` prints is human
+   prose with no porcelain form, and this design forbids parsing that prose for every other verb —
+   so `pull` does not get a special exemption either. A caller who needs to know what changed uses
+   `Status()` and `Log()` afterwards, both of which are precise. A merge conflict is the one outcome
+   that gets its own type, `GitPullConflictException`, because it leaves the repository mid-merge —
+   `CreateException` is overridden to look for `CONFLICT` on standard *output*, the same trap
+   `commit` sets with "nothing to commit" on stderr-vs-stdout, and `LC_ALL=C` is what makes matching
+   the literal word dependable.
+
 **Hosting layer.** `GitProvider` is an abstract base with a `GitHubProvider` implementation over
 Octokit. `IsAuthenticated` and `RefreshRemoteRepositories()` both go through `TryGetCredential`,
 which resolves a `Credential` from `ktsu.CredentialCache` keyed by `PersonaGUID`. Azure DevOps
@@ -141,10 +176,9 @@ referenced, because they pull `System.Data.SqlClient` (a package with a known hi
 advisory) into the published package as a direct dependency. Do not add Azure DevOps hosting
 support without resolving that dependency concern first.
 
-**Planned, not yet implemented (do not document as present):** `fetch`, `pull`, `push`, and Azure
-DevOps hosting support. These are tracked for Phase 5. Deliberately out of scope even later:
-`commit --amend`, `add --force`, `switch` (see `IGitCheckoutBuilder`'s remarks for why `checkout`
-was chosen instead), and submodule support.
+**Planned, not yet implemented (do not document as present):** Azure DevOps hosting support.
+Deliberately out of scope even later: `commit --amend`, `add --force`, `switch` (see
+`IGitCheckoutBuilder`'s remarks for why `checkout` was chosen instead), and submodule support.
 
 ## Testing
 
@@ -160,11 +194,14 @@ git binary:
 `GitRepositoryMetadataTests.TestPaths` provides a cross-platform `AbsoluteDirectoryPath` root used
 across the builder and repository tests.
 
-A third, slower tier lives under `GitIntegration.Test/Integration/` (e.g. `GitRoundTripTests`),
-marked `[TestCategory("Integration")]`. These run a real git binary against a throwaway repository
-per test rather than a fake runner, and self-skip with `Assert.Inconclusive` when git is not found
-on `PATH`, so a contributor who has not installed git still sees a green suite instead of a wall of
-failures. Run this tier alone with:
+A third, slower tier lives under `GitIntegration.Test/Integration/` (e.g. `GitRoundTripTests`,
+`GitRemoteSyncTests`), marked `[TestCategory("Integration")]`. These run a real git binary against
+a throwaway repository per test rather than a fake runner, and self-skip with
+`Assert.Inconclusive` when git is not found on `PATH`, so a contributor who has not installed git
+still sees a green suite instead of a wall of failures. `GitRemoteSyncTests` exercises `fetch`,
+`pull`, and `push` against a bare repository on the local filesystem standing in for a remote —
+real push negotiation and real rejection behaviour with no network and no credentials, which is
+what would otherwise make these tests flaky or unrunnable in CI. Run this tier alone with:
 
 ```bash
 dotnet test --filter "TestCategory=Integration"
@@ -179,6 +216,26 @@ KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 dotnet test --filter "TestCategory=Integra
 ```
 
 Any value other than empty, `0`, or `false` counts as set.
+
+### A green Windows run does not mean the POSIX runners will pass
+
+Git for Windows ships a **system-level** config at `C:/Program Files/Git/etc/gitconfig` that stock
+Linux and macOS git do not have — it sets `pull.rebase=false`, among other things. An integration
+test that depends on such a default passes on Windows and fails on both POSIX runners. This has
+already happened once: `git pull` refuses divergent branches outright unless a reconciliation
+strategy is configured, so the conflicting-pull test merged on Windows and died with
+`fatal: Need to specify how to reconcile divergent branches` everywhere else.
+
+`GIT_CONFIG_NOSYSTEM=1` makes git ignore that system file, which reproduces the POSIX environment
+closely enough to catch this class of bug from Windows before pushing:
+
+```bash
+KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 GIT_CONFIG_NOSYSTEM=1 dotnet test --filter "TestCategory=Integration"
+```
+
+The durable fix is for each test to pin whatever host config it depends on into the throwaway
+repository itself, the way `GitRemoteSyncTests.CreateWorkingCopyAsync` pins `user.name`,
+`user.email`, `commit.gpgsign`, and `pull.rebase`.
 
 **Remember:** plain `dotnet test`, never `dotnet test --nologo` — see Build Commands above.
 

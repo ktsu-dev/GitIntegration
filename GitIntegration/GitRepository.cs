@@ -200,6 +200,21 @@ public class GitRepository
 		return new GitRemoteSetUrlBuilder(RequireRunner(), LocalPath, name, url);
 	}
 
+	/// <summary>Downloads objects and refs from a remote without touching the working tree.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitFetchBuilder Fetch() => new GitFetchBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Fetches from a remote and integrates the result into the current branch.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitPullBuilder Pull() => new GitPullBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Sends local commits to a remote.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitPushBuilder Push() => new GitPushBuilder(RequireRunner(), LocalPath);
+
 	private IGitProcessRunner RequireRunner() =>
 		ProcessRunner ?? throw new InvalidOperationException(
 			"This GitRepository carries hosting metadata only and has no process runner. Obtain one " +

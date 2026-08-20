@@ -18,7 +18,7 @@ using ktsu.Semantics.Paths;
 /// Repository discovery is delegated to <c>git rev-parse --show-toplevel</c>, which performs the
 /// upward walk itself. That is why this type takes no filesystem abstraction: there is nothing to
 /// walk that git does not already walk, and asking git keeps the answer consistent with what every
-/// subsequent verb will see. Phase 4's <c>Init</c> and <c>Clone</c> do need one, because they act on
+/// subsequent verb will see. <c>Init</c> and <c>Clone</c> do need one, because they act on
 /// a destination where no repository exists yet to be asked.
 /// </remarks>
 /// <param name="runner">Runs every command this client issues.</param>

@@ -1,0 +1,146 @@
+// Copyright (c) 2023-2026 ktsu-dev contributors
+
+namespace ktsu.GitIntegration;
+
+using System;
+using System.Collections.Generic;
+
+/// <summary>
+/// Reads <c>git push --porcelain</c>.
+/// </summary>
+/// <remarks>
+/// Each record is <c>&lt;flag&gt;TAB&lt;local-ref&gt;:&lt;remote-ref&gt;TAB&lt;summary&gt;</c>.
+/// Records are surrounded by lines that are not records — a leading <c>To &lt;url&gt;</c>, a
+/// trailing <c>Done</c>, and a tracking notice when the push set an upstream — so the parser
+/// recognises records by shape rather than by position.
+/// </remarks>
+internal static class GitPushParser
+{
+	private const int FieldCount = 3;
+
+	/// <summary>
+	/// Parses porcelain push output.
+	/// </summary>
+	/// <param name="output">Everything git wrote to standard output.</param>
+	/// <returns>The parsed account of every reference the push touched.</returns>
+	/// <exception cref="GitParseException">A record did not have the expected shape.</exception>
+	internal static GitPushResult Parse(string output)
+	{
+		Ensure.NotNull(output);
+
+		List<GitRefUpdate> updates = [];
+
+		foreach (string line in output.Split('\n'))
+		{
+			string record = line.TrimEnd('\r');
+
+			// Every record carries a tab and nothing else git prints on this stream does, which is
+			// what lets the header, the trailer, and the tracking notice be skipped by shape. A
+			// line that has a tab but not the fields a record needs is left to ReadUpdate, which
+			// rejects it rather than dropping it silently.
+			if (record.Length == 0 || !record.Contains('\t', StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			updates.Add(ReadUpdate(record));
+		}
+
+		return new GitPushResult { Updates = updates };
+	}
+
+	private static GitRefUpdate ReadUpdate(string record)
+	{
+		string[] fields = record.Split('\t');
+
+		if (fields.Length < FieldCount || fields[0].Length != 1)
+		{
+			throw new GitParseException($"Malformed push record: '{record}'.");
+		}
+
+		int colon = fields[1].IndexOf(':');
+
+		if (colon < 0)
+		{
+			throw new GitParseException($"A push record's reference field has no colon: '{record}'.");
+		}
+
+		string source = fields[1][..colon];
+		string destination = fields[1][(colon + 1)..];
+		string summary = fields[2];
+		(GitCommitSha? oldSha, GitCommitSha? newSha) = ReadShaRange(summary);
+
+		return new GitRefUpdate
+		{
+			Kind = ToKind(fields[0][0]),
+			Reference = GitParseValues.ToSemantic<GitRefName>(destination, "pushed reference"),
+
+			// A deletion writes an empty local side — ":refs/heads/gone" — because nothing is being
+			// sent, so an empty source is a normal record rather than a malformed one.
+			Source = source.Length == 0
+				? null
+				: GitParseValues.ToSemantic<GitRefName>(source, "pushed source reference"),
+			OldSha = oldSha,
+			NewSha = newSha,
+			Summary = summary,
+		};
+	}
+
+	/// <summary>
+	/// Pulls the object ids out of a summary that carries a commit range.
+	/// </summary>
+	/// <remarks>
+	/// Push reports object ids only inside the summary, abbreviated, as <c>66afe49..7c85857</c> for
+	/// an ordinary update and <c>8fabc01...e60966f (forced update)</c> for a non-fast-forward one.
+	/// Every other summary git writes there is bracketed prose, so anything without the separator
+	/// simply has no range to report, and reading the two halves with <c>TryCreate</c> keeps prose
+	/// that happens to contain dots from throwing.
+	/// </remarks>
+	private static (GitCommitSha? OldSha, GitCommitSha? NewSha) ReadShaRange(string summary)
+	{
+		int separator = summary.IndexOf("..", StringComparison.Ordinal);
+
+		if (separator <= 0)
+		{
+			return (null, null);
+		}
+
+		string before = summary[..separator];
+
+		// A non-fast-forward update writes three dots rather than two and appends
+		// " (forced update)", so the separator is consumed run-length rather than assumed to be two
+		// characters, and the trailing id stops at the first space rather than at the end of the
+		// summary. Assuming either left both ids unparseable on exactly the pushes where knowing
+		// which commits were overwritten matters most.
+		int afterStart = separator;
+
+		while (afterStart < summary.Length && summary[afterStart] == '.')
+		{
+			afterStart++;
+		}
+
+		int end = summary.IndexOf(' ', afterStart);
+		string after = end < 0 ? summary[afterStart..] : summary[afterStart..end];
+
+		return GitCommitSha.TryCreate(before, out GitCommitSha? oldSha) &&
+			GitCommitSha.TryCreate(after, out GitCommitSha? newSha)
+				? (oldSha, newSha)
+				: (null, null);
+	}
+
+	private static GitRefUpdateKind ToKind(char flag) => flag switch
+	{
+		' ' => GitRefUpdateKind.FastForward,
+		'+' => GitRefUpdateKind.Forced,
+		'-' => GitRefUpdateKind.Removed,
+		'*' => GitRefUpdateKind.Created,
+		'!' => GitRefUpdateKind.Rejected,
+		'=' => GitRefUpdateKind.UpToDate,
+		't' => GitRefUpdateKind.TagUpdate,
+
+		// Deliberately tolerant, unlike the status parser: git's push flags are not a closed set
+		// this library can rely on never growing, and failing a whole push report over one
+		// unrecognised character would be worse than naming the reference with an unknown kind.
+		_ => GitRefUpdateKind.Unknown,
+	};
+}

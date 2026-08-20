@@ -22,6 +22,15 @@ internal sealed class ScriptedGitProcessRunner : IGitProcessRunner
 	/// <summary>Gets every argument vector this runner was asked to run, in order.</summary>
 	public List<IReadOnlyList<string>> Invocations { get; } = [];
 
+	/// <summary>Gets every request this runner was given, in the same order as <see cref="Invocations"/>.</summary>
+	/// <remarks>
+	/// <see cref="RecordingGitProcessRunner"/> keeps only the last request, which is enough where a
+	/// builder runs git once. A multi-invocation verb needs one request per invocation, because
+	/// what distinguishes them is not the arguments alone — the fetch carries the caller's progress
+	/// sink while the version probe preceding it deliberately does not.
+	/// </remarks>
+	public List<GitProcessRequest> Requests { get; } = [];
+
 	/// <summary>Queues the next result this runner will return.</summary>
 	/// <param name="standardOutput">What git writes to standard output.</param>
 	/// <param name="standardError">What git writes to standard error.</param>
@@ -47,6 +56,7 @@ internal sealed class ScriptedGitProcessRunner : IGitProcessRunner
 		ArgumentNullException.ThrowIfNull(request);
 
 		Invocations.Add([.. request.Arguments]);
+		Requests.Add(request);
 
 		// Running out of queued responses means the code under test issued a command the test did
 		// not anticipate. Failing here names that command; returning a default would hide it.

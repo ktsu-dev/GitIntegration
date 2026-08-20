@@ -43,8 +43,8 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	/// </summary>
 	/// <remarks>
 	/// Forwarded into every <see cref="GitProcessRequest"/> this builder issues. Only the
-	/// long-running verbs have any use for it — <c>clone</c> writes its whole progress stream to
-	/// standard error, and Phase 5's <c>fetch</c> and <c>push</c> will do the same — so most
+	/// long-running verbs have any use for it — <c>clone</c>, <c>fetch</c>, <c>push</c>, and
+	/// <c>pull</c> all write their progress stream to standard error while they run — so most
 	/// builders leave it null and the request carries no sink at all. The sink may be invoked
 	/// concurrently by the standard-output and standard-error readers and must be thread-safe.
 	/// </remarks>
