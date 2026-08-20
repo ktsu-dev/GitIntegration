@@ -187,6 +187,11 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			arguments.Add("--ff-only");
 		}
 
+		// --no-rebase sits next to --rebase rather than in declaration order because the two are
+		// the same switch: git takes the last one it is given, so emitting both would silently
+		// pick a strategy rather than fail. The guard above makes that unreachable, and keeping
+		// the pair adjacent is what makes it obvious at a glance that nothing between them can
+		// separate the check from what it protects.
 		if (_merge)
 		{
 			arguments.Add("--no-rebase");
