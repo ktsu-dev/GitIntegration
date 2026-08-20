@@ -16,5 +16,12 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Octokit" />
     <PackageReference Include="Polyfill" PrivateAssets="all" />
+
+    <!-- ktsu.Essentials's IFileSystemProvider is a marker interface with no members of its own; it
+         inherits System.IO.Abstractions.IFileSystem straight from Testably.Abstractions.FileSystem
+         .Interface. GitCloneBuilder's destination pre-check calls members declared on that base
+         interface (Directory.Exists, Directory.GetFileSystemEntries), which the KTSU0006 analyzer
+         treats as direct use of a transitively-referenced package requiring its own reference. -->
+    <PackageReference Include="Testably.Abstractions.FileSystem.Interface" />
   </ItemGroup>
 </Project>
