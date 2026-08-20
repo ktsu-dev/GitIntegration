@@ -134,7 +134,7 @@ public class GitCommitBuilderTests
 	}
 
 	[TestMethod]
-	public async Task TheReadBackUsesThePinnedLogFormatAndAskesForOneCommitAsync()
+	public async Task TheReadBackUsesThePinnedLogFormatAndAsksForOneCommitAsync()
 	{
 		// Asserted literally so a change to the shared format constant fails here rather than
 		// silently returning a differently-shaped commit.
