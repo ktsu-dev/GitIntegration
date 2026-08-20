@@ -181,6 +181,94 @@ public sealed class GitNothingToCommitException : GitCommandException
 }
 
 /// <summary>
+/// Git refused at least one of the references a push tried to update.
+/// </summary>
+/// <remarks>
+/// Carries the parsed <see cref="Result"/> because this is the one failure in the library whose
+/// output is exactly what the caller wanted: a rejected push exits non-zero and still prints a
+/// complete porcelain record naming every reference and why each was refused. Throwing that detail
+/// away would leave a caller with an exit code and some prose.
+/// </remarks>
+public sealed class GitPushRejectedException : GitCommandException
+{
+	/// <summary>Gets the parsed push result, or <see langword="null"/> when none was available.</summary>
+	public GitPushResult? Result { get; }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPushRejectedException"/> class.</summary>
+	public GitPushRejectedException() { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPushRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	public GitPushRejectedException(string message) : base(message) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPushRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="innerException">The underlying failure.</param>
+	public GitPushRejectedException(string message, Exception innerException) : base(message, innerException) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPushRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	public GitPushRejectedException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)
+		: base(message, exitCode, arguments, standardError) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPushRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	/// <param name="result">The parsed account of what happened to each reference.</param>
+	public GitPushRejectedException(
+		string message,
+		int exitCode,
+		IReadOnlyList<string> arguments,
+		string standardError,
+		GitPushResult result)
+		: base(message, exitCode, arguments, standardError) => Result = result;
+}
+
+/// <summary>
+/// A pull merged cleanly enough to start but left conflicts in the working tree.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The repository is now mid-merge, which no other verb in this library produces. Resolving it is
+/// a non-goal of this design, but the state is inspectable: <c>status</c> reports each conflicted
+/// path as an unmerged entry, so a caller can find out exactly what needs attention through
+/// <c>GitRepository.Status()</c>.
+/// </para>
+/// <para>
+/// Given its own type because git reports the conflict on standard <em>output</em> while exiting
+/// 128, so without a dedicated classification it would be indistinguishable from any other pull
+/// failure.
+/// </para>
+/// </remarks>
+public sealed class GitPullConflictException : GitCommandException
+{
+	/// <summary>Initializes a new instance of the <see cref="GitPullConflictException"/> class.</summary>
+	public GitPullConflictException() { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPullConflictException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	public GitPullConflictException(string message) : base(message) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPullConflictException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="innerException">The underlying failure.</param>
+	public GitPullConflictException(string message, Exception innerException) : base(message, innerException) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPullConflictException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	public GitPullConflictException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)
+		: base(message, exitCode, arguments, standardError) { }
+}
+
+/// <summary>
 /// Git ran successfully but produced output this library could not interpret.
 /// </summary>
 /// <remarks>
