@@ -114,6 +114,98 @@ public class GitRepository
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitRemoteListBuilder Remotes() => new GitRemoteListBuilder(RequireRunner(), LocalPath);
 
+	/// <summary>Stages changes for the next commit.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitAddBuilder Add() => new GitAddBuilder(RequireRunner(), LocalPath);
+
+	/// <summary>Records the staged changes as a new commit.</summary>
+	/// <param name="message">The commit subject.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="message"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitCommitBuilder Commit(GitCommitMessage message)
+	{
+		// Argument validation precedes the state check so a null argument is reported as such,
+		// rather than as a missing runner.
+		Ensure.NotNull(message);
+		return new GitCommitBuilder(RequireRunner(), LocalPath, message);
+	}
+
+	/// <summary>Creates a branch.</summary>
+	/// <param name="name">The branch to create.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitBranchCreateBuilder CreateBranch(GitBranchName name)
+	{
+		Ensure.NotNull(name);
+		return new GitBranchCreateBuilder(RequireRunner(), LocalPath, name);
+	}
+
+	/// <summary>Deletes a branch.</summary>
+	/// <param name="name">The branch to delete.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitBranchDeleteBuilder DeleteBranch(GitBranchName name)
+	{
+		Ensure.NotNull(name);
+		return new GitBranchDeleteBuilder(RequireRunner(), LocalPath, name);
+	}
+
+	/// <summary>Switches the working tree to a different branch, tag, or commit.</summary>
+	/// <param name="target">The branch, tag, or commit to switch to.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="target"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitCheckoutBuilder Checkout(GitRefName target)
+	{
+		Ensure.NotNull(target);
+		return new GitCheckoutBuilder(RequireRunner(), LocalPath, target);
+	}
+
+	/// <summary>Adds a remote.</summary>
+	/// <param name="name">The remote to add.</param>
+	/// <param name="url">The URL the remote points at.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="name"/> or <paramref name="url"/> is <see langword="null"/>.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRemoteAddBuilder AddRemote(GitRemoteName name, GitRepositoryRemotePath url)
+	{
+		Ensure.NotNull(name);
+		Ensure.NotNull(url);
+		return new GitRemoteAddBuilder(RequireRunner(), LocalPath, name, url);
+	}
+
+	/// <summary>Removes a remote and every remote-tracking branch belonging to it.</summary>
+	/// <param name="name">The remote to remove.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRemoteRemoveBuilder RemoveRemote(GitRemoteName name)
+	{
+		Ensure.NotNull(name);
+		return new GitRemoteRemoveBuilder(RequireRunner(), LocalPath, name);
+	}
+
+	/// <summary>Changes the URL a remote points at.</summary>
+	/// <param name="name">The remote to change.</param>
+	/// <param name="url">The URL to set.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="name"/> or <paramref name="url"/> is <see langword="null"/>.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRemoteSetUrlBuilder SetRemoteUrl(GitRemoteName name, GitRepositoryRemotePath url)
+	{
+		Ensure.NotNull(name);
+		Ensure.NotNull(url);
+		return new GitRemoteSetUrlBuilder(RequireRunner(), LocalPath, name, url);
+	}
+
 	private IGitProcessRunner RequireRunner() =>
 		ProcessRunner ?? throw new InvalidOperationException(
 			"This GitRepository carries hosting metadata only and has no process runner. Obtain one " +

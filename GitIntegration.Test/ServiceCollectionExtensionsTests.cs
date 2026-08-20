@@ -2,7 +2,11 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
+
 using ktsu.Essentials;
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -120,5 +124,23 @@ public class ServiceCollectionExtensionsTests
 
 		Assert.AreEqual("/usr/local/bin/git", provider.GetRequiredService<GitOptions>().ExecutablePath);
 		Assert.IsNotNull(provider.GetRequiredService<IGitClient>());
+	}
+
+	[TestMethod]
+	public void TheRegisteredClientCanBuildACloneBuilder()
+	{
+		// Clone needs an IFileSystemProvider, which AddGitIntegration has registered since Phase 2
+		// but nothing consumed until now. This proves the two-argument constructor resolves.
+		ServiceCollection services = new();
+		_ = services.AddGitIntegration();
+
+		using ServiceProvider provider = services.BuildServiceProvider();
+		IGitClient client = provider.GetRequiredService<IGitClient>();
+
+		string destination = OperatingSystem.IsWindows() ? @"C:\dev\clone" : "/dev/clone";
+
+		Assert.IsNotNull(client.Clone(
+			"https://example.com/repo.git".As<GitRepositoryRemotePath>(),
+			destination.As<AbsoluteDirectoryPath>()));
 	}
 }
