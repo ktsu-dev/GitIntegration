@@ -22,6 +22,6 @@
          .Interface. GitCloneBuilder's destination pre-check calls members declared on that base
          interface (Directory.Exists, Directory.GetFileSystemEntries), which the KTSU0006 analyzer
          treats as direct use of a transitively-referenced package requiring its own reference. -->
-    <PackageReference Include="Testably.Abstractions.FileSystem.Interface" />
+    <PackageReference Include="Testably.Abstractions.FileSystem.Interface" PrivateAssets="all" />
   </ItemGroup>
 </Project>
