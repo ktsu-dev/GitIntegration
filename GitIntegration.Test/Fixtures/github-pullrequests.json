@@ -89,8 +89,8 @@
       {
         "id": 90040001,
         "node_id": "LA_kwDOEXAMPLE0AAAAB",
-        "url": "https://api.github.com/repos/contoso/example-repo/labels/area-NativeAOT-coreclr",
-        "name": "area-NativeAOT-coreclr",
+        "url": "https://api.github.com/repos/contoso/example-repo/labels/area-example-1",
+        "name": "area-example-1",
         "color": "d4c5f9",
         "default": false,
         "description": ""
@@ -156,7 +156,7 @@
           "site_admin": false
         },
         "html_url": "https://github.com/example-user-1/example-repo",
-        "description": ".NET is a cross-platform runtime for cloud, IoT, and desktop apps.",
+        "description": "An example repository.",
         "fork": true,
         "url": "https://api.github.com/repos/example-user-1/example-repo",
         "forks_url": "https://api.github.com/repos/example-user-1/example-repo/forks",
@@ -291,7 +291,7 @@
           "site_admin": false
         },
         "html_url": "https://github.com/contoso/example-repo",
-        "description": ".NET is a cross-platform runtime for cloud, mobile, desktop, and IoT apps.",
+        "description": "An example repository.",
         "fork": false,
         "url": "https://api.github.com/repos/contoso/example-repo",
         "forks_url": "https://api.github.com/repos/contoso/example-repo/forks",
@@ -517,8 +517,8 @@
       {
         "id": 90040001,
         "node_id": "LA_kwDOEXAMPLE0AAAAB",
-        "url": "https://api.github.com/repos/contoso/example-repo/labels/area-NativeAOT-coreclr",
-        "name": "area-NativeAOT-coreclr",
+        "url": "https://api.github.com/repos/contoso/example-repo/labels/area-example-1",
+        "name": "area-example-1",
         "color": "d4c5f9",
         "default": false,
         "description": ""
@@ -584,7 +584,7 @@
           "site_admin": false
         },
         "html_url": "https://github.com/contoso/example-repo",
-        "description": ".NET is a cross-platform runtime for cloud, mobile, desktop, and IoT apps.",
+        "description": "An example repository.",
         "fork": false,
         "url": "https://api.github.com/repos/contoso/example-repo",
         "forks_url": "https://api.github.com/repos/contoso/example-repo/forks",
@@ -723,7 +723,7 @@
           "site_admin": false
         },
         "html_url": "https://github.com/contoso/example-repo",
-        "description": ".NET is a cross-platform runtime for cloud, mobile, desktop, and IoT apps.",
+        "description": "An example repository.",
         "fork": false,
         "url": "https://api.github.com/repos/contoso/example-repo",
         "forks_url": "https://api.github.com/repos/contoso/example-repo/forks",
@@ -886,8 +886,8 @@
       {
         "id": 90040000,
         "node_id": "MDU6TGFiZWw5MDA0MDAwMA==",
-        "url": "https://api.github.com/repos/contoso/example-repo/labels/area-Infrastructure-libraries",
-        "name": "area-Infrastructure-libraries",
+        "url": "https://api.github.com/repos/contoso/example-repo/labels/area-example-2",
+        "name": "area-example-2",
         "color": "d4c5f9",
         "default": false,
         "description": ""
@@ -953,7 +953,7 @@
           "site_admin": true
         },
         "html_url": "https://github.com/example-user-3/example-repo",
-        "description": ".NET is a cross-platform runtime and libraries, for cloud, IoT and desktop apps. It includes a garbage collector, JIT compiler, primitive data types and class libraries.",
+        "description": "An example repository.",
         "fork": true,
         "url": "https://api.github.com/repos/example-user-3/example-repo",
         "forks_url": "https://api.github.com/repos/example-user-3/example-repo/forks",
@@ -1032,7 +1032,7 @@
         "forks": 0,
         "open_issues": 2,
         "watchers": 0,
-        "default_branch": "bazel"
+        "default_branch": "example-branch-4"
       }
     },
     "base": {
@@ -1088,7 +1088,7 @@
           "site_admin": false
         },
         "html_url": "https://github.com/contoso/example-repo",
-        "description": ".NET is a cross-platform runtime for cloud, mobile, desktop, and IoT apps.",
+        "description": "An example repository.",
         "fork": false,
         "url": "https://api.github.com/repos/contoso/example-repo",
         "forks_url": "https://api.github.com/repos/contoso/example-repo/forks",

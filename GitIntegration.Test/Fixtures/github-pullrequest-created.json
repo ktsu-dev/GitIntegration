@@ -41,8 +41,8 @@
     {
       "id": 90040001,
       "node_id": "LA_kwDOEXAMPLE0AAAAB",
-      "url": "https://api.github.com/repos/contoso/example-repo/labels/area-NativeAOT-coreclr",
-      "name": "area-NativeAOT-coreclr",
+      "url": "https://api.github.com/repos/contoso/example-repo/labels/area-example-1",
+      "name": "area-example-1",
       "description": "",
       "color": "d4c5f9",
       "default": false
@@ -156,7 +156,7 @@
       "fork": true,
       "archived": false,
       "disabled": false,
-      "description": ".NET is a cross-platform runtime for cloud, IoT, and desktop apps.",
+      "description": "An example repository.",
       "homepage": "https://docs.microsoft.com/contoso/core/",
       "language": "C#",
       "visibility": "public",
@@ -291,7 +291,7 @@
       "fork": false,
       "archived": false,
       "disabled": false,
-      "description": ".NET is a cross-platform runtime for cloud, mobile, desktop, and IoT apps.",
+      "description": "An example repository.",
       "homepage": "https://docs.microsoft.com/contoso/core/",
       "language": "C#",
       "visibility": "public",
