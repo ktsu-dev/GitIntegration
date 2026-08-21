@@ -12,6 +12,17 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 /// <summary>
 /// Dependency injection registration for git integration.
 /// </summary>
+/// <remarks>
+/// Registers only the local layer. The hosting layer (<see cref="GitHubProvider"/>,
+/// <see cref="AzureDevOpsProvider"/>) is deliberately unregistered: neither type has a constructor
+/// dependency this container could supply — <see cref="GitProvider.Owner"/> is a caller-supplied
+/// value with no sensible container-wide default, credential resolution goes through the
+/// process-wide <c>CredentialCache.Instance</c> singleton rather than an injected service, and
+/// <see cref="GitProvider.CreateHttpClient"/> constructs its own transport rather than resolving one.
+/// A registered factory delegate here (e.g. <c>Func&lt;GitProviderOwner, GitHubProvider&gt;</c>)
+/// would do nothing a caller cannot already do by writing <c>new GitHubProvider { Owner = owner }</c>
+/// — it would wire nothing, so it was not added. Construct a provider directly instead.
+/// </remarks>
 public static class ServiceCollectionExtensions
 {
 	/// <summary>

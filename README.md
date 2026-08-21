@@ -18,16 +18,19 @@ run both read-only commands (`status`, `log`, `diff`, `branches`, `remotes`, `re
 mutating commands (`init`, `clone`, `add`, `commit`, branch creation and deletion, `checkout`,
 remote management, and remote sync via `fetch`, `pull`, and `push`) without shelling out or
 hand-parsing porcelain output yourself. The **hosting layer** — the original half of this library —
-unifies access to hosted Git providers behind a `GitProvider` abstraction, with a `GitHubProvider`
-implementation built on Octokit.
+unifies access to hosted Git providers behind a `GitProvider` abstraction: `GitHubProvider`, built on
+Octokit, and `AzureDevOpsProvider`, built on a raw `HttpClient` against Azure DevOps's REST API.
+Both enumerate repositories and list and create pull requests through the same
+`IGitHostingProvider` contract.
 
 Every value that would otherwise be a bare `string` — a branch name, a commit SHA, a remote name, an
 author email — is instead a validated semantic type built on `ktsu.Semantics`, so a `GitBranchName`
 can no longer be accidentally passed where a `GitCommitSha` is expected.
 
-Azure DevOps hosting support is planned but not yet implemented. The two Azure DevOps client
-packages were deliberately left out of this release because they pull in `System.Data.SqlClient`,
-which carries a known high-severity advisory, as a direct dependency of the published package.
+Azure DevOps hosting deliberately does not use `Microsoft.TeamFoundationServer.Client` or the other
+official TFS/Azure DevOps client package — both pull in `System.Data.SqlClient`, which carries a
+known high-severity advisory, as a direct dependency of the published package. `AzureDevOpsProvider`
+builds and parses its requests by hand instead.
 
 ## Features
 
@@ -56,13 +59,16 @@ which carries a known high-severity advisory, as a direct dependency of the publ
   prompts) and `LC_ALL=C` (English, machine-stable output), which is what makes the output parsers
   safe to write against fixed English text.
 - **Dependency Injection**: `AddGitIntegration()` registers the client, process runner, and options
-  as singletons in one call.
-- **Hosting Provider Abstraction**: `GitProvider` defines a common contract for enumerating and
-  refreshing remote repositories; `GitHubProvider` implements it on top of Octokit.
+  as singletons in one call. The hosting layer is constructed directly instead — see
+  [Working with a Hosting Provider](#working-with-a-hosting-provider).
+- **Hosting Provider Abstraction**: `IGitHostingProvider` defines a common contract for enumerating
+  repositories, listing open pull requests, and creating a pull request —
+  `GitHubProvider` implements it on top of Octokit, `AzureDevOpsProvider` on a raw `HttpClient`
+  against Azure DevOps's REST API.
 - **Credential Resolution**: hosting providers integrate with `ktsu.CredentialCache`, so credentials
   come from the host's native keyring rather than configuration files.
-- **Semantic Git Types**: 13 validated wrapper types for every identifier Git tooling passes around,
-  so mismatched arguments fail at compile time rather than at runtime.
+- **Semantic Git Types**: validated wrapper types for every identifier Git tooling passes around, so
+  mismatched arguments fail at compile time rather than at runtime.
 
 ## Installation
 
@@ -416,17 +422,96 @@ catch (GitCommandException ex)
 
 ### Working with a Hosting Provider
 
+Providers are constructed directly rather than resolved from DI: `GitHubProvider` and
+`AzureDevOpsProvider` need only a caller-supplied `Owner` (and, for Azure DevOps, an optional
+`Project`), so there is nothing a container would meaningfully wire up.
+
 ```csharp
 using ktsu.GitIntegration;
 using ktsu.Semantics.Strings;
 
-GitProvider provider = new GitHubProvider
+IGitHostingProvider github = new GitHubProvider
 {
     Owner = "ktsu-dev".As<GitProviderOwner>(),
 };
 
-// Pulls credentials from the credential cache, then authenticates the client.
-provider.RefreshRemoteRepositories();
+// Credentials come from ktsu.CredentialCache, keyed by PersonaGUID — nothing to configure here
+// unless a specific persona is needed.
+IReadOnlyList<GitRepository> repositories = await github.GetRepositoriesAsync();
+```
+
+`GitHubProvider.GetRepositoriesAsync` returns only `Owner`'s **public** repositories — GitHub's
+`GET /users/{login}/repos` does not honour authentication to reveal private ones. Azure DevOps has
+no equivalent restriction: it returns everything the resolved credential can see.
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+IGitHostingProvider azure = new AzureDevOpsProvider
+{
+    Owner = "my-org".As<GitProviderOwner>(),
+    Project = "my-project".As<AzureDevOpsProjectName>(),
+};
+
+IReadOnlyList<GitRepository> repositories = await azure.GetRepositoriesAsync();
+```
+
+`Project` is only required for pull request operations — Azure DevOps has no project-less pull
+request endpoint, and calling `GetPullRequestsAsync` or `CreatePullRequest` without it throws
+`InvalidOperationException` immediately. `GetPullRequestsAsync` returns **open** pull requests
+only, on both hosts:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+GitRepositoryName repositoryName = "GitIntegration".As<GitRepositoryName>();
+IReadOnlyList<GitPullRequest> openPullRequests = await azure.GetPullRequestsAsync(repositoryName);
+
+foreach (GitPullRequest pullRequest in openPullRequests)
+{
+    Console.WriteLine($"#{pullRequest.Number.WeakString} {pullRequest.Title.WeakString} ({pullRequest.State})");
+}
+```
+
+Creating a pull request goes through a builder, the same idiom as the local layer's mutating verbs:
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+GitPullRequest created = await azure.CreatePullRequest(repositoryName)
+    .From("feature/new-thing".As<GitBranchName>())
+    .Into("main".As<GitBranchName>())
+    .Titled("Add feature X".As<GitPullRequestTitle>())
+    .Describing("Longer explanation of the change.")
+    .ExecuteAsync();
+
+Console.WriteLine(created.WebURI?.WeakString);
+```
+
+A hosting failure — authentication, not found, rate limiting, or anything else the host reports —
+surfaces as a `GitHostingException` subtype carrying the provider name, HTTP status, and response
+body, mirroring how `GitCommandException` carries the argument vector for the local layer:
+
+```csharp
+try
+{
+    await azure.CreatePullRequest(repositoryName)
+        .From("feature/new-thing".As<GitBranchName>())
+        .Into("main".As<GitBranchName>())
+        .Titled("Add feature X".As<GitPullRequestTitle>())
+        .ExecuteAsync();
+}
+catch (GitHostingAuthenticationException ex)
+{
+    Console.WriteLine($"{ex.ProviderName} rejected the request: {ex.StatusCode}");
+}
+catch (GitHostingRateLimitException ex)
+{
+    Console.WriteLine($"Rate limited until {ex.ResetsAt}.");
+}
 ```
 
 ### Working with Semantic Types
@@ -583,6 +668,11 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitNothingToCommitException` | A `GitCommandException` specialization: `git commit` was run with nothing staged. The one `commit` failure that is an ordinary program state rather than a fault. |
 | `GitPushRejectedException` | A `GitCommandException` specialization: git refused at least one reference during `push`. Carries the parsed `Result` (`GitPushResult`) so the rejection detail is not lost. |
 | `GitPullConflictException` | A `GitCommandException` specialization: `pull` left conflicts in the working tree. Use `Status()` to see which paths are unmerged. |
+| `GitHostingException` | Base type for every hosting-layer failure. Does **not** derive from `GitException` — it carries HTTP concepts, not process ones. Carries `ProviderName`, `StatusCode`, `ResponseBody`. |
+| `GitHostingAuthenticationException` | A `GitHostingException` specialization: the host rejected the request as unauthenticated, or the credential no longer grants access. |
+| `GitHostingNotFoundException` | A `GitHostingException` specialization: the requested resource does not exist, or is not visible to the caller's credentials. |
+| `GitHostingRateLimitException` | A `GitHostingException` specialization: the caller has exhausted its request quota. Carries `ResetsAt`, when the host reported one. |
+| `GitHostingRequestException` | A `GitHostingException` specialization for any other non-success response — a malformed request, a validation failure, or a server-side error. |
 
 ### Result Models
 
@@ -605,10 +695,13 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitPushResult` | `Updates`, `HasRejections` — the outcome of `Push()`. |
 | `GitRefUpdate` | `Kind`, `Reference`, `Source`, `OldSha`, `NewSha`, `Summary`, `IsRejected` — one reference changed by a fetch or a push. |
 | `GitRefUpdateKind` | Enum: `FastForward`, `Forced`, `Removed`, `Created`, `Rejected`, `UpToDate`, `TagUpdate`, `Unknown`. |
+| `GitPullRequest` | `Number`, `Title`, `Description`, `SourceBranch`, `TargetBranch`, `Author`, `State`, `IsDraft`, `WebURI`, `CreatedAt` — one pull request, as reported by a hosting provider. A `null` optional field means the host did not report that value. |
+| `GitPullRequestState` | Enum: `Open`, `Merged`, `Closed`. |
 
-### `GitProvider`
+### `IGitHostingProvider`
 
-Abstract base class describing a hosted Git provider.
+The contract every hosting provider implements: repository enumeration, pull request listing, and
+pull request creation, over whichever transport and authentication scheme the host requires.
 
 #### Properties
 
@@ -618,19 +711,57 @@ Abstract base class describing a hosted Git provider.
 | `Owner` | `GitProviderOwner` | The owner of the repositories in this provider. |
 | `PersonaGUID` | `PersonaGUID` | The persona GUID used for authentication with the provider (from `ktsu.CredentialCache`). |
 | `IsAuthenticated` | `bool` | Whether a credential is currently resolvable for this provider. |
-| `Repositories` | `ConcurrentBag<GitRepository>` | The repositories known from the provider. |
 
 #### Methods
 
 | Name | Return Type | Description |
 |------|-------------|-------------|
-| `RefreshRemoteRepositories()` | `void` | Refreshes the provider's view of the remote repositories, authenticating first if a credential is available. |
+| `GetRepositoriesAsync(CancellationToken)` | `Task<IReadOnlyList<GitRepository>>` | Retrieves the repositories `Owner` has, from the host. Coverage differs by host — see `GitHubProvider` and `AzureDevOpsProvider` below. |
+| `GetPullRequestsAsync(GitRepositoryName, CancellationToken)` | `Task<IReadOnlyList<GitPullRequest>>` | Retrieves a repository's **open** pull requests. The filter is requested explicitly of the host, not left to its default. |
+| `CreatePullRequest(GitRepositoryName)` | `IGitPullRequestCreateBuilder` | Starts building a pull request for a repository. |
 | `TryGetCredential(out Credential?)` | `bool` | Attempts to resolve a credential for this provider from the credential cache. |
+
+### `GitProvider`
+
+The abstract base both hosting providers derive from. Implements `IGitHostingProvider`; resolves
+credentials via `TryGetCredential`/`ResolveCredential`, and issues every request through an
+`HttpClient` it constructs itself.
 
 ### `GitHubProvider`
 
-`GitProvider` implementation backed by Octokit. Authenticates the underlying `GitHubClient` from a
-`CredentialWithUsernamePassword` resolved via `TryGetCredential`.
+`GitProvider` implementation backed by Octokit. `GetRepositoriesAsync` returns only `Owner`'s
+**public** repositories — GitHub's `GET /users/{login}/repos` does not honour authentication to
+reveal private ones, and supplying a token does not widen this.
+
+### `AzureDevOpsProvider`
+
+`GitProvider` implementation built on a raw `HttpClient` against Azure DevOps's REST API
+(`api-version=7.1`) — no Azure DevOps client library is referenced (see the Introduction).
+
+#### Additional Properties
+
+| Name | Type | Description |
+|------|------|-------------|
+| `Project` | `AzureDevOpsProjectName?` | Scopes repository enumeration to a project, or `null` to enumerate the whole organisation. **Required** for `GetPullRequestsAsync` and `CreatePullRequest` — Azure DevOps has no project-less pull request endpoint, and calling either without it throws `InvalidOperationException`. |
+
+`GetRepositoriesAsync` returns everything the resolved credential can see — unlike
+`GitHubProvider`, there is no public-only restriction.
+
+### `IGitPullRequestCreateBuilder`
+
+Collects a pull request's details before submitting it. `From`, `Into`, and `Titled` are required;
+`Describing` and `AsDraft` are optional. A missing required value throws `InvalidOperationException`
+from `ExecuteAsync`, not from the setter that left it unset, since parts may be supplied in any
+order.
+
+| Name | Return Type | Description |
+|------|-------------|-------------|
+| `From(GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the source branch. |
+| `Into(GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the target branch. |
+| `Titled(GitPullRequestTitle)` | `IGitPullRequestCreateBuilder` | Sets the title. |
+| `Describing(string)` | `IGitPullRequestCreateBuilder` | Sets the description. |
+| `AsDraft()` | `IGitPullRequestCreateBuilder` | Marks the pull request as a draft. |
+| `ExecuteAsync(CancellationToken)` | `Task<GitPullRequest>` | Submits the pull request to the host. |
 
 ### `ServiceCollectionExtensions`
 
@@ -638,6 +769,10 @@ Abstract base class describing a hosted Git provider.
 |------|-------------|-------------|
 | `AddGitIntegration(IServiceCollection)` | `IServiceCollection` | Registers git integration with default options, invoking the `git` found on `PATH`. |
 | `AddGitIntegration(IServiceCollection, Action<GitOptions>)` | `IServiceCollection` | Registers git integration with configured options. Idempotent per service. |
+
+Registers only the local layer. Hosting providers are constructed directly — see
+[Working with a Hosting Provider](#working-with-a-hosting-provider) — since neither `GitHubProvider`
+nor `AzureDevOpsProvider` has a constructor dependency a container could supply.
 
 ### Semantic Types
 
@@ -655,7 +790,11 @@ Abstract base class describing a hosted Git provider.
 | `GitRepositoryName` | Repository name |
 | `GitRepositoryRemotePath` | Clone path or URL |
 | `GitRepositoryWebURI` | Repository web address |
-| `AzureDevOpsProjectName` | Azure DevOps project name (reserved for planned Azure DevOps support) |
+| `AzureDevOpsProjectName` | Azure DevOps project name — scopes `AzureDevOpsProvider` repository enumeration, and required for its pull request operations |
+| `GitPullRequestNumber` | Pull request's host-assigned number |
+| `GitPullRequestTitle` | Pull request title |
+| `GitPullRequestAuthor` | Host's identifier for the account that opened a pull request (a GitHub login, or an Azure DevOps unique name) |
+| `GitPullRequestWebURI` | Pull request web address |
 
 ## Contributing
 
