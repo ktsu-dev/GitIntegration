@@ -15,15 +15,22 @@ using ktsu.Semantics.Strings;
 public sealed class GitProviderTests
 {
 	// CredentialCache.Instance is a process-wide singleton whose default store is the platform's
-	// native secret manager. Every test resets it onto a fresh InMemoryCredentialStore first, so
-	// tests never touch real Windows Credential Manager / Keychain / libsecret state, and each
-	// test's persona is unique, so tests sharing the process-wide singleton cannot see each other's
-	// seeded credentials.
-	private static PersonaGUID SeedCredential(Credential credential)
+	// native secret manager. It is switched onto a fresh InMemoryCredentialStore exactly once, in
+	// this static constructor, rather than per test: the CLR guarantees a type initializer runs at
+	// most once even under concurrent first access, which a per-test
+	// ResetSingletonForTesting()+ConfigureStore() pair does not — Microsoft Testing Platform runs
+	// this class's test methods in parallel, and two tests each resetting the singleton around a
+	// third test's AddOrReplace can wipe its seeded credential before ResolveCredential reads it.
+	// Each test still gets its own PersonaGUID, which is all the isolation a shared, thread-safe
+	// cache needs between tests that touch different keys.
+	static GitProviderTests()
 	{
 		CredentialCache.ResetSingletonForTesting();
 		CredentialCache.ConfigureStore(new InMemoryCredentialStore());
+	}
 
+	private static PersonaGUID SeedCredential(Credential credential)
+	{
 		PersonaGUID persona = CredentialCache.CreatePersonaGUID();
 		CredentialCache.Instance.AddOrReplace(persona, credential);
 		return persona;
@@ -64,8 +71,8 @@ public sealed class GitProviderTests
 	[TestMethod]
 	public void ProceedsUnauthenticatedWhenNoCredentialIsResolved()
 	{
-		CredentialCache.ResetSingletonForTesting();
-		CredentialCache.ConfigureStore(new InMemoryCredentialStore());
+		// A fresh persona that nothing ever seeded: TryGet reports false, and ResolveCredential
+		// must treat that exactly like a resolved CredentialWithNothing.
 		PersonaGUID persona = CredentialCache.CreatePersonaGUID();
 		TestProvider provider = CreateProvider(persona);
 
