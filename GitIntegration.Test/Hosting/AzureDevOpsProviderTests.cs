@@ -197,6 +197,7 @@ public sealed class AzureDevOpsProviderTests
 			.ConfigureAwait(false);
 
 		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "Request was blocked due to exceeding usage");
 		Assert.AreEqual(resetsAt, exception.ResetsAt);
 	}
 

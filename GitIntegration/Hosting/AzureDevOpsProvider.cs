@@ -122,9 +122,15 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <c>searchCriteria.status=active</c> sent explicitly (findings section 3: the endpoint's
 	/// documented default is already <c>active</c>, but <see cref="IGitHostingProvider.GetPullRequestsAsync"/>'s
 	/// contract is defined by this library, not by restating whatever a host happens to default to
-	/// today). <c>{repositoryId}</c> is filled with <paramref name="repositoryName"/> — the only
-	/// repository identifier this method receives — the same substitution
-	/// <see cref="GitHubProvider.GetPullRequestsAsync"/> makes for GitHub's equivalent path segment.
+	/// today). <c>{repositoryId}</c> is filled with <paramref name="repositoryName"/>, which is
+	/// unconfirmed against the documented schema, not sanctioned by it: Microsoft's reference types
+	/// that parameter as a repository <b>id</b> (<c>GitRepository.id</c> is a <c>string (uuid)</c>),
+	/// and draws an explicit id-or-name distinction for the sibling <c>project</c> parameter without
+	/// drawing one here — a distinction Microsoft states where it applies reads as deliberate where it
+	/// is withheld. This library passes the name anyway because <see cref="IGitHostingProvider"/>
+	/// exposes no repository id for a caller to supply. It very likely works today; that is a
+	/// different property from being specified, and only the specified kind survives a vendor's next
+	/// change unannounced.
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
 	public override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default)
