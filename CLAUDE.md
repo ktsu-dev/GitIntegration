@@ -233,8 +233,9 @@ Two non-obvious, load-bearing design points:
 Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
 library uses (see the dependency note below). Both go through the same shape: `IsAuthenticated` and
 every request-issuing method resolve a credential via `TryGetCredential`/`ResolveCredential`, which
-reads a `Credential` from `ktsu.CredentialCache` keyed by `PersonaGUID`, and every request is issued
-through `GitProvider.CreateHttpClient()`.
+reads a `Credential` from `ktsu.CredentialCache` keyed by `PersonaGUID`, and every request goes
+through the provider's own `HttpClient`-based transport — the two providers differ in how they build
+it, which the next point covers.
 
 **One transport seam fakes both providers.** `GitProvider`'s `internal HttpMessageHandler? Handler`
 init property is the only test seam this layer has. `AzureDevOpsProvider` uses it directly, building

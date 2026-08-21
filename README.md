@@ -723,9 +723,10 @@ pull request creation, over whichever transport and authentication scheme the ho
 
 ### `GitProvider`
 
-The abstract base both hosting providers derive from. Implements `IGitHostingProvider`; resolves
-credentials via `TryGetCredential`/`ResolveCredential`, and issues every request through an
-`HttpClient` it constructs itself.
+The abstract base both hosting providers derive from. Implements `IGitHostingProvider` and resolves
+credentials via `TryGetCredential`/`ResolveCredential`; each concrete provider builds its own
+`HttpClient`-based transport around that credential — see `GitHubProvider` and `AzureDevOpsProvider`
+below for how the two differ.
 
 ### `GitHubProvider`
 
