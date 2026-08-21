@@ -15,6 +15,17 @@ using ktsu.CredentialCache;
 /// the pull-request-creation entry point common to every host. Concrete providers (GitHub, Azure
 /// DevOps) supply the per-host implementations of repository and pull request retrieval.
 /// </summary>
+/// <remarks>
+/// Not an extension point for assemblies outside this library. <see cref="CreatePullRequestCoreAsync"/>
+/// is <see langword="internal"/> because its <see cref="GitPullRequestSpecification"/> parameter is
+/// itself <see langword="internal"/> — a member cannot be more accessible than a type in its own
+/// signature, and that parameter carries no reason to become public API purely to enable
+/// subclassing that nothing has asked for. A type outside this assembly can therefore declare a
+/// subclass, but never complete one: the abstract member it cannot see is also one it cannot
+/// override, so no externally-defined subclass of <see cref="GitProvider"/> can ever be
+/// instantiated. This library ships exactly two providers, GitHub and Azure DevOps, and both live
+/// here.
+/// </remarks>
 public abstract class GitProvider : IGitHostingProvider
 {
 	/// <inheritdoc/>
