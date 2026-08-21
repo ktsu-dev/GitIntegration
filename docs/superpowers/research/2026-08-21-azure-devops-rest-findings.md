@@ -12,24 +12,57 @@ Microsoft's published reference pages, then redacted.
 
 ## 1. `api-version` for Git endpoints
 
-**Value: `7.2-preview.2`.** Confirmed on all three Git endpoints this task covers, each stating
-"API Version: 7.2-preview.2" and requiring it as a query parameter (`api-version | query | True`).
+**Decided value: `7.1` (stable). `7.2-preview.2` was rejected as a preview pin — see below.**
 
-- Repositories - List: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/list?view=azure-devops-rest-7.2>
-- Pull Requests - Get Pull Requests: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests?view=azure-devops-rest-7.2>
-- Pull Requests - Create: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.2>
+The first pass through this task fetched only the `?view=azure-devops-rest-7.2` pages, which report
+`7.2-preview.2` on every endpoint. That is an artefact of which doc view was read, not evidence that no
+stable version documents these endpoints — the `-preview` suffix means the 7.2 surface can change or be
+withdrawn under a consumer who has already upgraded, which is a durable liability for a library shipped
+to nuget.org. Per review feedback, I re-fetched the same three endpoints at
+`?view=azure-devops-rest-7.1` to check whether the stable release covers everything this phase needs.
 
-`api-version` is marked `Required: True` in the URI parameter table on every one of these pages. It is
-not optional.
+**Result: 7.1 exists for all three endpoints, is stable (`API Version: 7.1`, no `-preview` suffix), and
+documents every field and query parameter this phase's spec needs.** Endpoint-by-endpoint:
 
-Note the version string carries a `-preview.2` suffix. That is the documented current value for REST
-API 7.2, not a placeholder — do not strip the suffix when building the query string.
+| Endpoint | 7.1 exists? | `api-version` value at 7.1 | Fields this phase needs, present at 7.1? |
+|---|---|---|---|
+| Repositories - List | yes | `7.1` | yes — `id`, `name`, `webUrl`, `remoteUrl`, `project` all present in the 7.1 `GitRepository` schema table. |
+| Pull Requests - Get Pull Requests | yes | `7.1` | yes — `pullRequestId`, `title`, `description`, `sourceRefName`, `targetRefName`, `createdBy`, `status`, `isDraft`, `creationDate`, `_links` all present in the 7.1 `GitPullRequest` schema table. `searchCriteria.status` (with the same "Defaults to Active if unset" wording) is present. |
+| Pull Requests - Create | yes | `7.1` | yes — request body accepts `sourceRefName`, `targetRefName`, `title`, `description`, `isDraft`; the worked example still returns `201` with a populated `_links` (same key set as 7.2 — see section 6). |
+
+Sources fetched for this comparison:
+- Repositories - List (7.1): <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/list?view=azure-devops-rest-7.1>
+- Pull Requests - Get Pull Requests (7.1): <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests?view=azure-devops-rest-7.1>
+- Pull Requests - Create (7.1): <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.1>
+
+**Differences found between the 7.1 and 7.2 schema tables, all irrelevant to this phase:**
+- `GitRepository`: 7.2 adds `creationDate`; 7.1 does not have it. Not one of the fields this phase reads.
+- `GitPullRequest`: 7.2 adds `ignoreTargetRefAndChooseDynamically`; 7.1 does not have it. Not a field this phase reads or writes.
+- `GET .../pullrequests` search criteria: 7.2 adds `searchCriteria.labels` and `searchCriteria.tagsFilterOperator` (label filtering); 7.1 lacks both. This phase doesn't filter by label.
+- `GitStatusState` enum: 7.2 adds a `partiallySucceeded` value; irrelevant (this phase doesn't consume `GitStatus`).
+- Response tables for repositories and pull-request-list both say `200 OK` at both versions — consistent, no discrepancy there. (Create's response table says `200` at both 7.1 and 7.2 while its own worked example says `201` at both — see section 4, unchanged finding, not version-dependent.)
+
+**Ruling: use `api-version=7.1` in the client, not `7.2-preview.2`.** 7.1 is stable, requires no
+`-preview` handling, and every field and query parameter this phase's spec needs is present at 7.1.
+Tasks 8/9 should build the Azure DevOps client against `7.1`.
+
+**No fixture needed a URL change.** None of the seven captured fixtures embed the `api-version` query
+string or a `-preview` marker inside the JSON response *body* — the version string only ever appeared
+in the request-line examples on the documentation pages (never copied into a fixture), and the 7.1 and
+7.2 sample response bodies for all three endpoints are byte-identical wherever both exist (same
+`fabrikam` org, same GUIDs, same field values). Confirmed by grepping every fixture in
+`GitIntegration.Test/Fixtures/*.json` for `api-version`, `7.2-preview`, and `preview.2` — zero matches
+in any fixture.
+
+`api-version` remains `Required: True` in the URI parameter table on every endpoint at both versions —
+it is never optional, regardless of which version string is used.
 
 ## 2. `GET .../_apis/git/repositories` — org-wide and project-scoped
 
 Source: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/list?view=azure-devops-rest-7.2>
+(also independently confirmed at 7.1: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/list?view=azure-devops-rest-7.1> — same endpoint, same URL shape, `api-version=7.1` instead of `7.2-preview.2`; see section 1 for the ruling to use 7.1)
 
-URL template as documented:
+URL template as documented (7.2 view shown; substitute `api-version=7.1` per section 1's ruling):
 `GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories?api-version=7.2-preview.2`
 
 `project` is a path parameter with `Required` left blank (not `True`) — it is optional. The
@@ -62,8 +95,10 @@ whether it differs from `remoteUrl` the way the pull-request `url`/`_links.web.h
 ## 3. `GET .../pullrequests` — listing, filter, and field names
 
 Source: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests?view=azure-devops-rest-7.2>
+(also independently confirmed at 7.1: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests?view=azure-devops-rest-7.1> — every field and query parameter below is present at 7.1 too; see section 1)
 
-URL template: `GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.2-preview.2`
+URL template (7.2 view shown; substitute `api-version=7.1` per section 1's ruling):
+`GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.2-preview.2`
 
 **Filter for active pull requests:** `searchCriteria.status`, type `PullRequestStatus`
 (`notSet` | `active` | `abandoned` | `completed` | `all`). Documented default: **"Defaults to Active if
@@ -103,8 +138,10 @@ any, turns on the top-level PR's own `_links`.
 ## 4. `POST .../pullrequests` — create
 
 Source: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.2>
+(also independently confirmed at 7.1: <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.1> — request body fields, the `201` worked example, and the `_links` key set below are all identical at 7.1; see section 1)
 
-URL template: `POST https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.2-preview.2`
+URL template (7.2 view shown; substitute `api-version=7.1` per section 1's ruling):
+`POST https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.2-preview.2`
 
 **Request body**, from the page's own sample request (verbatim field names):
 
@@ -238,22 +275,51 @@ into them.
 
 ## Contradictions and gaps against the spec — report these
 
-1. **`_links.web.href` is not confirmed to exist anywhere in the Azure DevOps Git pull request
-   payload.** The spec's "Two normalisations" section states "the web link is at `_links.web.href`."
-   The *only* example response across the three fetched pages that shows a populated `_links` at all
-   is the Create response, and its keys are `self`, `repository`, `workItems`, `sourceBranch`,
-   `targetBranch`, `sourceCommit`, `targetCommit`, `createdBy`, `iterations` — **no `web` key.** The
-   `GetPullRequest` (singular) reference page has no example response section at all, and the
-   `GetPullRequests` (list) page's three examples never populate `_links`. I could not find any
-   official Azure DevOps REST example, across any page fetched for this task, showing a `web` key
-   inside a pull request's `_links`. This does not prove the field never exists — `ReferenceLinks` is
-   documented only as a generic, unenumerated `{links: object}`, so its actual key set at runtime may
-   depend on server version, `includeLinks`, or other unstated conditions — but it means Task 9 cannot
-   build `WebURI` population against a confirmed example. **Recommendation for Task 9: treat
-   `_links.web.href` as "read defensively, populate `WebURI` only if present" (which is already the
-   spec's stated null-means-not-known discipline), and do not add a test asserting `WebURI` is
-   populated for a plain PR-list or PR-create response, since neither captured fixture demonstrates
-   the field.**
+1. **`_links.web.href` is settled as unconfirmed anywhere in official Microsoft sources — not merely
+   "not found in the first pass," but actively checked and absent everywhere it could plausibly appear.**
+   The spec's "Two normalisations" section states "the web link is at `_links.web.href`." Four separate
+   official sources were checked, at both REST 7.1 and 7.2 where applicable, and none of them show it:
+   - The *only* example response across every page fetched (7.1 and 7.2, both List and Create) that
+     shows a populated `_links` at all is the Create response, and its keys are `self`, `repository`,
+     `workItems`, `sourceBranch`, `targetBranch`, `sourceCommit`, `targetCommit`, `createdBy`,
+     `iterations` — **no `web` key**, at either version.
+   - `GetPullRequests` (list, plural) — three worked examples at 7.2, three at 7.1, all six never
+     populate `_links` at all.
+   - `GetPullRequest` (singular, get-by-id) — checked at **both** 7.1 and 7.2:
+     <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-request?view=azure-devops-rest-7.2>
+     and
+     <https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-request?view=azure-devops-rest-7.1>.
+     **Neither page has an Examples section at all** — the page goes straight from the Security section
+     to the Definitions table, with no sample request or response of any kind. This was the page most
+     likely to show a richer, more fully-populated example (per the coordinator's suggestion); it
+     doesn't exist.
+   - The `GitPullRequest`/`ReferenceLinks` **schema definitions** (not just examples) were checked for
+     an enumerated `web` key. On every REST reference page, `ReferenceLinks` is documented only as
+     `{ links: object }` — a generic, unenumerated map, never listing `web`, `self`, or any other
+     specific key. I then went outside the REST reference to Microsoft's own official Node.js SDK,
+     `microsoft/azure-devops-node-api`, and fetched
+     `api/interfaces/GitInterfaces.ts`
+     (<https://raw.githubusercontent.com/microsoft/azure-devops-node-api/master/api/interfaces/GitInterfaces.ts>)
+     directly: `GitPullRequest._links` is typed as bare `any`, and the file contains no
+     `ReferenceLinks` interface and no comment anywhere mentioning a `web` link key for pull requests.
+     This is Microsoft's own published client library, not a third party, and it does not encode a
+     `web` key either.
+   - A `WebSearch` for `_links.web.href` alongside "azure devops pull request json example" turned up
+     no page (official or community) showing a populated example of it.
+
+   **This is now a settled finding, not an open gap: no official Microsoft source — REST reference at
+   either 7.1 or 7.2, in any of List/Create/GetById, or the official Node SDK's type definitions —
+   documents or demonstrates a `web` key inside a pull request's `_links`.**
+
+   **Ruling, recorded here for Task 9 to inherit directly:** Azure DevOps `WebURI` is read from
+   `_links.web.href` when present, and left **null** otherwise. It is **never** composed from a
+   constructed URL such as `https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{id}`. An
+   organization on a custom or legacy `visualstudio.com` domain would receive a confidently wrong
+   public URL from a constructed link, and the spec's own discipline — null means "not known," which
+   is exactly what is true here — already covers this case correctly. Do not add a test asserting
+   `WebURI` is populated for a plain PR-list or PR-create response, since no captured fixture (nor any
+   official example found for this task) demonstrates the field populated; a test could only assert the
+   defensive-null path from the fixtures actually in hand.
 2. **Basic auth with empty username, PAT as password — no contradiction, confirmed.** The spec's
    Credentials table says Azure DevOps uses "Basic, empty username, token as password." The official
    getting-started page confirms this exact scheme:
