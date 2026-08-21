@@ -17,6 +17,15 @@
     <PackageReference Include="Octokit" />
     <PackageReference Include="Polyfill" PrivateAssets="all" />
 
+    <!-- System.Text.Json ships in-box with the net9.0/net10.0 shared framework, but AzureDevOpsProvider
+         and AzureDevOpsJson use its types directly (JsonSerializer, JsonSerializerContext), which the
+         KTSU0006 analyzer treats as direct use of a transitively-available package requiring its own
+         reference. PrivateAssets="all" because this reference exists only to satisfy the analyzer, not
+         as part of this library's public surface. Unlike Testably.Abstractions.FileSystem.Interface
+         below, no VersionOverride is needed: nothing else in this graph pins a different version of
+         System.Text.Json, so there is no lower version a consumer could resolve instead. -->
+    <PackageReference Include="System.Text.Json" PrivateAssets="all" />
+
     <!-- ktsu.Essentials's IFileSystemProvider is a marker interface with no members of its own; it
          inherits System.IO.Abstractions.IFileSystem straight from Testably.Abstractions.FileSystem
          .Interface. GitCloneBuilder's destination pre-check calls members declared on that base
