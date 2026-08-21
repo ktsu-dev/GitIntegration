@@ -16,8 +16,22 @@ public class GitPullRequestTests
 		Assert.IsTrue(GitPullRequestNumber.TryCreate("42", out _));
 
 	[TestMethod]
+	public void RejectsAnEmptyPullRequestNumber() =>
+		// RegexMatch alone would let this through: it short-circuits to success on an empty
+		// string, so HasNonWhitespaceContent is what actually catches an empty, required Number.
+		Assert.IsFalse(GitPullRequestNumber.TryCreate(string.Empty, out _));
+
+	[TestMethod]
 	public void RejectsAnEmptyTitle() =>
 		Assert.IsFalse(GitPullRequestTitle.TryCreate(string.Empty, out _));
+
+	[TestMethod]
+	public void RejectsAnEmptyAuthor() =>
+		Assert.IsFalse(GitPullRequestAuthor.TryCreate(string.Empty, out _));
+
+	[TestMethod]
+	public void RejectsAnEmptyWebURI() =>
+		Assert.IsFalse(GitPullRequestWebURI.TryCreate(string.Empty, out _));
 
 	[TestMethod]
 	public void CarriesEveryFieldItWasGiven()

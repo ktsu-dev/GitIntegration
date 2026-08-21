@@ -25,6 +25,13 @@ public sealed record GitProviderOwner : SemanticString<GitProviderOwner> { }
 public sealed record AzureDevOpsProjectName : SemanticString<AzureDevOpsProjectName> { }
 
 /// <summary>A pull request's host-assigned number.</summary>
+/// <remarks>
+/// <see cref="RegexMatchAttribute"/> alone would let an empty value through — it validates shape,
+/// not presence, so it short-circuits to success on an empty string. <c>Number</c> is
+/// <see langword="required"/> and so cannot express "not known" by being null; empty is its only
+/// failure mode, and <see cref="HasNonWhitespaceContentAttribute"/> is what catches it.
+/// </remarks>
+[HasNonWhitespaceContent]
 [RegexMatch(@"^[0-9]+$")]
 public sealed record GitPullRequestNumber : SemanticString<GitPullRequestNumber> { }
 
@@ -40,7 +47,14 @@ public sealed record GitPullRequestTitle : SemanticString<GitPullRequestTitle> {
 /// unique name that is usually an email address. This type carries whichever the host gave,
 /// unaltered, rather than normalising two different concepts into one that matches neither.
 /// </remarks>
+[HasNonWhitespaceContent]
 public sealed record GitPullRequestAuthor : SemanticString<GitPullRequestAuthor> { }
 
 /// <summary>The browser address of a pull request.</summary>
+/// <remarks>
+/// No URI-shape validation: GitHub and Azure DevOps web addresses differ enough that guessing a
+/// pattern would reject legitimate values from one host or the other. Non-empty is the only
+/// invariant worth enforcing here.
+/// </remarks>
+[HasNonWhitespaceContent]
 public sealed record GitPullRequestWebURI : SemanticString<GitPullRequestWebURI> { }
