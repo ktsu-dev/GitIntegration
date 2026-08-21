@@ -4,8 +4,10 @@ namespace ktsu.GitIntegration.Test;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -27,6 +29,33 @@ public sealed class AzureDevOpsProviderTests
 	/// <summary>Reads a captured fixture's raw JSON text from the test output's Fixtures directory.</summary>
 	private static string Fixture(string name) =>
 		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+
+	/// <summary>
+	/// Wraps the single captured create-response fixture in the pull-request-list envelope
+	/// (<c>{ "value": [...], "count": 1 }</c>, confirmed by findings section 3), varying only
+	/// <c>status</c> — the payload's shape is otherwise untouched.
+	/// </summary>
+	/// <param name="status">The <c>status</c> value to substitute.</param>
+	private static string SinglePullRequestListResponse(string status)
+	{
+		string json = Fixture("azure-devops-pullrequest-created.json")
+			.Replace("\"status\": \"active\"", $"\"status\": \"{status}\"", StringComparison.Ordinal);
+		return $"{{\"value\":[{json}],\"count\":1}}";
+	}
+
+	/// <summary>
+	/// Adds a <c>web</c> entry to the captured create-response fixture's <c>_links</c> object.
+	/// </summary>
+	/// <remarks>
+	/// Findings section "Contradictions and gaps" entry 1 confirms no published Azure DevOps example
+	/// populates a <c>web</c> key inside a pull request's <c>_links</c> — this is the one place this
+	/// test suite adds a key a captured fixture never carries, done deliberately and only here, to
+	/// prove <see cref="AzureDevOpsProvider"/> reads <see cref="GitPullRequest.WebURI"/> from it when
+	/// it is present. Every other key in <c>_links</c>, and the rest of the payload, stays exactly as
+	/// captured.
+	/// </remarks>
+	private static string WithWebLink(string json, string href) =>
+		json.Replace("\"_links\": {", $"\"_links\": {{\n    \"web\": {{ \"href\": \"{href}\" }},", StringComparison.Ordinal);
 
 	[TestMethod]
 	public async Task RequestsTheOrganizationWideRepositoryEndpointWhenNoProjectIsSetAsync()
@@ -199,6 +228,296 @@ public sealed class AzureDevOpsProviderTests
 
 		Assert.AreEqual(HttpStatusCode.InternalServerError, exception.StatusCode);
 		StringAssert.Contains(exception.ResponseBody, "Something went wrong");
+	}
+
+	[TestMethod]
+	public async Task TranslatesAForbiddenResponseWithoutRateLimitHeadersToAnAuthenticationFailureAsync()
+	{
+		// The companion to TranslatesAForbiddenRateLimitResponseToGitHostingRateLimitExceptionAsync:
+		// a single 403 test would pin only one branch of Translate's 403 routing and leave the other
+		// free to regress. No X-RateLimit-* header is queued here at all.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond((HttpStatusCode)403, "{\"message\":\"Access Denied\"}", ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingAuthenticationException exception = await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "Access Denied");
+	}
+
+	[TestMethod]
+	public async Task TranslatesATooManyRequestsResponseToGitHostingRateLimitExceptionAsync()
+	{
+		DateTimeOffset resetsAt = DateTimeOffset.FromUnixTimeSeconds(1798800000);
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"Request was blocked due to exceeding usage\"}",
+				("Content-Type", "application/json"),
+				("X-RateLimit-Reset", "1798800000"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "Request was blocked");
+		Assert.AreEqual(resetsAt, exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ThrowsWhenPullRequestsAreRequestedWithoutAProjectAsync()
+	{
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>() };
+
+		InvalidOperationException exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+			async () => await provider.GetPullRequestsAsync("repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, nameof(AzureDevOpsProvider.Project));
+	}
+
+	[TestMethod]
+	public async Task ThrowsWhenAPullRequestIsCreatedWithoutAProjectAsync()
+	{
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>() };
+
+		InvalidOperationException exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+			async () => await provider.CreatePullRequest("repo".As<GitRepositoryName>())
+				.From("a".As<GitBranchName>()).Into("b".As<GitBranchName>()).Titled("t".As<GitPullRequestTitle>())
+				.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, nameof(AzureDevOpsProvider.Project));
+	}
+
+	[TestMethod]
+	public async Task RequestsThePullRequestsEndpointForTheConfiguredRepositoryAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-pullrequests.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		_ = await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(HttpMethod.Get, handler.Requests[0].Method);
+		Assert.AreEqual(
+			"https://dev.azure.com/contoso/ExampleProject/_apis/git/repositories/example-repo/pullrequests",
+			handler.Requests[0].Uri.GetLeftPart(UriPartial.Path));
+	}
+
+	[TestMethod]
+	public async Task RequestsOnlyActivePullRequestsAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-pullrequests.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		_ = await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// The library's contract is "open pull requests only", requested explicitly rather than
+		// inherited from whatever Azure DevOps happens to default to today (findings section 3).
+		StringAssert.Contains(handler.Requests[0].Uri.Query, "searchCriteria.status=active");
+	}
+
+	[TestMethod]
+	public async Task StripsRefsHeadsFromTheBranchNamesAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-pullrequests.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		// The fixture's first entry carries "refs/heads/npaulk/my_work" and
+		// "refs/heads/new_feature" — asserted bare, not fully-qualified, so a caller never has to
+		// branch on host to get a plain branch name.
+		Assert.AreEqual("npaulk/my_work".As<GitBranchName>(), pullRequests[0].SourceBranch);
+		Assert.AreEqual("new_feature".As<GitBranchName>(), pullRequests[0].TargetBranch);
+	}
+
+	[TestMethod]
+	public async Task ParsesEveryPullRequestFieldAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-pullrequests.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(3, pullRequests.Count);
+
+		GitPullRequest pullRequest = pullRequests[0];
+		Assert.AreEqual("22".As<GitPullRequestNumber>(), pullRequest.Number);
+		Assert.AreEqual("A new feature".As<GitPullRequestTitle>(), pullRequest.Title);
+		Assert.AreEqual("Adding a new feature", pullRequest.Description);
+		Assert.AreEqual("npaulk/my_work".As<GitBranchName>(), pullRequest.SourceBranch);
+		Assert.AreEqual("new_feature".As<GitBranchName>(), pullRequest.TargetBranch);
+		Assert.AreEqual("example-user@contoso.example".As<GitPullRequestAuthor>(), pullRequest.Author);
+		Assert.AreEqual(GitPullRequestState.Open, pullRequest.State);
+		Assert.IsFalse(pullRequest.IsDraft);
+		// None of the list fixture's entries populate _links at all (findings section 3), so WebURI
+		// stays null rather than being guessed from "url", the API address.
+		Assert.IsNull(pullRequest.WebURI);
+		Assert.AreEqual(
+			DateTimeOffset.Parse("2016-11-01T16:30:31.6655471Z", CultureInfo.InvariantCulture, DateTimeStyles.None),
+			pullRequest.CreatedAt);
+	}
+
+	[TestMethod]
+	public async Task LeavesTheWebUriNullWhenTheWebLinkIsAbsentAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-pullrequests.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		Assert.IsNull(pullRequests[0].WebURI);
+	}
+
+	[TestMethod]
+	public async Task TakesTheWebUriFromTheWebLinkNotTheApiUrlAsync()
+	{
+		// The create-response fixture is the only one with a populated _links object at all, and it
+		// carries no "web" key by default (findings section 4) — WithWebLink adds exactly that one
+		// key, the additive variant ruling 2 in the task allows.
+		string json = WithWebLink(
+			Fixture("azure-devops-pullrequest-created.json"),
+			"https://dev.azure.com/contoso/ExampleProject/_git/ExampleProject/pullrequest/22");
+
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.Created, json, ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		GitPullRequest created = await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+			.From("npaulk/my_work".As<GitBranchName>())
+			.Into("new_feature".As<GitBranchName>())
+			.Titled("A new feature".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		// Asserted against the "web" value and proven distinct from "url" — a regression to reading
+		// "url" (the API address) instead of "_links.web.href" would make this fail.
+		Assert.AreEqual(
+			"https://dev.azure.com/contoso/ExampleProject/_git/ExampleProject/pullrequest/22".As<GitPullRequestWebURI>(),
+			created.WebURI);
+		Assert.AreNotEqual(
+			"https://dev.azure.com/contoso/_apis/git/repositories/3411ebc1-d5aa-464f-9615-0b527bc66719/pullRequests/22",
+			created.WebURI!.WeakString);
+	}
+
+	[TestMethod]
+	public async Task SendsTheConfiguredValuesInTheCreateBodyAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.Created, Fixture("azure-devops-pullrequest-created.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		GitPullRequest created = await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+			.From("npaulk/my_work".As<GitBranchName>())
+			.Into("new_feature".As<GitBranchName>())
+			.Titled("A new feature".As<GitPullRequestTitle>())
+			.Describing("Adding a new feature")
+			.AsDraft()
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpMethod.Post, handler.Requests[0].Method);
+		string body = handler.Requests[0].Body!;
+		// Sent fully-qualified: GitPullRequestSpecification carries bare branch names, and Azure
+		// DevOps's request body needs refs/heads/... (findings section 4) — the reverse of the
+		// stripping GetPullRequestsAsync applies on the way back in.
+		StringAssert.Contains(body, "\"sourceRefName\":\"refs/heads/npaulk/my_work\"");
+		StringAssert.Contains(body, "\"targetRefName\":\"refs/heads/new_feature\"");
+		StringAssert.Contains(body, "\"title\":\"A new feature\"");
+		StringAssert.Contains(body, "\"description\":\"Adding a new feature\"");
+		StringAssert.Contains(body, "\"isDraft\":true");
+
+		Assert.AreEqual("22".As<GitPullRequestNumber>(), created.Number);
+	}
+
+	[TestMethod]
+	public async Task MapsActiveCompletedAndAbandonedAsync()
+	{
+		static AzureDevOpsProvider MakeProvider(FakeHttpMessageHandler handler) => new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		using (FakeHttpMessageHandler activeHandler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SinglePullRequestListResponse("active"), ("Content-Type", "application/json")))
+		{
+			IReadOnlyList<GitPullRequest> pullRequests = await MakeProvider(activeHandler)
+				.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+				.ConfigureAwait(false);
+			Assert.AreEqual(GitPullRequestState.Open, pullRequests[0].State);
+		}
+
+		using (FakeHttpMessageHandler completedHandler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SinglePullRequestListResponse("completed"), ("Content-Type", "application/json")))
+		{
+			IReadOnlyList<GitPullRequest> pullRequests = await MakeProvider(completedHandler)
+				.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+				.ConfigureAwait(false);
+			Assert.AreEqual(GitPullRequestState.Merged, pullRequests[0].State);
+		}
+
+		using (FakeHttpMessageHandler abandonedHandler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SinglePullRequestListResponse("abandoned"), ("Content-Type", "application/json")))
+		{
+			IReadOnlyList<GitPullRequest> pullRequests = await MakeProvider(abandonedHandler)
+				.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+				.ConfigureAwait(false);
+			Assert.AreEqual(GitPullRequestState.Closed, pullRequests[0].State);
+		}
 	}
 
 	public TestContext TestContext { get; set; } = null!;

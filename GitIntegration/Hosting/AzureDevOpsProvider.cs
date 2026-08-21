@@ -59,6 +59,12 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="AzureDevOpsProjectName"/>'s remarks. Findings section 2 confirms the org-wide and
 	/// project-scoped forms are the same endpoint with the project path segment present or absent,
 	/// not two different routes, which is exactly what <see cref="Project"/> being optional models.
+	/// Pull request operations are the asymmetric case: Azure DevOps has no project-less pull-request
+	/// endpoint, so <see cref="GetPullRequestsAsync"/> and <see cref="CreatePullRequestCoreAsync"/>
+	/// both require <see cref="Project"/> to be set and throw <see cref="InvalidOperationException"/>
+	/// otherwise. Resolving it automatically by re-enumerating repositories and matching names was
+	/// rejected: it costs an extra call and is ambiguous whenever two projects hold a repository of
+	/// the same name.
 	/// </remarks>
 	public AzureDevOpsProjectName? Project { get; init; }
 
@@ -111,16 +117,133 @@ public sealed class AzureDevOpsProvider : GitProvider
 	}
 
 	/// <inheritdoc/>
-	// The real implementation lists the repository's open pull requests through the same transport
-	// GetRepositoriesAsync uses, with $skip/$top pagination; it is not written yet.
-	public override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default) =>
-		throw new NotImplementedException("Azure DevOps pull request listing is not yet implemented.");
+	/// <remarks>
+	/// Calls <c>GET .../repositories/{repositoryId}/pullrequests</c> with
+	/// <c>searchCriteria.status=active</c> sent explicitly (findings section 3: the endpoint's
+	/// documented default is already <c>active</c>, but <see cref="IGitHostingProvider.GetPullRequestsAsync"/>'s
+	/// contract is defined by this library, not by restating whatever a host happens to default to
+	/// today). <c>{repositoryId}</c> is filled with <paramref name="repositoryName"/> — the only
+	/// repository identifier this method receives — the same substitution
+	/// <see cref="GitHubProvider.GetPullRequestsAsync"/> makes for GitHub's equivalent path segment.
+	/// </remarks>
+	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
+	public override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default)
+	{
+		Ensure.NotNull(repositoryName);
+		cancellationToken.ThrowIfCancellationRequested();
+		EnsureProjectIsSet();
+
+		Uri requestUri = BuildPullRequestsUri(repositoryName, includeActiveFilter: true);
+		HostingCredential credential = ResolveCredential();
+
+		HttpClient client = CreateHttpClient();
+
+		try
+		{
+			using HttpRequestMessage request = new(HttpMethod.Get, requestUri);
+			ApplyAuthentication(request, credential);
+
+			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+			string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+			if (!response.IsSuccessStatusCode)
+			{
+				throw Translate(response, body);
+			}
+
+			AzureDevOpsPullRequestListResponse? parsed = JsonSerializer.Deserialize(
+				body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestListResponse);
+
+			return parsed is null ? [] : [.. parsed.Value.Select(ToGitPullRequest)];
+		}
+		finally
+		{
+			client.Dispose();
+		}
+	}
 
 	/// <inheritdoc/>
-	// The real implementation submits the specification over the same transport and maps the result
-	// back to GitPullRequest; it is not written yet.
-	internal override Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken) =>
-		throw new NotImplementedException("Azure DevOps pull request creation is not yet implemented.");
+	/// <remarks>
+	/// Calls <c>POST .../repositories/{repositoryId}/pullrequests</c> with the request body documented
+	/// in findings section 4. <see cref="GitPullRequestSpecification.Source"/> and
+	/// <see cref="GitPullRequestSpecification.Target"/> are bare branch names — this library's own
+	/// normalisation, matching what a caller gets back from every read path — so they are qualified
+	/// with <c>refs/heads/</c> here before being sent, the reverse of the stripping
+	/// <see cref="ToGitPullRequest(AzureDevOpsPullRequest)"/> does on the way back in. The response is
+	/// the created pull request; Microsoft's own worked example reports <c>201</c> despite the
+	/// endpoint's response table saying <c>200</c> (findings section 4), so this method checks
+	/// <see cref="HttpResponseMessage.IsSuccessStatusCode"/> rather than a specific status code.
+	/// </remarks>
+	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
+	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken)
+	{
+		Ensure.NotNull(repositoryName);
+		Ensure.NotNull(specification);
+		cancellationToken.ThrowIfCancellationRequested();
+		EnsureProjectIsSet();
+
+		Uri requestUri = BuildPullRequestsUri(repositoryName, includeActiveFilter: false);
+		HostingCredential credential = ResolveCredential();
+
+		AzureDevOpsPullRequestCreateRequest requestBody = new()
+		{
+			SourceRefName = $"refs/heads/{specification.Source.WeakString}",
+			TargetRefName = $"refs/heads/{specification.Target.WeakString}",
+			Title = specification.Title.WeakString,
+			Description = specification.Description,
+			IsDraft = specification.IsDraft,
+		};
+
+		HttpClient client = CreateHttpClient();
+
+		try
+		{
+			string requestJson = JsonSerializer.Serialize(requestBody, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestCreateRequest);
+
+			using HttpRequestMessage request = new(HttpMethod.Post, requestUri)
+			{
+				Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
+			};
+			ApplyAuthentication(request, credential);
+
+			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+			string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+			if (!response.IsSuccessStatusCode)
+			{
+				throw Translate(response, body);
+			}
+
+			AzureDevOpsPullRequest? parsed = JsonSerializer.Deserialize(body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequest);
+
+			return parsed is null
+				? throw new GitHostingRequestException(
+					"Azure DevOps reported success but returned no pull request body.", Name, response.StatusCode, body)
+				: ToGitPullRequest(parsed);
+		}
+		finally
+		{
+			client.Dispose();
+		}
+	}
+
+	/// <summary>
+	/// Throws when a pull request operation is attempted without <see cref="Project"/> set.
+	/// </summary>
+	/// <remarks>
+	/// Both <see cref="GetPullRequestsAsync"/> and <see cref="CreatePullRequestCoreAsync"/> call this
+	/// before building a request, since neither has a project-less pull-request endpoint to fall back
+	/// to — see <see cref="Project"/>'s remarks for why this is not resolved automatically instead.
+	/// </remarks>
+	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>.</exception>
+	private void EnsureProjectIsSet()
+	{
+		if (Project is null)
+		{
+			throw new InvalidOperationException(
+				$"Azure DevOps pull request operations require {nameof(Project)} to be set, since Azure DevOps scopes pull requests to a project. Set {nameof(AzureDevOpsProvider)}.{nameof(Project)} before calling this member.");
+		}
+	}
 
 	/// <summary>
 	/// Builds the repository-list request URI for this provider's <see cref="GitProvider.Owner"/>
@@ -136,6 +259,35 @@ public sealed class AzureDevOpsProvider : GitProvider
 			: $"https://dev.azure.com/{organization}/{Uri.EscapeDataString(Project.WeakString)}/_apis/git/repositories";
 
 		return new Uri($"{path}?api-version={ApiVersion}");
+	}
+
+	/// <summary>
+	/// Builds the pull-request-list or pull-request-create request URI for a repository, scoped to
+	/// this provider's <see cref="GitProvider.Owner"/> and <see cref="Project"/>.
+	/// </summary>
+	/// <remarks>
+	/// Callers must have already checked <see cref="Project"/> is non-<see langword="null"/> — see
+	/// <see cref="EnsureProjectIsSet"/> — since a pull request URI has no project-less form to fall
+	/// back to.
+	/// </remarks>
+	/// <param name="repositoryName">The repository the URI is scoped to.</param>
+	/// <param name="includeActiveFilter">
+	/// Whether to append <c>searchCriteria.status=active</c> — set for the listing GET, unset for the
+	/// creating POST, which findings section 4 does not document taking a search criteria at all.
+	/// </param>
+	/// <returns>The request URI, carrying <see cref="ApiVersion"/>.</returns>
+	private Uri BuildPullRequestsUri(GitRepositoryName repositoryName, bool includeActiveFilter)
+	{
+		string organization = Uri.EscapeDataString(Owner.WeakString);
+		string project = Uri.EscapeDataString(Project!.WeakString);
+		string repository = Uri.EscapeDataString(repositoryName.WeakString);
+
+		string path = $"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repository}/pullrequests";
+		string query = includeActiveFilter
+			? $"?searchCriteria.status=active&api-version={ApiVersion}"
+			: $"?api-version={ApiVersion}";
+
+		return new Uri(path + query);
 	}
 
 	/// <summary>
@@ -201,6 +353,70 @@ public sealed class AzureDevOpsProvider : GitProvider
 			RemotePath = repository.RemoteUrl is string remoteUrl ? remoteUrl.As<GitRepositoryRemotePath>() : null,
 		};
 	}
+
+	/// <summary>
+	/// Maps an Azure DevOps pull request onto this library's model.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="AzureDevOpsPullRequest.SourceRefName"/> and <see cref="AzureDevOpsPullRequest.TargetRefName"/>
+	/// arrive fully qualified (e.g. <c>refs/heads/main</c>); <see cref="StripRefsHeadsPrefix"/> strips
+	/// the prefix so a caller never has to branch on host to get a bare branch name — see the spec's
+	/// "Two normalisations" section. <see cref="GitPullRequest.Author"/> is read from
+	/// <see cref="AzureDevOpsIdentityRef.UniqueName"/>, not <see cref="AzureDevOpsIdentityRef.DisplayName"/>:
+	/// <see cref="GitPullRequestAuthor"/>'s own remarks record that Azure DevOps's identifier is the
+	/// unique name, usually an email address, the same distinction GitHub's login draws on the other
+	/// side. <see cref="GitPullRequest.WebURI"/> is read only from <c>_links.web.href</c>, never
+	/// composed from a constructed URL — see <see cref="AzureDevOpsReferenceLinks"/>'s remarks.
+	/// </remarks>
+	/// <param name="pullRequest">The pull request Azure DevOps returned.</param>
+	/// <returns>The equivalent <see cref="GitPullRequest"/>.</returns>
+	private static GitPullRequest ToGitPullRequest(AzureDevOpsPullRequest pullRequest) => new()
+	{
+		Number = pullRequest.PullRequestId.ToString(CultureInfo.InvariantCulture).As<GitPullRequestNumber>(),
+		Title = (pullRequest.Title ?? string.Empty).As<GitPullRequestTitle>(),
+		Description = pullRequest.Description,
+		SourceBranch = StripRefsHeadsPrefix(pullRequest.SourceRefName ?? string.Empty).As<GitBranchName>(),
+		TargetBranch = StripRefsHeadsPrefix(pullRequest.TargetRefName ?? string.Empty).As<GitBranchName>(),
+		Author = pullRequest.CreatedBy?.UniqueName is string uniqueName ? uniqueName.As<GitPullRequestAuthor>() : null,
+		State = ToGitPullRequestState(pullRequest.Status),
+		IsDraft = pullRequest.IsDraft,
+		WebURI = pullRequest.Links?.Web?.Href is string href ? href.As<GitPullRequestWebURI>() : null,
+		CreatedAt = pullRequest.CreationDate,
+	};
+
+	/// <summary>
+	/// Strips a leading <c>refs/heads/</c> from a fully-qualified ref, leaving the value untouched
+	/// when the prefix is absent.
+	/// </summary>
+	/// <param name="refName">The ref name, fully qualified or already bare.</param>
+	/// <returns>The bare branch name.</returns>
+	private static string StripRefsHeadsPrefix(string refName)
+	{
+		const string prefix = "refs/heads/";
+		return refName.StartsWith(prefix, StringComparison.Ordinal) ? refName[prefix.Length..] : refName;
+	}
+
+	/// <summary>
+	/// Maps Azure DevOps's <c>status</c> onto <see cref="GitPullRequestState"/>.
+	/// </summary>
+	/// <remarks>
+	/// The mapping table in the spec's "State mapping" section, confirmed against the
+	/// <c>PullRequestStatus</c> enumeration on both fetched pull-request pages (findings section
+	/// "Contradictions and gaps" entry 4): <c>active</c> → <see cref="GitPullRequestState.Open"/>,
+	/// <c>completed</c> → <see cref="GitPullRequestState.Merged"/>, <c>abandoned</c> →
+	/// <see cref="GitPullRequestState.Closed"/>. <c>notSet</c> and <c>all</c> are query-side-only
+	/// values a host never reports as a pull request's own status, so they fall through to the
+	/// unsupported case along with anything else unrecognised.
+	/// </remarks>
+	/// <param name="status">The status Azure DevOps reported.</param>
+	/// <returns>The equivalent <see cref="GitPullRequestState"/>.</returns>
+	private static GitPullRequestState ToGitPullRequestState(string? status) => status switch
+	{
+		"active" => GitPullRequestState.Open,
+		"completed" => GitPullRequestState.Merged,
+		"abandoned" => GitPullRequestState.Closed,
+		_ => throw new NotSupportedException($"Azure DevOps reported an unrecognised pull request status '{status}'."),
+	};
 
 	/// <summary>
 	/// Maps a failed Azure DevOps response onto this library's hosting exception hierarchy.

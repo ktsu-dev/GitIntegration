@@ -2,6 +2,7 @@
 
 namespace ktsu.GitIntegration;
 
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -63,6 +64,154 @@ internal sealed class AzureDevOpsErrorResponse
 }
 
 /// <summary>
+/// The envelope Azure DevOps wraps a pull request list in.
+/// </summary>
+/// <remarks>
+/// Shape confirmed against the Get Pull Requests endpoint's three sample responses:
+/// <c>{ "value": [ GitPullRequest, ... ], "count": &lt;int&gt; }</c>. See findings section 3.
+/// </remarks>
+internal sealed class AzureDevOpsPullRequestListResponse
+{
+	/// <summary>Gets the number of pull requests in <see cref="Value"/>.</summary>
+	public int Count { get; init; }
+
+	/// <summary>Gets the pull requests the request returned.</summary>
+	public IReadOnlyList<AzureDevOpsPullRequest> Value { get; init; } = [];
+}
+
+/// <summary>
+/// One pull request, as Azure DevOps's <c>GitPullRequest</c> schema reports it.
+/// </summary>
+/// <remarks>
+/// Only the fields <see cref="AzureDevOpsProvider"/> maps onto <see cref="GitPullRequest"/> are
+/// declared here. Field names come from findings section 3 (list) and section 4 (create — the same
+/// schema, confirmed identical at both endpoints). <see cref="IsDraft"/> and <see cref="Links"/> are
+/// documented-by-schema-only for the list endpoint: no sample response the findings could check
+/// populates <c>isDraft</c>, and none of the list samples populate <c>_links</c> at all. The create
+/// endpoint's own sample response is the only one that populates <see cref="Links"/>, and even there
+/// carries no <c>web</c> key — see <see cref="AzureDevOpsReferenceLinks.Web"/>.
+/// </remarks>
+internal sealed class AzureDevOpsPullRequest
+{
+	/// <summary>Gets the pull request's host-assigned number.</summary>
+	public int PullRequestId { get; init; }
+
+	/// <summary>Gets the pull request's title, or <see langword="null"/> when the host omitted it.</summary>
+	public string? Title { get; init; }
+
+	/// <summary>Gets the pull request's description, or <see langword="null"/> when the host omitted it.</summary>
+	public string? Description { get; init; }
+
+	/// <summary>
+	/// Gets the fully-qualified source ref (e.g. <c>refs/heads/my-branch</c>), or <see langword="null"/>
+	/// when the host omitted it.
+	/// </summary>
+	public string? SourceRefName { get; init; }
+
+	/// <summary>
+	/// Gets the fully-qualified target ref (e.g. <c>refs/heads/main</c>), or <see langword="null"/>
+	/// when the host omitted it.
+	/// </summary>
+	public string? TargetRefName { get; init; }
+
+	/// <summary>Gets the identity that created the pull request, or <see langword="null"/> when the host omitted it.</summary>
+	public AzureDevOpsIdentityRef? CreatedBy { get; init; }
+
+	/// <summary>Gets the pull request's status (<c>active</c>, <c>completed</c>, or <c>abandoned</c>).</summary>
+	public string? Status { get; init; }
+
+	/// <summary>Gets a value indicating whether the pull request is a draft.</summary>
+	public bool IsDraft { get; init; }
+
+	/// <summary>Gets when the pull request was created, or <see langword="null"/> when the host omitted it.</summary>
+	public DateTimeOffset? CreationDate { get; init; }
+
+	/// <summary>
+	/// Gets the pull request's related links, or <see langword="null"/> when the host omitted them.
+	/// </summary>
+	/// <remarks>
+	/// JSON key is <c>_links</c>, which the naming policy this context applies would otherwise render
+	/// as <c>links</c> — the explicit <see cref="JsonPropertyNameAttribute"/> is required, not
+	/// decorative.
+	/// </remarks>
+	[JsonPropertyName("_links")]
+	public AzureDevOpsReferenceLinks? Links { get; init; }
+}
+
+/// <summary>
+/// Azure DevOps's <c>IdentityRef</c> shape, as it appears on a pull request's <c>createdBy</c>.
+/// </summary>
+/// <remarks>Field names from findings section 3.</remarks>
+internal sealed class AzureDevOpsIdentityRef
+{
+	/// <summary>Gets the identity's display name, or <see langword="null"/> when the host omitted it.</summary>
+	public string? DisplayName { get; init; }
+
+	/// <summary>
+	/// Gets the identity's unique name (usually an email address), or <see langword="null"/> when the
+	/// host omitted it.
+	/// </summary>
+	public string? UniqueName { get; init; }
+}
+
+/// <summary>
+/// Azure DevOps's <c>ReferenceLinks</c> shape, as it appears on a pull request's <c>_links</c>.
+/// </summary>
+/// <remarks>
+/// Only <see cref="Web"/> is declared. Findings section "Contradictions and gaps" entry 1 settles
+/// that no official Microsoft source — the REST schema, any sample response at either API version,
+/// or the official Node SDK's type definitions — documents or demonstrates a <c>web</c> key on a
+/// pull request's <c>_links</c>; every real example found instead carries <c>self</c>,
+/// <c>repository</c>, <c>workItems</c>, <c>sourceBranch</c>, <c>targetBranch</c>,
+/// <c>sourceCommit</c>, <c>targetCommit</c>, <c>createdBy</c>, and <c>iterations</c>. Those keys are
+/// left undeclared here because nothing in this library's model reads them — <see cref="Web"/> is
+/// read when present and stays <see langword="null"/> otherwise, never composed from a constructed
+/// URL.
+/// </remarks>
+internal sealed class AzureDevOpsReferenceLinks
+{
+	/// <summary>
+	/// Gets the pull request's browser-facing link, or <see langword="null"/> when the host did not
+	/// report one.
+	/// </summary>
+	public AzureDevOpsLink? Web { get; init; }
+}
+
+/// <summary>One entry in a <c>ReferenceLinks</c> map: a single <c>href</c>.</summary>
+internal sealed class AzureDevOpsLink
+{
+	/// <summary>Gets the link's target, or <see langword="null"/> when the host omitted it.</summary>
+	public string? Href { get; init; }
+}
+
+/// <summary>
+/// The request body <c>POST .../pullrequests</c> accepts, as documented in findings section 4.
+/// </summary>
+/// <remarks>
+/// <see cref="IsDraft"/> is documented in the request body schema table but does not appear in the
+/// page's own sample request — schema-confirmed as a settable field, not example-confirmed. It is
+/// still sent, since <see cref="GitPullRequestSpecification.IsDraft"/> is part of this library's own
+/// contract regardless of whether the documentation's worked example happens to exercise it.
+/// </remarks>
+internal sealed class AzureDevOpsPullRequestCreateRequest
+{
+	/// <summary>Gets the fully-qualified source ref (e.g. <c>refs/heads/my-branch</c>).</summary>
+	public required string SourceRefName { get; init; }
+
+	/// <summary>Gets the fully-qualified target ref (e.g. <c>refs/heads/main</c>).</summary>
+	public required string TargetRefName { get; init; }
+
+	/// <summary>Gets the pull request's title.</summary>
+	public required string Title { get; init; }
+
+	/// <summary>Gets the pull request's description, or <see langword="null"/> to omit one.</summary>
+	public string? Description { get; init; }
+
+	/// <summary>Gets a value indicating whether the pull request should be created as a draft.</summary>
+	public bool IsDraft { get; init; }
+}
+
+/// <summary>
 /// Source-generated serialization metadata for the Azure DevOps DTOs.
 /// </summary>
 /// <remarks>
@@ -74,6 +223,9 @@ internal sealed class AzureDevOpsErrorResponse
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(AzureDevOpsRepositoryListResponse))]
 [JsonSerializable(typeof(AzureDevOpsErrorResponse))]
+[JsonSerializable(typeof(AzureDevOpsPullRequestListResponse))]
+[JsonSerializable(typeof(AzureDevOpsPullRequest))]
+[JsonSerializable(typeof(AzureDevOpsPullRequestCreateRequest))]
 internal sealed partial class AzureDevOpsJsonContext : JsonSerializerContext
 {
 }
