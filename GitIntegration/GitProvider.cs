@@ -70,10 +70,13 @@ public abstract class GitProvider : IGitHostingProvider
 	public abstract Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default);
 
 	/// <inheritdoc/>
-	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepositoryName repositoryName) =>
-		// Replaced with construction of the concrete builder once it exists; until then there is
-		// nothing this method can correctly return.
-		throw new NotImplementedException("Pull request creation is not yet implemented.");
+	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepositoryName repositoryName)
+	{
+		Ensure.NotNull(repositoryName);
+
+		return new GitPullRequestCreateBuilder((specification, cancellationToken) =>
+			CreatePullRequestCoreAsync(repositoryName, specification, cancellationToken));
+	}
 
 	/// <summary>
 	/// Creates the pull request a finished <see cref="IGitPullRequestCreateBuilder"/> describes.

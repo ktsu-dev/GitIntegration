@@ -91,23 +91,44 @@ public interface IGitHostingProvider
 public interface IGitPullRequestCreateBuilder
 {
 	/// <summary>Sets the branch the pull request merges from.</summary>
+	/// <remarks>
+	/// Required, but not checked here: a caller may legally supply <see cref="From(GitBranchName)"/>,
+	/// <see cref="Into(GitBranchName)"/>, and <see cref="Titled(GitPullRequestTitle)"/> in any order,
+	/// so only the finished configuration knows whether it is complete. Leaving the source branch
+	/// unset makes <see cref="ExecuteAsync(CancellationToken)"/> throw
+	/// <see cref="System.InvalidOperationException"/> instead.
+	/// </remarks>
 	/// <param name="source">The source branch.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
 	public IGitPullRequestCreateBuilder From(GitBranchName source);
 
 	/// <summary>Sets the branch the pull request merges into.</summary>
+	/// <remarks>
+	/// Required, but not checked here, for the same reason as <see cref="From(GitBranchName)"/>:
+	/// leaving the target branch unset makes <see cref="ExecuteAsync(CancellationToken)"/> throw
+	/// <see cref="System.InvalidOperationException"/> instead.
+	/// </remarks>
 	/// <param name="target">The target branch.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="target"/> is <see langword="null"/>.</exception>
 	public IGitPullRequestCreateBuilder Into(GitBranchName target);
 
 	/// <summary>Sets the pull request's title.</summary>
+	/// <remarks>
+	/// Required, but not checked here, for the same reason as <see cref="From(GitBranchName)"/>:
+	/// leaving the title unset makes <see cref="ExecuteAsync(CancellationToken)"/> throw
+	/// <see cref="System.InvalidOperationException"/> instead.
+	/// </remarks>
 	/// <param name="title">The title.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="title"/> is <see langword="null"/>.</exception>
 	public IGitPullRequestCreateBuilder Titled(GitPullRequestTitle title);
 
 	/// <summary>Sets the pull request's description.</summary>
 	/// <param name="description">The description.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="description"/> is <see langword="null"/>.</exception>
 	public IGitPullRequestCreateBuilder Describing(string description);
 
 	/// <summary>Marks the pull request as a draft.</summary>
