@@ -29,11 +29,23 @@ public sealed class GitHubProvider : GitProvider
 	public override GitProviderName Name => "GitHub".As<GitProviderName>();
 
 	/// <inheritdoc/>
+	/// <remarks>
+	/// Calls GitHub's <c>GET /users/{login}/repos</c>, which returns only <see cref="GitProvider.Owner"/>'s
+	/// <b>public</b> repositories. Supplying a token does not widen this: that endpoint does not
+	/// honour authentication to reveal private repositories the way <c>GET /user/repos</c> would for
+	/// the token's own account, and switching to that endpoint would silently stop honouring
+	/// <see cref="GitProvider.Owner"/> — it always describes the token's own repositories, regardless
+	/// of which owner was configured, which would break callers who name someone else's owner on
+	/// purpose. A caller that needs private repositories for a specific owner has no equivalent
+	/// through this provider today; do not assume this method's coverage matches an
+	/// <c>AzureDevOpsProvider</c> equivalent, whose token can see everything it has access to under
+	/// the same interface.
+	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		(GitHubClient client, IDisposable? transport) = CreateClient();
+		(GitHubClient client, IDisposable transport) = CreateClient();
 
 		try
 		{
@@ -46,7 +58,7 @@ public sealed class GitHubProvider : GitProvider
 		}
 		finally
 		{
-			transport?.Dispose();
+			transport.Dispose();
 		}
 	}
 
@@ -56,15 +68,16 @@ public sealed class GitHubProvider : GitProvider
 		Ensure.NotNull(repositoryName);
 		cancellationToken.ThrowIfCancellationRequested();
 
-		(GitHubClient client, IDisposable? transport) = CreateClient();
-
-		// State is requested explicitly rather than left to GitHub's default: IGitHostingProvider's
-		// contract is "open pull requests only", and that contract must not quietly track whatever a
-		// vendor happens to default to today.
-		PullRequestRequest request = new() { State = ItemStateFilter.Open };
+		(GitHubClient client, IDisposable transport) = CreateClient();
 
 		try
 		{
+			// State is requested explicitly rather than left to GitHub's default: IGitHostingProvider's
+			// contract is "open pull requests only", and that contract must not quietly track whatever a
+			// vendor happens to default to today. Built inside the try, after the transport already
+			// exists, so a future validating change to PullRequestRequest can never leak it.
+			PullRequestRequest request = new() { State = ItemStateFilter.Open };
+
 			IReadOnlyList<PullRequest> pullRequests = await client.PullRequest
 				.GetAllForRepository(Owner.WeakString, repositoryName.WeakString, request)
 				.ConfigureAwait(false);
@@ -77,7 +90,7 @@ public sealed class GitHubProvider : GitProvider
 		}
 		finally
 		{
-			transport?.Dispose();
+			transport.Dispose();
 		}
 	}
 
@@ -88,18 +101,20 @@ public sealed class GitHubProvider : GitProvider
 		Ensure.NotNull(specification);
 		cancellationToken.ThrowIfCancellationRequested();
 
-		(GitHubClient client, IDisposable? transport) = CreateClient();
-
-		// Source maps to head and Target maps to base: NewPullRequest's positional constructor takes
-		// (title, head, base), the same order GitHub's own API expects.
-		NewPullRequest newPullRequest = new(specification.Title.WeakString, specification.Source.WeakString, specification.Target.WeakString)
-		{
-			Body = specification.Description,
-			Draft = specification.IsDraft,
-		};
+		(GitHubClient client, IDisposable transport) = CreateClient();
 
 		try
 		{
+			// Source maps to head and Target maps to base: NewPullRequest's positional constructor
+			// takes (title, head, base), the same order GitHub's own API expects. Built inside the
+			// try, after the transport already exists, so its own argument validation can never leak
+			// the transport this method just acquired.
+			NewPullRequest newPullRequest = new(specification.Title.WeakString, specification.Source.WeakString, specification.Target.WeakString)
+			{
+				Body = specification.Description,
+				Draft = specification.IsDraft,
+			};
+
 			PullRequest created = await client.PullRequest
 				.Create(Owner.WeakString, repositoryName.WeakString, newPullRequest)
 				.ConfigureAwait(false);
@@ -112,7 +127,7 @@ public sealed class GitHubProvider : GitProvider
 		}
 		finally
 		{
-			transport?.Dispose();
+			transport.Dispose();
 		}
 	}
 
@@ -120,37 +135,49 @@ public sealed class GitHubProvider : GitProvider
 	/// Creates an Octokit client wired to this provider's transport and credential.
 	/// </summary>
 	/// <remarks>
-	/// Octokit's <see cref="Connection"/> constructor that takes an
-	/// <see cref="Octokit.Internal.IHttpClient"/> is how a test's <see cref="GitProvider.Handler"/>
-	/// reaches Octokit: wrapping it in a <see cref="HttpClientAdapter"/> is the only supported way to
-	/// hand Octokit a custom <see cref="HttpMessageHandler"/>. With no handler configured, the
-	/// product-header-only constructor builds Octokit's own real transport instead, and the returned
-	/// transport is <see langword="null"/> — that path is entirely Octokit's own responsibility to
-	/// manage, and this provider never constructed anything of its own to dispose.
+	/// <para>
+	/// Both branches go through <see cref="HttpClientAdapter"/> and always hand back a real,
+	/// disposable transport — there is no "Octokit manages its own transport" free path.
+	/// <see cref="GitHubClient(ProductHeaderValue)"/> looks like it would give Octokit that
+	/// responsibility, but it does not: internally it builds exactly the same
+	/// <see cref="HttpClientAdapter"/>-over-<see cref="HttpClient"/> chain this method would build by
+	/// hand, and nothing in <see cref="GitHubClient"/> or <see cref="Connection"/> ever disposes it,
+	/// because neither type implements <see cref="IDisposable"/>. Every call this provider makes
+	/// through a default-constructed client was leaking one <see cref="HttpClient"/> — and its
+	/// underlying socket handler — until this method started constructing that same default handler
+	/// itself, via <see cref="Octokit.Internal.HttpMessageHandlerFactory.CreateDefault()"/>, so its
+	/// caller can dispose it exactly like the injected-<see cref="GitProvider.Handler"/> case.
+	/// </para>
+	/// <para>
+	/// When <see cref="GitProvider.Handler"/> is set — a test's fake, reached only because the test
+	/// project has <c>InternalsVisibleTo</c> — <see cref="NonOwningHandler"/> stands between the
+	/// adapter and that handler: <see cref="HttpClientAdapter"/>'s <c>Dispose</c> tears down whatever
+	/// <see cref="HttpMessageHandler"/> its factory produced, and the injected handler belongs to
+	/// whoever supplied it, not to this provider. <see cref="NonOwningHandler"/> absorbs that
+	/// teardown without forwarding it.
+	/// </para>
+	/// <para>
+	/// <see cref="GitProvider.ResolveCredential"/> runs before either transport is constructed: it
+	/// can throw <see cref="InvalidOperationException"/> for a credential subtype this library does
+	/// not recognise, and running it first means that throw can never leave a constructed
+	/// <see cref="HttpClientAdapter"/> stranded with nothing left to dispose it — there is nothing to
+	/// strand yet.
+	/// </para>
 	/// </remarks>
 	/// <returns>
 	/// A client ready to issue requests, with this provider's credential applied, paired with the
-	/// disposable transport the caller must dispose once done with the client — or
-	/// <see langword="null"/> when nothing needs disposing.
+	/// transport the caller must dispose once done with the client.
 	/// </returns>
-	private (GitHubClient Client, IDisposable? Transport) CreateClient()
+	private (GitHubClient Client, IDisposable Transport) CreateClient()
 	{
+		Credentials credentials = ToOctokitCredentials(ResolveCredential());
 		ProductHeaderValue product = new(AppDomain.CurrentDomain.FriendlyName);
 
-		if (Handler is null)
-		{
-			return (new GitHubClient(product) { Credentials = ToOctokitCredentials(ResolveCredential()) }, null);
-		}
+		HttpClientAdapter adapter = Handler is null
+			? new(HttpMessageHandlerFactory.CreateDefault)
+			: new(() => new NonOwningHandler(Handler));
 
-		// NonOwningHandler stands between HttpClientAdapter and Handler: HttpClientAdapter's Dispose
-		// tears down whatever HttpMessageHandler its factory produced, and Handler belongs to whoever
-		// supplied it (almost always a test's fake, which the test itself still owns and disposes) —
-		// not to this provider. NonOwningHandler absorbs that teardown without forwarding it.
-		HttpClientAdapter adapter = new(() => new NonOwningHandler(Handler));
-		GitHubClient client = new(new Connection(product, adapter))
-		{
-			Credentials = ToOctokitCredentials(ResolveCredential()),
-		};
+		GitHubClient client = new(new Connection(product, adapter)) { Credentials = credentials };
 
 		return (client, adapter);
 	}

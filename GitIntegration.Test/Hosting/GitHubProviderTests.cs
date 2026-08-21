@@ -9,7 +9,6 @@ using System.Net;
 using System.Threading.Tasks;
 
 using ktsu.CredentialCache;
-using ktsu.CredentialCache.Storage;
 using ktsu.Semantics.Strings;
 
 // System.Net (for HttpStatusCode) and ktsu.CredentialCache both declare a type named
@@ -19,14 +18,10 @@ using CredentialCache = ktsu.CredentialCache.CredentialCache;
 [TestClass]
 public sealed class GitHubProviderTests
 {
-	// Matches GitProviderTests' own reset: CredentialCache.Instance is a process-wide singleton, and
-	// a type initializer running at most once is exactly what avoids two tests racing to reset it
-	// out from under each other under Microsoft Testing Platform's parallel execution.
-	static GitHubProviderTests()
-	{
-		CredentialCache.ResetSingletonForTesting();
-		CredentialCache.ConfigureStore(new InMemoryCredentialStore());
-	}
+	// CredentialCache.Instance is configured onto an in-memory store exactly once, assembly-wide, by
+	// CredentialCacheAssemblySetup's [AssemblyInitialize] — see that type's remarks for why a
+	// per-class static constructor doing this raced against GitProviderTests' own, under this
+	// assembly's method-level test parallelism.
 
 	/// <summary>Reads a captured fixture's raw JSON text from the test output's Fixtures directory.</summary>
 	private static string Fixture(string name) =>
@@ -141,6 +136,34 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task MapsEveryFieldOfAPullRequestAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SinglePullRequestArray("open", merged: false), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		// Every mapped field asserted against the fixture's real values, not just Number/State/WebURI:
+		// SourceBranch/TargetBranch come from Head.Ref/Base.Ref and a swap between the two would ship
+		// green if only one side were checked, and a dropped Title, Description, Author, IsDraft, or
+		// CreatedAt would likewise pass a narrower assertion set.
+		GitPullRequest pullRequest = pullRequests[0];
+		Assert.AreEqual("132594".As<GitPullRequestNumber>(), pullRequest.Number);
+		Assert.AreEqual("Don't build all JIT flavors for clr.aot".As<GitPullRequestTitle>(), pullRequest.Title);
+		StringAssert.Contains(pullRequest.Description, "After #131666");
+		Assert.AreEqual("example-branch-1".As<GitBranchName>(), pullRequest.SourceBranch);
+		Assert.AreEqual("main".As<GitBranchName>(), pullRequest.TargetBranch);
+		Assert.AreEqual("example-user-1".As<GitPullRequestAuthor>(), pullRequest.Author);
+		Assert.AreEqual(GitPullRequestState.Open, pullRequest.State);
+		Assert.IsFalse(pullRequest.IsDraft);
+		Assert.AreEqual("https://github.com/contoso/example-repo/pull/132594".As<GitPullRequestWebURI>(), pullRequest.WebURI);
+		Assert.AreEqual(new DateTimeOffset(2026, 8, 21, 0, 43, 5, TimeSpan.Zero), pullRequest.CreatedAt);
+	}
+
+	[TestMethod]
 	public async Task RequestsOnlyOpenPullRequestsAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
@@ -176,6 +199,7 @@ public sealed class GitHubProviderTests
 		StringAssert.Contains(body, "\"title\":\"Don't build all JIT flavors for clr.aot\"");
 		StringAssert.Contains(body, "\"head\":\"example-branch-1\"");
 		StringAssert.Contains(body, "\"base\":\"main\"");
+		StringAssert.Contains(body, "\"body\":\"Because reasons\"");
 		StringAssert.Contains(body, "\"draft\":true");
 
 		Assert.AreEqual("132594".As<GitPullRequestNumber>(), created.Number);

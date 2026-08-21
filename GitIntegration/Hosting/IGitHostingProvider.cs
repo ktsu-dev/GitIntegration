@@ -48,6 +48,14 @@ public interface IGitHostingProvider
 	/// <summary>
 	/// Retrieves the repositories this provider's owner has, from the remote service.
 	/// </summary>
+	/// <remarks>
+	/// Implementations are not guaranteed to agree on exactly which of the owner's repositories this
+	/// returns — each host's own API shapes that. GitHub's implementation, in particular, returns
+	/// only the owner's <b>public</b> repositories, even when an authenticated credential is
+	/// supplied; see <see cref="GitHubProvider.GetRepositoriesAsync"/> for why. A caller that needs a
+	/// specific host's exact coverage should consult that provider's own remarks rather than assume
+	/// parity across hosts.
+	/// </remarks>
 	/// <param name="cancellationToken">A token to cancel the request.</param>
 	/// <returns>The repositories reported by the host.</returns>
 	public Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default);

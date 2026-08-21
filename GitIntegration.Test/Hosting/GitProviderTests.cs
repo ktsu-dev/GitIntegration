@@ -8,26 +8,16 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using ktsu.CredentialCache;
-using ktsu.CredentialCache.Storage;
 using ktsu.Semantics.Strings;
 
 [TestClass]
 public sealed class GitProviderTests
 {
-	// CredentialCache.Instance is a process-wide singleton whose default store is the platform's
-	// native secret manager. It is switched onto a fresh InMemoryCredentialStore exactly once, in
-	// this static constructor, rather than per test: the CLR guarantees a type initializer runs at
-	// most once even under concurrent first access, which a per-test
-	// ResetSingletonForTesting()+ConfigureStore() pair does not — Microsoft Testing Platform runs
-	// this class's test methods in parallel, and two tests each resetting the singleton around a
-	// third test's AddOrReplace can wipe its seeded credential before ResolveCredential reads it.
-	// Each test still gets its own PersonaGUID, which is all the isolation a shared, thread-safe
-	// cache needs between tests that touch different keys.
-	static GitProviderTests()
-	{
-		CredentialCache.ResetSingletonForTesting();
-		CredentialCache.ConfigureStore(new InMemoryCredentialStore());
-	}
+	// CredentialCache.Instance is configured onto a fresh InMemoryCredentialStore exactly once,
+	// assembly-wide, by CredentialCacheAssemblySetup's [AssemblyInitialize] — see that type's remarks
+	// for why a per-class static constructor doing this is not safe under this assembly's
+	// method-level test parallelism. Each test here still gets its own PersonaGUID, which is all the
+	// isolation a shared, thread-safe cache needs between tests that touch different keys.
 
 	private static PersonaGUID SeedCredential(Credential credential)
 	{
