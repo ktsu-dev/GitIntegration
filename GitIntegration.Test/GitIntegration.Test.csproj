@@ -25,4 +25,10 @@
          its abstractions package. Both facts look like mistakes and are not. -->
     <PackageReference Include="Testably.Abstractions.Testing" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Captured hosting-API response fixtures (Phase 5b, Task 1). Copied so the Hosting/*.cs tests
+         in later tasks can load them by relative path from the test output directory. -->
+    <None Include="Fixtures\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
