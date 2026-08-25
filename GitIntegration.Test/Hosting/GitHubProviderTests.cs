@@ -169,6 +169,25 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task ThrowsWhenARepositoryNameIsWhitespaceOnlyAsync()
+	{
+		// Path.GetFileName("   ") returns "   " unchanged — there is no separator to strip, so the
+		// leaf is exactly the whitespace-only input. GitRepositoryName itself rejects a
+		// whitespace-only value ([HasNonWhitespaceContent]), so LocalPath is held to the same rule:
+		// a name the semantic type would refuse is not a name this mapping can turn into a directory
+		// either.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SingleRepositoryArray("   "), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "cannot be represented as a local directory");
+	}
+
+	[TestMethod]
 	public async Task MapsAnOpenPullRequestToOpenAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
