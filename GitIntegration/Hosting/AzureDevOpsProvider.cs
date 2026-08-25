@@ -5,7 +5,6 @@ namespace ktsu.GitIntegration;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -16,7 +15,6 @@ using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
-using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
 /// <summary>
@@ -426,11 +424,11 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <returns>The equivalent <see cref="GitRepository"/>.</returns>
 	/// <exception cref="GitHostingRequestException">
 	/// <paramref name="repository"/>'s name is missing or cannot be represented as a local directory.
-	/// See <see cref="GitProvider.ToLocalDirectoryLeaf(string, GitProviderName)"/>.
+	/// See <see cref="GitProvider.ToLocalRepositoryPath(string, GitProviderName)"/>.
 	/// </exception>
 	private GitRepository ToGitRepository(AzureDevOpsRepository repository) => new()
 	{
-		LocalPath = Path.Combine(Environment.CurrentDirectory, ToLocalDirectoryLeaf(repository.Name, Name)).As<AbsoluteDirectoryPath>(),
+		LocalPath = ToLocalRepositoryPath(repository.Name, Name),
 		Name = repository.Name is string repositoryName ? repositoryName.As<GitRepositoryName>() : null,
 		WebURI = repository.WebUrl is string webUrl ? webUrl.As<GitRepositoryWebURI>() : null,
 		RemotePath = repository.RemoteUrl is string remoteUrl ? remoteUrl.As<GitRepositoryRemotePath>() : null,

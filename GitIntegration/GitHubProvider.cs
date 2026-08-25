@@ -5,14 +5,12 @@ namespace ktsu.GitIntegration;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
-using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
 using Octokit;
@@ -248,11 +246,11 @@ public sealed class GitHubProvider : GitProvider
 	/// <returns>The equivalent <see cref="GitRepository"/>.</returns>
 	/// <exception cref="GitHostingRequestException">
 	/// <paramref name="repository"/>'s name cannot be represented as a local directory. See
-	/// <see cref="GitProvider.ToLocalDirectoryLeaf(string, GitProviderName)"/>.
+	/// <see cref="GitProvider.ToLocalRepositoryPath(string, GitProviderName)"/>.
 	/// </exception>
 	private GitRepository ToGitRepository(Repository repository) => new()
 	{
-		LocalPath = Path.Combine(Environment.CurrentDirectory, ToLocalDirectoryLeaf(repository.Name, Name)).As<AbsoluteDirectoryPath>(),
+		LocalPath = ToLocalRepositoryPath(repository.Name, Name),
 		Name = repository.Name.As<GitRepositoryName>(),
 		WebURI = repository.HtmlUrl.As<GitRepositoryWebURI>(),
 		RemotePath = repository.CloneUrl.As<GitRepositoryRemotePath>(),
