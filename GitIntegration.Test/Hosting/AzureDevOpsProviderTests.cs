@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -21,6 +22,9 @@ using CredentialCache = ktsu.CredentialCache.CredentialCache;
 [TestClass]
 public sealed class AzureDevOpsProviderTests
 {
+	/// <summary>A non-JSON body of the kind a proxy or sign-on page returns under a success status.</summary>
+	private const string SignInPage = "<!DOCTYPE html><html><body>Sign in to continue</body></html>";
+
 	// CredentialCache.Instance is configured onto an in-memory store exactly once, assembly-wide, by
 	// CredentialCacheAssemblySetup's [AssemblyInitialize] — see that type's remarks for why a
 	// per-class initializer doing this would race under this assembly's method-level test
@@ -56,6 +60,42 @@ public sealed class AzureDevOpsProviderTests
 	/// </remarks>
 	private static string WithWebLink(string json, string href) =>
 		json.Replace("\"_links\": {", $"\"_links\": {{\n    \"web\": {{ \"href\": \"{href}\" }},", StringComparison.Ordinal);
+
+	/// <summary>
+	/// Wraps one copy of the captured create-response fixture per supplied id in the pull-request-list
+	/// envelope, substituting each copy's <c>pullRequestId</c>.
+	/// </summary>
+	/// <remarks>
+	/// Paging cannot be exercised from a captured fixture alone: the provider asks for a page at a time
+	/// and treats a page short of what it asked for as the last one, so proving it fetches a second page
+	/// needs a first page that is genuinely full, and no captured response is that long. Only
+	/// <c>pullRequestId</c> varies between the copies, which is what lets an assertion tell one page's
+	/// entries from the other's.
+	/// </remarks>
+	/// <param name="pullRequestIds">The <c>pullRequestId</c> to give each entry, in order.</param>
+	private static string PullRequestListPage(IEnumerable<int> pullRequestIds)
+	{
+		string template = Fixture("azure-devops-pullrequest-created.json");
+
+		string[] entries = [.. pullRequestIds.Select(id =>
+			template.Replace("\"pullRequestId\": 22", $"\"pullRequestId\": {id}", StringComparison.Ordinal))];
+
+		return $"{{\"value\":[{string.Join(",", entries)}],\"count\":{entries.Length}}}";
+	}
+
+	/// <summary>
+	/// Adds <c>"isDraft": true</c> to every pull request object in a captured payload.
+	/// </summary>
+	/// <remarks>
+	/// The field is confirmed in Microsoft's schema but populated in none of the published example
+	/// responses, so no captured fixture carries it, and its absence maps to
+	/// <see cref="GitPullRequest.IsDraft"/>'s own <see langword="false"/> default. Asserting that
+	/// default would pass with the mapping deleted, so the flag has to be varied to be worth asserting.
+	/// The same additive treatment <see cref="WithWebLink"/> applies, for the same reason.
+	/// </remarks>
+	/// <param name="json">The captured payload to add the flag to.</param>
+	private static string WithDraftFlag(string json) =>
+		json.Replace("\"status\": \"active\",", "\"isDraft\": true, \"status\": \"active\",", StringComparison.Ordinal);
 
 	[TestMethod]
 	public async Task RequestsTheOrganizationWideRepositoryEndpointWhenNoProjectIsSetAsync()
@@ -314,6 +354,11 @@ public sealed class AzureDevOpsProviderTests
 		Assert.AreEqual(
 			"https://dev.azure.com/contoso/ExampleProject/_apis/git/repositories/example-repo/pullrequests",
 			handler.Requests[0].Uri.GetLeftPart(UriPartial.Path));
+
+		// A first page short of the size asked for is the last page, so this costs exactly one
+		// request. Without this, a paging bug that always asked for one page too many would show
+		// up only as an unrelated "no queued response" failure.
+		Assert.AreEqual(1, handler.Requests.Count);
 	}
 
 	[TestMethod]
@@ -362,7 +407,7 @@ public sealed class AzureDevOpsProviderTests
 	public async Task ParsesEveryPullRequestFieldAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, Fixture("azure-devops-pullrequests.json"), ("Content-Type", "application/json"));
+			.Respond(HttpStatusCode.OK, WithDraftFlag(Fixture("azure-devops-pullrequests.json")), ("Content-Type", "application/json"));
 		AzureDevOpsProvider provider = new()
 		{
 			Owner = "contoso".As<GitProviderOwner>(),
@@ -384,7 +429,10 @@ public sealed class AzureDevOpsProviderTests
 		Assert.AreEqual("new_feature".As<GitBranchName>(), pullRequest.TargetBranch);
 		Assert.AreEqual("example-user@contoso.example".As<GitPullRequestAuthor>(), pullRequest.Author);
 		Assert.AreEqual(GitPullRequestState.Open, pullRequest.State);
-		Assert.IsFalse(pullRequest.IsDraft);
+		// Asserted true, against a fixture varied to carry "isDraft": true. False is
+		// GitPullRequest.IsDraft's own default, so asserting it would still pass with the
+		// mapping deleted. See WithDraftFlag.
+		Assert.IsTrue(pullRequest.IsDraft);
 		// None of the list fixture's entries populate _links at all (findings section 3), so WebURI
 		// stays null rather than being guessed from "url", the API address.
 		Assert.IsNull(pullRequest.WebURI);
@@ -519,6 +567,132 @@ public sealed class AzureDevOpsProviderTests
 				.ConfigureAwait(false);
 			Assert.AreEqual(GitPullRequestState.Closed, pullRequests[0].State);
 		}
+	}
+
+	[TestMethod]
+	public async Task FetchesEveryPageOfPullRequestsAsync()
+	{
+		// A first page returned full is the only thing that makes the provider ask for a second, and
+		// Azure DevOps documents no continuation token on this endpoint, so a short page is the only
+		// end-of-results signal available. 100 is the $top the provider sends.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, PullRequestListPage(Enumerable.Range(1, 100)), ("Content-Type", "application/json"))
+			.Respond(HttpStatusCode.OK, PullRequestListPage([101, 102]), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		// $top and $skip are the documented pagination for this endpoint, and $top is sent on the
+		// first page too: without it a short page could equally mean the service applied its own
+		// default, and the provider could not tell the last page from a truncated one.
+		Assert.AreEqual(2, handler.Requests.Count);
+		StringAssert.Contains(handler.Requests[0].Uri.Query, "$top=100");
+		StringAssert.Contains(handler.Requests[0].Uri.Query, "$skip=0");
+		StringAssert.Contains(handler.Requests[1].Uri.Query, "$top=100");
+		StringAssert.Contains(handler.Requests[1].Uri.Query, "$skip=100");
+
+		// The second page's entries are in the result, not merely its request issued: returning only
+		// the first page's 100 is exactly the silent truncation paging exists to avoid.
+		Assert.AreEqual(102, pullRequests.Count);
+		Assert.AreEqual("1".As<GitPullRequestNumber>(), pullRequests[0].Number);
+		Assert.AreEqual("100".As<GitPullRequestNumber>(), pullRequests[99].Number);
+		Assert.AreEqual("101".As<GitPullRequestNumber>(), pullRequests[100].Number);
+		Assert.AreEqual("102".As<GitPullRequestNumber>(), pullRequests[101].Number);
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnUnparsableRepositoryListBodyToGitHostingRequestExceptionAsync()
+	{
+		// A 200 carrying HTML is what a proxy interstitial, a captive portal, or a single sign-on
+		// redirect page looks like. Unwrapped, System.Text.Json's JsonException would escape a public
+		// method whose documented failure surface is the GitHostingException hierarchy.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SignInPage, ("Content-Type", "text/html"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		// The status the host actually reported, not a synthesised failure code.
+		Assert.AreEqual(HttpStatusCode.OK, exception.StatusCode);
+		// The body travels on the exception, which is what makes such a page diagnosable rather than
+		// a parse error with no evidence attached.
+		StringAssert.Contains(exception.ResponseBody, "Sign in to continue");
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnUnparsablePullRequestListBodyToGitHostingRequestExceptionAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SignInPage, ("Content-Type", "text/html"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.OK, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "Sign in to continue");
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnUnparsableCreateResponseBodyToGitHostingRequestExceptionAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.Created, SignInPage, ("Content-Type", "text/html"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+				.From("a".As<GitBranchName>()).Into("b".As<GitBranchName>()).Titled("t".As<GitPullRequestTitle>())
+				.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.Created, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "Sign in to continue");
+	}
+
+	[TestMethod]
+	public async Task LeavesAnInjectedHandlerUndisposedAndUsableForASecondCallAsync()
+	{
+		// The GitHubProviderTests counterpart, through the other transport: this provider builds a
+		// per-call HttpClient and disposes it after every request, which must not take the injected
+		// handler with it. It equally protects the shared default handler, which a test cannot
+		// observe directly.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-repositories.json"), ("Content-Type", "application/json"))
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-repositories.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		IReadOnlyList<GitRepository> first =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(handler.WasDisposed);
+
+		IReadOnlyList<GitRepository> second =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(handler.WasDisposed);
+
+		Assert.AreEqual(2, handler.Requests.Count);
+		Assert.AreEqual("example-repo-1".As<GitRepositoryName>(), first[0].Name);
+		Assert.AreEqual("example-repo-1".As<GitRepositoryName>(), second[0].Name);
 	}
 
 	public TestContext TestContext { get; set; } = null!;

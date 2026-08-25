@@ -24,6 +24,21 @@ using Octokit.Internal;
 public sealed class GitHubProvider : GitProvider
 {
 	/// <summary>
+	/// The transport every <see cref="GitHubProvider"/> call shares when no
+	/// <see cref="GitProvider.Handler"/> was injected.
+	/// </summary>
+	/// <remarks>
+	/// Its own instance rather than the one behind <see cref="GitProvider.CreateHttpClient"/>,
+	/// because the two never talk to the same hosts and a connection pool is per host anyway. What
+	/// matters is that it is one handler for the process rather than one per call, and
+	/// <see cref="GitProvider.CreateDefaultHandler"/> is what keeps the two providers' settings from
+	/// drifting apart. It replaces a per-call
+	/// <c>Octokit.Internal.HttpMessageHandlerFactory.CreateDefault()</c>, whose settings that factory
+	/// reproduces.
+	/// </remarks>
+	private static readonly SocketsHttpHandler SharedHandler = CreateDefaultHandler();
+
+	/// <summary>
 	/// Gets the name of this Git provider.
 	/// </summary>
 	public override GitProviderName Name => "GitHub".As<GitProviderName>();
@@ -136,25 +151,22 @@ public sealed class GitHubProvider : GitProvider
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// Both branches go through <see cref="HttpClientAdapter"/> and always hand back a real,
-	/// disposable transport — there is no "Octokit manages its own transport" free path.
-	/// <see cref="GitHubClient(ProductHeaderValue)"/> looks like it would give Octokit that
-	/// responsibility, but it does not: internally it builds exactly the same
-	/// <see cref="HttpClientAdapter"/>-over-<see cref="HttpClient"/> chain this method would build by
-	/// hand, and nothing in <see cref="GitHubClient"/> or <see cref="Connection"/> ever disposes it,
-	/// because neither type implements <see cref="IDisposable"/>. Every call this provider makes
-	/// through a default-constructed client was leaking one <see cref="HttpClient"/> — and its
-	/// underlying socket handler — until this method started constructing that same default handler
-	/// itself, via <see cref="Octokit.Internal.HttpMessageHandlerFactory.CreateDefault()"/>, so its
-	/// caller can dispose it exactly like the injected-<see cref="GitProvider.Handler"/> case.
+	/// The adapter is per call and the handler underneath it is not.
+	/// <see cref="HttpClientAdapter"/> disposes whatever <see cref="HttpMessageHandler"/> its factory
+	/// produced, and neither handler this method can reach belongs to it: <see cref="SharedHandler"/>
+	/// has to outlive every call, and an injected <see cref="GitProvider.Handler"/> belongs to
+	/// whoever supplied it. <see cref="NonOwningHandler"/> stands between the adapter and both,
+	/// absorbing that teardown without forwarding it, so the caller can still dispose the adapter
+	/// after every request.
 	/// </para>
 	/// <para>
-	/// When <see cref="GitProvider.Handler"/> is set — a test's fake, reached only because the test
-	/// project has <c>InternalsVisibleTo</c> — <see cref="NonOwningHandler"/> stands between the
-	/// adapter and that handler: <see cref="HttpClientAdapter"/>'s <c>Dispose</c> tears down whatever
-	/// <see cref="HttpMessageHandler"/> its factory produced, and the injected handler belongs to
-	/// whoever supplied it, not to this provider. <see cref="NonOwningHandler"/> absorbs that
-	/// teardown without forwarding it.
+	/// The adapter must be disposed, and there is no "Octokit manages its own transport" free path
+	/// to fall back on. <see cref="GitHubClient(ProductHeaderValue)"/> looks like it would give
+	/// Octokit that responsibility, but it does not: internally it builds exactly the same
+	/// <see cref="HttpClientAdapter"/>-over-<see cref="HttpClient"/> chain this method builds by
+	/// hand, and nothing in <see cref="GitHubClient"/> or <see cref="Connection"/> ever disposes it,
+	/// because neither type implements <see cref="IDisposable"/>. Every call this provider makes
+	/// through a default-constructed client leaks one <see cref="HttpClient"/>.
 	/// </para>
 	/// <para>
 	/// <see cref="GitProvider.ResolveCredential"/> runs before either transport is constructed: it
@@ -173,9 +185,8 @@ public sealed class GitHubProvider : GitProvider
 		Credentials credentials = ToOctokitCredentials(ResolveCredential());
 		ProductHeaderValue product = new(AppDomain.CurrentDomain.FriendlyName);
 
-		HttpClientAdapter adapter = Handler is null
-			? new(HttpMessageHandlerFactory.CreateDefault)
-			: new(() => new NonOwningHandler(Handler));
+		HttpMessageHandler transport = Handler ?? SharedHandler;
+		HttpClientAdapter adapter = new(() => new NonOwningHandler(transport));
 
 		GitHubClient client = new(new Connection(product, adapter)) { Credentials = credentials };
 
@@ -183,7 +194,7 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <summary>
-	/// A pass-through transport whose disposal stops at itself, so wrapping a caller-owned
+	/// A pass-through transport whose disposal stops at itself, so wrapping an
 	/// <see cref="HttpMessageHandler"/> in it never disposes that handler.
 	/// </summary>
 	/// <remarks>
@@ -193,6 +204,10 @@ public sealed class GitHubProvider : GitProvider
 	/// CA2215 rightly refuses to allow. <see cref="HttpMessageInvoker"/>'s two-argument constructor
 	/// takes a <c>disposeHandler</c> flag built for exactly this: forwarding requests to a handler
 	/// this instance does not own.
+	///
+	/// Only this provider needs it. <see cref="GitProvider.CreateHttpClient"/> says the same thing
+	/// with <see cref="HttpClient(HttpMessageHandler, bool)"/>'s own <c>disposeHandler</c> flag,
+	/// which <see cref="HttpClientAdapter"/> has no equivalent of.
 	/// </remarks>
 	/// <param name="inner">The handler to forward every request to. Never disposed by this instance.</param>
 	private sealed class NonOwningHandler(HttpMessageHandler inner) : HttpMessageHandler
@@ -297,6 +312,23 @@ public sealed class GitHubProvider : GitProvider
 	/// <summary>
 	/// Maps an Octokit API failure onto this library's hosting exception hierarchy.
 	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// The arm order is load-bearing. <see cref="RateLimitExceededException"/>,
+	/// <see cref="SecondaryRateLimitExceededException"/>, and <see cref="AbuseException"/> all derive
+	/// from <see cref="ForbiddenException"/>, so the three specific arms must precede the general one
+	/// or a rate-limit failure would be reported as an authentication failure instead.
+	/// </para>
+	/// <para>
+	/// <see cref="ForbiddenException"/> maps to <see cref="GitHostingAuthenticationException"/>, and
+	/// not to the default arm, because Octokit's <see cref="AuthorizationException"/> derives from
+	/// <see cref="ApiException"/> rather than from <see cref="ForbiddenException"/>. Without its own
+	/// arm a plain 403, which is how GitHub reports "resource not accessible by personal access
+	/// token", would fall through to <see cref="GitHostingRequestException"/>. A caller writing
+	/// host-agnostic <c>catch (GitHostingAuthenticationException)</c> would then handle that failure
+	/// on Azure DevOps and miss it on GitHub, and the two providers exist to be interchangeable.
+	/// </para>
+	/// </remarks>
 	/// <param name="exception">The failure Octokit reported.</param>
 	/// <returns>The equivalent <see cref="GitHostingException"/>, ready to throw.</returns>
 	private GitHostingException Translate(ApiException exception)
@@ -308,10 +340,31 @@ public sealed class GitHubProvider : GitProvider
 
 		return exception switch
 		{
-			AuthorizationException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
-			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody),
 			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset),
+			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null),
+			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds)),
+			AuthorizationException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
+			ForbiddenException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
+			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody),
 			_ => new GitHostingRequestException(exception.Message, Name, exception.StatusCode, responseBody),
 		};
 	}
+
+	/// <summary>
+	/// Converts an abuse-detection <c>Retry-After</c> delay into the absolute reset time
+	/// <see cref="GitHostingRateLimitException.ResetsAt"/> reports.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="AbuseException.RetryAfterSeconds"/> is a relative delay, and
+	/// <see cref="GitHostingRateLimitException.ResetsAt"/> is an absolute instant, because that is
+	/// what <see cref="RateLimitExceededException.Reset"/> and Azure DevOps's
+	/// <c>X-RateLimit-Reset</c> both report. Anchoring to <see cref="DateTimeOffset.UtcNow"/> loses
+	/// however long the failed request itself took, which makes the result marginally early rather
+	/// than late, and a caller that waits slightly too long is safe where one that waits too little
+	/// is not.
+	/// </remarks>
+	/// <param name="retryAfterSeconds">The delay GitHub asked for, or <see langword="null"/> when it sent no <c>Retry-After</c>.</param>
+	/// <returns>The absolute reset time, or <see langword="null"/> when no delay was reported.</returns>
+	private static DateTimeOffset? ToResetTime(int? retryAfterSeconds) =>
+		retryAfterSeconds is int seconds ? DateTimeOffset.UtcNow.AddSeconds(seconds) : null;
 }

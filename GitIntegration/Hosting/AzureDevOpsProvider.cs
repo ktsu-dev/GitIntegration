@@ -12,6 +12,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,9 +27,9 @@ using ktsu.Semantics.Strings;
 /// DevOps hosting support was deliberately kept off the two official TFS/Azure DevOps client
 /// packages, because they pull a package with a known high-severity advisory into this library's
 /// dependency graph (see <see cref="GitProvider"/>'s remarks on the hosting layer). Every request
-/// here is therefore built and parsed by hand, against the exact URL templates, <c>api-version</c>,
-/// and field names recorded in
-/// <c>docs/superpowers/research/2026-08-21-azure-devops-rest-findings.md</c>.
+/// here is therefore built and parsed by hand, against URL templates, an <c>api-version</c>, and
+/// field names taken from Microsoft's published REST reference rather than from how the API is
+/// assumed to behave.
 /// </remarks>
 public sealed class AzureDevOpsProvider : GitProvider
 {
@@ -36,13 +37,26 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// The <c>api-version</c> query parameter every request in this provider carries.
 	/// </summary>
 	/// <remarks>
-	/// <c>7.1</c>, not the <c>7.2-preview.2</c> the documentation's default view reports — findings
-	/// section 1 confirms 7.1 is stable, documents every field and query parameter this provider
-	/// needs, and rules out the preview surface deliberately: a <c>-preview</c> pin is a durable
-	/// liability for a library shipped to nuget.org, since Microsoft can change or withdraw it under
-	/// a consumer who already upgraded.
+	/// <c>7.1</c>, not the <c>7.2-preview.2</c> the documentation's default view reports. 7.1 is
+	/// stable and documents every field and query parameter this provider needs, and the preview
+	/// surface is ruled out deliberately: a <c>-preview</c> pin is a durable liability for a library
+	/// shipped to nuget.org, since Microsoft can change or withdraw it under a consumer who already
+	/// upgraded.
 	/// </remarks>
 	private const string ApiVersion = "7.1";
+
+	/// <summary>
+	/// The number of pull requests each page of <see cref="GetPullRequestsAsync"/> asks for, sent as
+	/// <c>$top</c>.
+	/// </summary>
+	/// <remarks>
+	/// Azure DevOps documents no continuation-token header on this endpoint, so <c>$top</c>/<c>$skip</c>
+	/// is the only pagination available and a short page is the only end-of-results signal there is.
+	/// The value therefore has to be sent rather than left to the service's default: without a
+	/// <c>$top</c> this provider could not tell a final page from a defaulted one, and would silently
+	/// truncate every repository holding more open pull requests than that default.
+	/// </remarks>
+	private const int PullRequestPageSize = 100;
 
 	/// <summary>
 	/// Gets the name of this Git provider.
@@ -56,9 +70,9 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// </summary>
 	/// <remarks>
 	/// Azure DevOps nests repositories under a project, which GitHub has no equivalent of — see
-	/// <see cref="AzureDevOpsProjectName"/>'s remarks. Findings section 2 confirms the org-wide and
-	/// project-scoped forms are the same endpoint with the project path segment present or absent,
-	/// not two different routes, which is exactly what <see cref="Project"/> being optional models.
+	/// <see cref="AzureDevOpsProjectName"/>'s remarks. The org-wide and project-scoped forms are the
+	/// same endpoint with the project path segment present or absent, not two different routes, which
+	/// is exactly what <see cref="Project"/> being optional models.
 	/// Pull request operations are the asymmetric case: Azure DevOps has no project-less pull-request
 	/// endpoint, so <see cref="GetPullRequestsAsync"/> and <see cref="CreatePullRequestCoreAsync"/>
 	/// both require <see cref="Project"/> to be set and throw <see cref="InvalidOperationException"/>
@@ -71,10 +85,10 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <inheritdoc/>
 	/// <remarks>
 	/// Calls <c>GET https://dev.azure.com/{organization}/[{project}/]_apis/git/repositories</c> —
-	/// the project path segment appears only when <see cref="Project"/> is set. Findings section 5
-	/// confirms this endpoint has no pagination parameters at all: the response is the complete
-	/// repository list for the organisation or project on every call, so this method issues exactly
-	/// one request.
+	/// the project path segment appears only when <see cref="Project"/> is set. This endpoint
+	/// documents no pagination parameters at all: the response is the complete repository list for
+	/// the organisation or project on every call, so this method issues exactly one request. That is
+	/// what makes it differ from <see cref="GetPullRequestsAsync"/>, which must page.
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
 	{
@@ -102,35 +116,46 @@ public sealed class AzureDevOpsProvider : GitProvider
 				throw Translate(response, body);
 			}
 
-			AzureDevOpsRepositoryListResponse? parsed = JsonSerializer.Deserialize(
-				body, AzureDevOpsJsonContext.Default.AzureDevOpsRepositoryListResponse);
+			AzureDevOpsRepositoryListResponse? parsed = DeserializeSuccessBody(
+				body, AzureDevOpsJsonContext.Default.AzureDevOpsRepositoryListResponse, response.StatusCode);
 
 			return parsed is null ? [] : [.. parsed.Value.Select(ToGitRepository)];
 		}
 		finally
 		{
 			// This client owns its handler exactly when it constructed one — CreateHttpClient's
-			// disposeHandler flag is false whenever a test injected Handler, so disposing here never
-			// tears down a handler this provider does not own and a later call would reuse.
+			// disposeHandler flag is false for every handler this provider did not construct, so
+			// disposing here never tears down a handler a later call would reuse.
 			client.Dispose();
 		}
 	}
 
 	/// <inheritdoc/>
 	/// <remarks>
+	/// <para>
 	/// Calls <c>GET .../repositories/{repositoryId}/pullrequests</c> with
-	/// <c>searchCriteria.status=active</c> sent explicitly (findings section 3: the endpoint's
-	/// documented default is already <c>active</c>, but <see cref="IGitHostingProvider.GetPullRequestsAsync"/>'s
-	/// contract is defined by this library, not by restating whatever a host happens to default to
-	/// today). <c>{repositoryId}</c> is filled with <paramref name="repositoryName"/>, which is
-	/// unconfirmed against the documented schema, not sanctioned by it: Microsoft's reference types
-	/// that parameter as a repository <b>id</b> (<c>GitRepository.id</c> is a <c>string (uuid)</c>),
-	/// and draws an explicit id-or-name distinction for the sibling <c>project</c> parameter without
-	/// drawing one here — a distinction Microsoft states where it applies reads as deliberate where it
-	/// is withheld. This library passes the name anyway because <see cref="IGitHostingProvider"/>
-	/// exposes no repository id for a caller to supply. It very likely works today; that is a
-	/// different property from being specified, and only the specified kind survives a vendor's next
-	/// change unannounced.
+	/// <c>searchCriteria.status=active</c> sent explicitly. The endpoint's documented default is
+	/// already <c>active</c>, but <see cref="IGitHostingProvider.GetPullRequestsAsync"/>'s contract is
+	/// defined by this library, not by restating whatever a host happens to default to today.
+	/// </para>
+	/// <para>
+	/// Pages with <c>$top</c> and <c>$skip</c>, the only pagination this endpoint documents, and
+	/// issues requests until one comes back holding fewer than <see cref="PullRequestPageSize"/> pull
+	/// requests. A repository with more open pull requests than one page therefore costs more than
+	/// one request, which is the price of not truncating the answer. <see cref="GetRepositoriesAsync"/>
+	/// needs none of this, because its endpoint documents no pagination at all.
+	/// </para>
+	/// <para>
+	/// <c>{repositoryId}</c> is filled with <paramref name="repositoryName"/>, which is unconfirmed
+	/// against the documented schema, not sanctioned by it: Microsoft's reference types that parameter
+	/// as a repository <b>id</b> (<c>GitRepository.id</c> is a <c>string (uuid)</c>), and draws an
+	/// explicit id-or-name distinction for the sibling <c>project</c> parameter without drawing one
+	/// here — a distinction Microsoft states where it applies reads as deliberate where it is
+	/// withheld. This library passes the name anyway because <see cref="IGitHostingProvider"/> exposes
+	/// no repository id for a caller to supply. It very likely works today; that is a different
+	/// property from being specified, and only the specified kind survives a vendor's next change
+	/// unannounced.
+	/// </para>
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
 	public override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default)
@@ -139,28 +164,45 @@ public sealed class AzureDevOpsProvider : GitProvider
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();
 
-		Uri requestUri = BuildPullRequestsUri(repositoryName, includeActiveFilter: true);
 		HostingCredential credential = ResolveCredential();
 
 		HttpClient client = CreateHttpClient();
 
 		try
 		{
-			using HttpRequestMessage request = new(HttpMethod.Get, requestUri);
-			ApplyAuthentication(request, credential);
+			List<GitPullRequest> pullRequests = [];
+			int skip = 0;
+			bool morePages = true;
 
-			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-			string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-			if (!response.IsSuccessStatusCode)
+			while (morePages)
 			{
-				throw Translate(response, body);
+				using HttpRequestMessage request = new(HttpMethod.Get, BuildPullRequestListUri(repositoryName, skip));
+				ApplyAuthentication(request, credential);
+
+				using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+				string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+				if (!response.IsSuccessStatusCode)
+				{
+					throw Translate(response, body);
+				}
+
+				AzureDevOpsPullRequestListResponse? parsed = DeserializeSuccessBody(
+					body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestListResponse, response.StatusCode);
+
+				IReadOnlyList<AzureDevOpsPullRequest> page = parsed?.Value ?? [];
+				pullRequests.AddRange(page.Select(ToGitPullRequest));
+
+				// Advanced by what actually arrived rather than by the page size asked for, so a
+				// service returning more than $top would skip past the entries it already sent
+				// instead of requesting them a second time. A page short of the size asked for is
+				// the last one, and an empty page ends the loop without advancing forever, since a
+				// continuing page always advances skip by at least PullRequestPageSize.
+				skip += page.Count;
+				morePages = page.Count >= PullRequestPageSize;
 			}
 
-			AzureDevOpsPullRequestListResponse? parsed = JsonSerializer.Deserialize(
-				body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestListResponse);
-
-			return parsed is null ? [] : [.. parsed.Value.Select(ToGitPullRequest)];
+			return pullRequests;
 		}
 		finally
 		{
@@ -170,14 +212,14 @@ public sealed class AzureDevOpsProvider : GitProvider
 
 	/// <inheritdoc/>
 	/// <remarks>
-	/// Calls <c>POST .../repositories/{repositoryId}/pullrequests</c> with the request body documented
-	/// in findings section 4. <see cref="GitPullRequestSpecification.Source"/> and
+	/// Calls <c>POST .../repositories/{repositoryId}/pullrequests</c>.
+	/// <see cref="GitPullRequestSpecification.Source"/> and
 	/// <see cref="GitPullRequestSpecification.Target"/> are bare branch names — this library's own
 	/// normalisation, matching what a caller gets back from every read path — so they are qualified
 	/// with <c>refs/heads/</c> here before being sent, the reverse of the stripping
 	/// <see cref="ToGitPullRequest(AzureDevOpsPullRequest)"/> does on the way back in. The response is
 	/// the created pull request; Microsoft's own worked example reports <c>201</c> despite the
-	/// endpoint's response table saying <c>200</c> (findings section 4), so this method checks
+	/// endpoint's response table saying <c>200</c>, so this method checks
 	/// <see cref="HttpResponseMessage.IsSuccessStatusCode"/> rather than a specific status code.
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
@@ -188,7 +230,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();
 
-		Uri requestUri = BuildPullRequestsUri(repositoryName, includeActiveFilter: false);
+		Uri requestUri = BuildPullRequestCreateUri(repositoryName);
 		HostingCredential credential = ResolveCredential();
 
 		AzureDevOpsPullRequestCreateRequest requestBody = new()
@@ -220,7 +262,8 @@ public sealed class AzureDevOpsProvider : GitProvider
 				throw Translate(response, body);
 			}
 
-			AzureDevOpsPullRequest? parsed = JsonSerializer.Deserialize(body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequest);
+			AzureDevOpsPullRequest? parsed = DeserializeSuccessBody(
+				body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequest, response.StatusCode);
 
 			return parsed is null
 				? throw new GitHostingRequestException(
@@ -268,32 +311,85 @@ public sealed class AzureDevOpsProvider : GitProvider
 	}
 
 	/// <summary>
-	/// Builds the pull-request-list or pull-request-create request URI for a repository, scoped to
-	/// this provider's <see cref="GitProvider.Owner"/> and <see cref="Project"/>.
+	/// Builds the URI for one page of a repository's pull request listing.
+	/// </summary>
+	/// <remarks>
+	/// <c>$top</c> is sent on every page, including the first, so a short page always means the last
+	/// page rather than possibly meaning a defaulted one. See <see cref="PullRequestPageSize"/>.
+	/// </remarks>
+	/// <param name="repositoryName">The repository the URI is scoped to.</param>
+	/// <param name="skip">How many pull requests the service should pass over before filling this page.</param>
+	/// <returns>The request URI, carrying <see cref="ApiVersion"/>.</returns>
+	private Uri BuildPullRequestListUri(GitRepositoryName repositoryName, int skip) =>
+		new($"{PullRequestsPath(repositoryName)}?searchCriteria.status=active&$top={PullRequestPageSize}&$skip={skip.ToString(CultureInfo.InvariantCulture)}&api-version={ApiVersion}");
+
+	/// <summary>
+	/// Builds the URI a pull request is created against.
+	/// </summary>
+	/// <remarks>
+	/// The same path as the listing, without the listing's query parameters: Microsoft's reference
+	/// documents no search criteria and no pagination on the creating <c>POST</c>.
+	/// </remarks>
+	/// <param name="repositoryName">The repository the pull request is opened against.</param>
+	/// <returns>The request URI, carrying <see cref="ApiVersion"/>.</returns>
+	private Uri BuildPullRequestCreateUri(GitRepositoryName repositoryName) =>
+		new($"{PullRequestsPath(repositoryName)}?api-version={ApiVersion}");
+
+	/// <summary>
+	/// Builds the pull request endpoint's path for a repository, scoped to this provider's
+	/// <see cref="GitProvider.Owner"/> and <see cref="Project"/>.
 	/// </summary>
 	/// <remarks>
 	/// Callers must have already checked <see cref="Project"/> is non-<see langword="null"/> — see
 	/// <see cref="EnsureProjectIsSet"/> — since a pull request URI has no project-less form to fall
 	/// back to.
 	/// </remarks>
-	/// <param name="repositoryName">The repository the URI is scoped to.</param>
-	/// <param name="includeActiveFilter">
-	/// Whether to append <c>searchCriteria.status=active</c> — set for the listing GET, unset for the
-	/// creating POST, which findings section 4 does not document taking a search criteria at all.
-	/// </param>
-	/// <returns>The request URI, carrying <see cref="ApiVersion"/>.</returns>
-	private Uri BuildPullRequestsUri(GitRepositoryName repositoryName, bool includeActiveFilter)
+	/// <param name="repositoryName">The repository the path is scoped to.</param>
+	/// <returns>The endpoint path, with no query string.</returns>
+	private string PullRequestsPath(GitRepositoryName repositoryName)
 	{
 		string organization = Uri.EscapeDataString(Owner.WeakString);
 		string project = Uri.EscapeDataString(Project!.WeakString);
 		string repository = Uri.EscapeDataString(repositoryName.WeakString);
 
-		string path = $"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repository}/pullrequests";
-		string query = includeActiveFilter
-			? $"?searchCriteria.status=active&api-version={ApiVersion}"
-			: $"?api-version={ApiVersion}";
+		return $"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repository}/pullrequests";
+	}
 
-		return new Uri(path + query);
+	/// <summary>
+	/// Deserializes the body of a response the host reported as successful, reporting a body that is
+	/// not the JSON this provider expects as a <see cref="GitHostingRequestException"/>.
+	/// </summary>
+	/// <remarks>
+	/// A success status code is not a promise that the body came from Azure DevOps. A proxy
+	/// interstitial, a captive portal, or a single sign-on redirect page all arrive as HTML under a
+	/// <c>200</c>, and an unwrapped <see cref="JsonException"/> would then escape a public method
+	/// whose documented failure surface is the <see cref="GitHostingException"/> hierarchy. The
+	/// original body travels on <see cref="GitHostingException.ResponseBody"/>, which is what makes
+	/// such a page diagnosable rather than merely a parse error. Failure bodies need no equivalent:
+	/// <see cref="ExtractMessage"/> already treats an unparsable one as the message itself.
+	/// </remarks>
+	/// <typeparam name="T">The shape the body is expected to have.</typeparam>
+	/// <param name="body">The response body, already read.</param>
+	/// <param name="typeInfo">The source-generated metadata to deserialize <typeparamref name="T"/> with.</param>
+	/// <param name="statusCode">The status code the host reported, carried onto any exception thrown.</param>
+	/// <returns>The deserialized body, or <see langword="null"/> when the body was JSON <c>null</c>.</returns>
+	/// <exception cref="GitHostingRequestException">The body is not valid JSON of the expected shape.</exception>
+	private T? DeserializeSuccessBody<T>(string body, JsonTypeInfo<T> typeInfo, HttpStatusCode statusCode)
+	{
+		try
+		{
+			return JsonSerializer.Deserialize(body, typeInfo);
+		}
+		catch (JsonException exception)
+		{
+			// The parse failure's own message is folded into the text rather than carried as an inner
+			// exception, because this hierarchy's four-argument constructors take no inner exception.
+			throw new GitHostingRequestException(
+				$"Azure DevOps reported success but returned a body that is not the expected JSON: {exception.Message}",
+				Name,
+				statusCode,
+				body);
+		}
 	}
 
 	/// <summary>

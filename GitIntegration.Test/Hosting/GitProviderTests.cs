@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration.Test;
 
 using System;
 using System.Collections.Generic;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -91,6 +92,82 @@ public sealed class GitProviderTests
 		InvalidOperationException exception = Assert.ThrowsExactly<InvalidOperationException>(() => _ = provider.CallResolveCredential());
 
 		StringAssert.Contains(exception.Message, nameof(UnrecognisedCredential));
+	}
+
+	[TestMethod]
+	public void ReportsAuthenticatedForATokenCredential()
+	{
+		PersonaGUID persona = SeedCredential(new CredentialWithToken { Token = "ghp_abc123".As<CredentialToken>() });
+		TestProvider provider = CreateProvider(persona);
+
+		Assert.IsTrue(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void ReportsAuthenticatedForAUsernamePasswordCredential()
+	{
+		PersonaGUID persona = SeedCredential(new CredentialWithUsernamePassword
+		{
+			Username = "octocat".As<CredentialUsername>(),
+			Password = "hunter2".As<CredentialPassword>(),
+		});
+		TestProvider provider = CreateProvider(persona);
+
+		Assert.IsTrue(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void ReportsUnauthenticatedWhenNoCredentialIsResolved()
+	{
+		PersonaGUID persona = CredentialCache.CreatePersonaGUID();
+		TestProvider provider = CreateProvider(persona);
+
+		Assert.IsFalse(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void ReportsUnauthenticatedForCredentialWithNothing()
+	{
+		// The case that used to report true: the credential cache holds an entry, so a bare
+		// TryGetCredential succeeds, but the entry says "proceed unauthenticated" and no request
+		// this provider issues will carry anything. ResolveCredential already maps it to
+		// HostingCredentialKind.None, and IsAuthenticated must agree with that rather than with the
+		// mere presence of an entry.
+		PersonaGUID persona = SeedCredential(new CredentialWithNothing());
+		TestProvider provider = CreateProvider(persona);
+
+		Assert.IsFalse(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void ReportsUnauthenticatedForAnUnrecognisedCredentialSubtype()
+	{
+		// A subtype ResolveCredential throws on can never be applied to a request, so reporting
+		// authenticated would be false. Reported rather than thrown: a property getter that throws
+		// would make a plain "if (provider.IsAuthenticated)" a hazard.
+		PersonaGUID persona = SeedCredential(new UnrecognisedCredential());
+		TestProvider provider = CreateProvider(persona);
+
+		Assert.IsFalse(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void TheSharedTransportBoundsItsPooledConnectionLifetime()
+	{
+		// PooledConnectionLifetime is what makes a handler held for the life of the process safe:
+		// without it a pooled connection is kept indefinitely, and the handler goes on using a host's
+		// original address long after DNS moves it. Each provider's shared handler is a private static
+		// no test can reach, so the factory both are built from is where the settings get pinned.
+		using SocketsHttpHandler handler = GitProvider.CreateDefaultHandler();
+
+		Assert.AreEqual(TimeSpan.FromMinutes(2), handler.PooledConnectionLifetime);
+
+		// Reproduce what Octokit's own default handler configures, so GitHubProvider loses nothing by
+		// sharing this shape instead of calling that factory per request.
+		Assert.IsFalse(handler.AllowAutoRedirect);
+		Assert.AreEqual(
+			System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+			handler.AutomaticDecompression);
 	}
 
 	private sealed class UnrecognisedCredential : Credential;

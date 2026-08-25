@@ -74,8 +74,10 @@ public class GitPullRequestTests
 			State = GitPullRequestState.Closed,
 		};
 
-		// A provider that failed to read a field must be indistinguishable from one whose host
-		// genuinely lacks it — null is "not known", not "known to be empty".
+		// null is "not known", never "known to be empty". That distinction is the whole point:
+		// a field a host genuinely lacks and a field a provider failed to read both read as null
+		// here, so a provider must never substitute an empty value for one it could not obtain and
+		// make the two indistinguishable from a real, populated answer.
 		Assert.IsNull(pullRequest.Description);
 		Assert.IsNull(pullRequest.Author);
 		Assert.IsNull(pullRequest.WebURI);

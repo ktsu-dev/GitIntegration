@@ -23,7 +23,7 @@
          reference. PrivateAssets="all" because this reference exists only to satisfy the analyzer, not
          as part of this library's public surface.
 
-         Here the lower resolver is the SHARED FRAMEWORK, not another package — the same Phase 4 failure
+         Here the lower resolver is the SHARED FRAMEWORK, not another package — the same failure
          mode on a different asset, and the version matters a great deal: an earlier version of this
          reference pinned System.Text.Json to 10.0.2, whose lib/net9.0 folder ships a REAL assembly
          (AssemblyVersion 10.0.0.0), so a net9.0 build compiled against a reference higher than any real

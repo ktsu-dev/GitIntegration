@@ -40,9 +40,15 @@ public interface IGitHostingProvider
 	public PersonaGUID PersonaGUID { get; }
 
 	/// <summary>
-	/// Gets a value indicating whether the user is authenticated with the remote service.
+	/// Gets a value indicating whether requests this provider issues carry a credential.
 	/// </summary>
-	/// <value><c>true</c> if authenticated; otherwise, <c>false</c>.</value>
+	/// <remarks>
+	/// Reports what a request would actually send, not merely whether a credential store holds an
+	/// entry for <see cref="PersonaGUID"/>. An entry that resolves to "proceed unauthenticated", and
+	/// an entry of a type the provider cannot apply, both report <see langword="false"/>. This is not
+	/// a check that the host would accept the credential: only a request can establish that.
+	/// </remarks>
+	/// <value><c>true</c> when a credential is resolved and applied to requests; otherwise, <c>false</c>.</value>
 	public bool IsAuthenticated { get; }
 
 	/// <summary>
@@ -56,7 +62,13 @@ public interface IGitHostingProvider
 	/// specific host's exact coverage should consult that provider's own remarks rather than assume
 	/// parity across hosts.
 	/// </remarks>
-	/// <param name="cancellationToken">A token to cancel the request.</param>
+	/// <param name="cancellationToken">
+	/// A token to cancel the request. Every provider checks it before issuing a request. Whether it
+	/// also cancels a request already in flight depends on the host's client:
+	/// <see cref="AzureDevOpsProvider"/> passes it to each HTTP call, while
+	/// <see cref="GitHubProvider"/> cannot, because Octokit exposes no overload accepting one for any
+	/// call this library makes.
+	/// </param>
 	/// <returns>The repositories reported by the host.</returns>
 	public Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default);
 
@@ -71,7 +83,13 @@ public interface IGitHostingProvider
 	/// pull requests is a filtering feature that can be added later without breaking this contract.
 	/// </remarks>
 	/// <param name="repositoryName">The repository to list pull requests for.</param>
-	/// <param name="cancellationToken">A token to cancel the request.</param>
+	/// <param name="cancellationToken">
+	/// A token to cancel the request. Every provider checks it before issuing a request. Whether it
+	/// also cancels a request already in flight depends on the host's client:
+	/// <see cref="AzureDevOpsProvider"/> passes it to each HTTP call, while
+	/// <see cref="GitHubProvider"/> cannot, because Octokit exposes no overload accepting one for any
+	/// call this library makes.
+	/// </param>
 	/// <returns>The repository's open pull requests, as reported by the host.</returns>
 	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default);
 
@@ -146,7 +164,13 @@ public interface IGitPullRequestCreateBuilder
 	/// <summary>
 	/// Submits the pull request to the host.
 	/// </summary>
-	/// <param name="cancellationToken">A token to cancel the request.</param>
+	/// <param name="cancellationToken">
+	/// A token to cancel the request. Every provider checks it before issuing a request. Whether it
+	/// also cancels a request already in flight depends on the host's client:
+	/// <see cref="AzureDevOpsProvider"/> passes it to each HTTP call, while
+	/// <see cref="GitHubProvider"/> cannot, because Octokit exposes no overload accepting one for any
+	/// call this library makes.
+	/// </param>
 	/// <returns>The pull request as the host reports it after creation.</returns>
 	/// <exception cref="System.InvalidOperationException">
 	/// A required part — the source branch, the target branch, or the title — was never supplied.

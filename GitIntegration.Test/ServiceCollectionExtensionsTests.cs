@@ -110,7 +110,7 @@ public class ServiceCollectionExtensionsTests
 		IGitClient asInterface = provider.GetRequiredService<IGitClient>();
 
 		// One singleton reached two ways, not two instances: a second client would mean two
-		// independent runners once Phase 5 gives the client per-instance state.
+		// independent runners if the client ever gains per-instance state.
 		Assert.AreSame(concrete, asInterface);
 	}
 
@@ -129,8 +129,8 @@ public class ServiceCollectionExtensionsTests
 	[TestMethod]
 	public void TheRegisteredClientCanBuildACloneBuilder()
 	{
-		// Clone needs an IFileSystemProvider, which AddGitIntegration has registered since Phase 2
-		// but nothing consumed until now. This proves the registered client can build a clone
+		// Clone needs an IFileSystemProvider, which AddGitIntegration registers but nothing
+		// consumed until now. This proves the registered client can build a clone
 		// builder, which exercises the filesystem dependency being present — it does not pin which
 		// GitClient constructor resolves, since Clone(...) succeeds under either.
 		ServiceCollection services = new();

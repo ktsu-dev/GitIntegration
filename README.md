@@ -710,7 +710,7 @@ pull request creation, over whichever transport and authentication scheme the ho
 | `Name` | `GitProviderName` | Display name of the provider. |
 | `Owner` | `GitProviderOwner` | The owner of the repositories in this provider. |
 | `PersonaGUID` | `PersonaGUID` | The persona GUID used for authentication with the provider (from `ktsu.CredentialCache`). |
-| `IsAuthenticated` | `bool` | Whether a credential is currently resolvable for this provider. |
+| `IsAuthenticated` | `bool` | Whether requests this provider issues carry a credential. A cache entry that resolves to "proceed unauthenticated", and one of a type the provider cannot apply, both report `false`. |
 
 #### Methods
 
@@ -719,14 +719,21 @@ pull request creation, over whichever transport and authentication scheme the ho
 | `GetRepositoriesAsync(CancellationToken)` | `Task<IReadOnlyList<GitRepository>>` | Retrieves the repositories `Owner` has, from the host. Coverage differs by host — see `GitHubProvider` and `AzureDevOpsProvider` below. |
 | `GetPullRequestsAsync(GitRepositoryName, CancellationToken)` | `Task<IReadOnlyList<GitPullRequest>>` | Retrieves a repository's **open** pull requests. The filter is requested explicitly of the host, not left to its default. |
 | `CreatePullRequest(GitRepositoryName)` | `IGitPullRequestCreateBuilder` | Starts building a pull request for a repository. |
-| `TryGetCredential(out Credential?)` | `bool` | Attempts to resolve a credential for this provider from the credential cache. |
 
 ### `GitProvider`
 
 The abstract base both hosting providers derive from. Implements `IGitHostingProvider` and resolves
 credentials via `TryGetCredential`/`ResolveCredential`; each concrete provider builds its own
 `HttpClient`-based transport around that credential — see `GitHubProvider` and `AzureDevOpsProvider`
-below for how the two differ.
+below for how the two differ. `public bool TryGetCredential(out Credential?)` is declared here, not
+on `IGitHostingProvider`, and reports only whether the credential cache holds an entry for this
+provider's `PersonaGUID`. `IsAuthenticated` is the narrower question of whether a request would
+actually carry one.
+
+Each provider type keeps **one** shared `SocketsHttpHandler` for the life of the process and builds
+a short-lived client or adapter over it per call, so a caller looping over many repositories reuses
+one connection pool rather than building and tearing down one per request. Neither provider is
+`IDisposable`, and neither ever disposes a handler injected for testing.
 
 ### `GitHubProvider`
 
@@ -738,6 +745,9 @@ reveal private ones, and supplying a token does not widen this.
 
 `GitProvider` implementation built on a raw `HttpClient` against Azure DevOps's REST API
 (`api-version=7.1`) — no Azure DevOps client library is referenced (see the Introduction).
+`GetPullRequestsAsync` pages with `$top` and `$skip` until a short page comes back, so a repository
+with more open pull requests than one page costs more than one request and is never truncated.
+`GetRepositoriesAsync` issues exactly one request, because that endpoint documents no pagination.
 
 #### Additional Properties
 

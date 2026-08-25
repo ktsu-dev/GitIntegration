@@ -155,6 +155,12 @@ what that target framework's own shared framework ships. No `VersionOverride` wa
 unlike the `Testably.Abstractions` case: nothing else in the graph pins `System.Text.Json` to a
 conflicting version, so a single central `PackageVersion` below both frameworks' floor is enough.
 
+One consequence of pinning it centrally rather than on the one project: this repo sets
+`CentralPackageTransitivePinningEnabled`, so `9.0.13` now applies to any future **transitive**
+dependency on `System.Text.Json` too, repo-wide. That is a note rather than a hazard, because a
+package needing a higher version would fail restore loudly rather than resolve to something
+unexpected. Raising the pin is then the fix, subject to the same `project.assets.json` check above.
+
 This fix also needs `NoWarn="NU1510"`, scoped to that one `PackageReference` item. Pinning to a
 version the SDK's package-pruning feature recognises as already covered by the framework makes NuGet
 warn "Remove this PackageReference" — the opposite of what KTSU0006 demands. Both diagnostics are
@@ -231,11 +237,36 @@ Two non-obvious, load-bearing design points:
 
 **Hosting layer.** `GitProvider` is an abstract base with two implementations: `GitHubProvider` over
 Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
-library uses (see the dependency note below). Both go through the same shape: `IsAuthenticated` and
-every request-issuing method resolve a credential via `TryGetCredential`/`ResolveCredential`, which
-reads a `Credential` from `ktsu.CredentialCache` keyed by `PersonaGUID`, and every request goes
-through the provider's own `HttpClient`-based transport — the two providers differ in how they build
-it, which the next point covers.
+library uses (see the dependency note below). Both go through the same shape: every request-issuing
+method resolves a credential via `TryGetCredential`/`ResolveCredential`, which reads a `Credential`
+from `ktsu.CredentialCache` keyed by `PersonaGUID`, and every request goes through the provider's own
+`HttpClient`-based transport — the two providers differ in how they build it, which the next point
+covers.
+
+**`IsAuthenticated` answers "would a request carry a credential", not "does the cache hold an
+entry".** A resolved `CredentialWithNothing` is an entry that means "proceed unauthenticated", and a
+subtype `ResolveCredential` does not recognise is one no request can ever carry. Both report `false`.
+The unrecognised case is *reported* rather than thrown, because a property getter that throws makes a
+plain `if (provider.IsAuthenticated)` a hazard, and CA1065 rightly objects. Both it and
+`ResolveCredential` go through one private `ResolveRecognisedCredential`, whose only difference is
+that it returns `null` for an unrecognised subtype where `ResolveCredential` throws — so the two
+answers cannot drift apart as `Credential` subtypes are added.
+
+**One shared `SocketsHttpHandler` per provider type, and a short-lived client or adapter per call.**
+A handler owns a connection pool, so building and disposing one per call tears the pool down each
+time and leaves its sockets in `TIME_WAIT` — the same socket-exhaustion antipattern as never
+disposing anything, approached from the other side. `GitProvider.CreateDefaultHandler` builds both
+instances so their settings cannot drift, and sets `PooledConnectionLifetime` (two minutes, matching
+`IHttpClientFactory`) so a process-lifetime handler does not go on using a host's original address
+after DNS moves it. Neither shared handler is ever disposed, and neither provider is `IDisposable`.
+
+The two providers express "this transport is not mine to dispose" differently, and that asymmetry is
+forced, not accidental. `GitProvider.CreateHttpClient` passes `disposeHandler: false` to
+`HttpClient`'s own constructor. `GitHubProvider` cannot: Octokit's `HttpClientAdapter` disposes
+whatever its factory produced and offers no equivalent flag, so it wraps in `NonOwningHandler`
+instead. Wrapping on both sides was tried and rejected — CA2000 cannot see that `HttpClient` takes
+ownership of a handler passed to it, so the uniform version needs a suppression, and this repository
+allows none.
 
 **One transport seam fakes both providers.** `GitProvider`'s `internal HttpMessageHandler? Handler`
 init property is the only test seam this layer has. `AzureDevOpsProvider` uses it directly, building
@@ -249,6 +280,27 @@ GitHub and Azure DevOps happen to default to open/active when a caller sends no 
 `IGitHostingProvider`'s contract is defined by this library, not by restating whatever a vendor
 happens to default to today — GitHub gets `PullRequestRequest { State = ItemStateFilter.Open }`,
 Azure DevOps gets `searchCriteria.status=active` on the query string, both sent unconditionally.
+
+**Azure DevOps pull request listing pages; repository enumeration does not.**
+`GET .../pullrequests` documents `$top`/`$skip` and no continuation-token header, so a short page is
+the only end-of-results signal there is, and `$top` has to be sent on the first page too — without
+it, a short page could equally mean the service applied its own default, and the provider could not
+tell a last page from a truncated one. `GetPullRequestsAsync` therefore loops until a page comes back
+holding fewer than `PullRequestPageSize` entries, advancing `$skip` by what actually arrived rather
+than by the size asked for. `GET .../repositories` documents no pagination at all and issues exactly
+one request. Octokit pages GitHub's listing itself, so both providers answer the same question the
+same way under one interface.
+
+**A plain 403 maps to `GitHostingAuthenticationException` on both hosts, and GitHub needs an explicit
+arm to get there.** Octokit's `AuthorizationException` derives from `ApiException`, *not* from
+`ForbiddenException` — verified by reflection against the Octokit 14 assembly, not assumed. Without
+its own `ForbiddenException` arm, GitHub's most common auth failure ("resource not accessible by
+personal access token") falls through to `GitHostingRequestException` while Azure DevOps maps the
+same 403 to `GitHostingAuthenticationException`. `RateLimitExceededException`,
+`SecondaryRateLimitExceededException`, and `AbuseException` all derive from `ForbiddenException`, so
+**arm order is load-bearing**: the three specific ones must precede it. Only `AbuseException` carries
+a relative delay (`RetryAfterSeconds`) rather than an absolute instant, so it is anchored to
+`DateTimeOffset.UtcNow`; `SecondaryRateLimitExceededException` carries no reset time at all.
 
 **Azure DevOps pull request operations require `Project`; repository enumeration does not.** Azure
 DevOps nests repositories under a project — GitHub has no equivalent — so
@@ -266,6 +318,15 @@ describes the token's own repositories regardless of which owner was asked for. 
 equivalent restriction: its enumeration returns everything the supplied token can see. Two
 implementations of the same `IGitHostingProvider.GetRepositoriesAsync` contract genuinely differ
 here — do not assume GitHub coverage matches Azure DevOps's, or vice versa.
+
+**A success status code is not a promise the body is JSON.** A proxy interstitial, a captive portal,
+or a single sign-on redirect page all arrive as HTML under a `200`. `AzureDevOpsProvider`'s three
+success-path deserializations go through `DeserializeSuccessBody`, which turns a `JsonException` into
+a `GitHostingRequestException` carrying the status and the original body — a public method whose
+documented failure surface is the `GitHostingException` hierarchy must not leak
+`System.Text.Json.JsonException`. Failure bodies already had this covered by `ExtractMessage`, which
+treats an unparsable body as the message itself. Octokit wraps its own deserialization failures in
+`ApiException`, so GitHub needs no equivalent.
 
 **This layer has no integration tier.** Every other tier in this repository that talks to a real
 external system (git itself) has one; the hosting layer does not, because hitting real GitHub and

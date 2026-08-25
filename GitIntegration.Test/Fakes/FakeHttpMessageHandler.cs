@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -25,12 +26,28 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
 	private readonly Queue<QueuedResponse> _responses = new();
 
-	private readonly List<RecordedRequest> _requests = [];
+	// A concurrent queue rather than a List: SendAsync is the one member a caller does not control
+	// the timing of, and nothing stops a provider issuing two requests through one handler at once.
+	// ConcurrentQueue preserves arrival order, which is what every assertion on Requests relies on.
+	private readonly ConcurrentQueue<RecordedRequest> _requests = new();
 
 	private int _totalQueued;
 
+	/// <summary>
+	/// Gets a value indicating whether anything has disposed this handler.
+	/// </summary>
+	/// <remarks>
+	/// A provider must never dispose a handler injected into it: the handler belongs to the test that
+	/// supplied it, and a disposed one would fail every request after the first. Recorded here so a
+	/// test can assert that directly rather than infer it from a second call happening to work.
+	/// </remarks>
+	public bool WasDisposed { get; private set; }
+
 	/// <summary>Gets every request this handler received, in order.</summary>
-	public IReadOnlyList<RecordedRequest> Requests => _requests;
+	/// <remarks>
+	/// A snapshot taken per read, so enumerating it can never race a request still arriving.
+	/// </remarks>
+	public IReadOnlyList<RecordedRequest> Requests => [.. _requests];
 
 	/// <summary>Queues the next response this handler will return.</summary>
 	/// <param name="status">The status code the response carries.</param>
@@ -78,7 +95,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 			}
 		}
 
-		_requests.Add(new RecordedRequest(request.Method, request.RequestUri!, body, headers));
+		_requests.Enqueue(new RecordedRequest(request.Method, request.RequestUri!, body, headers));
 
 		// Running out of queued responses means the code under test issued a request the test did
 		// not anticipate. Failing here names that request; returning a default would hide it.
@@ -121,6 +138,17 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 		}
 
 		return response;
+	}
+
+	/// <inheritdoc/>
+	protected override void Dispose(bool disposing)
+	{
+		if (disposing)
+		{
+			WasDisposed = true;
+		}
+
+		base.Dispose(disposing);
 	}
 
 	private readonly record struct QueuedResponse(HttpStatusCode Status, string Body, (string Name, string Value)[] Headers);

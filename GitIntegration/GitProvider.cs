@@ -28,6 +28,18 @@ using ktsu.CredentialCache;
 /// </remarks>
 public abstract class GitProvider : IGitHostingProvider
 {
+	/// <summary>
+	/// The transport every provider built on <see cref="CreateHttpClient"/> shares when no
+	/// <see cref="Handler"/> was injected.
+	/// </summary>
+	/// <remarks>
+	/// One handler for the process, not one per call. A handler owns a connection pool, so building
+	/// and disposing one per call tears down that pool each time and leaves its sockets in
+	/// <c>TIME_WAIT</c> — a caller looping over a hundred repositories would build and destroy a
+	/// hundred pools. See <see cref="CreateDefaultHandler"/> for why it is never disposed.
+	/// </remarks>
+	private static readonly SocketsHttpHandler SharedHandler = CreateDefaultHandler();
+
 	/// <inheritdoc/>
 	public abstract GitProviderName Name { get; }
 
@@ -49,7 +61,15 @@ public abstract class GitProvider : IGitHostingProvider
 	public PersonaGUID PersonaGUID { get; init; } = CredentialCache.CreatePersonaGUID();
 
 	/// <inheritdoc/>
-	public bool IsAuthenticated => TryGetCredential(out _);
+	/// <remarks>
+	/// Reports whether a request this provider issues would actually carry a credential, which is a
+	/// narrower question than whether the credential cache holds an entry. A resolved
+	/// <see cref="CredentialWithNothing"/> is an entry that says "proceed unauthenticated", and a
+	/// subtype <see cref="ResolveCredential"/> does not recognise is one no request can ever carry,
+	/// so both report <see langword="false"/> here. Both share <see cref="ResolveRecognisedCredential"/>
+	/// with <see cref="ResolveCredential"/> so the two can never drift apart.
+	/// </remarks>
+	public bool IsAuthenticated => ResolveRecognisedCredential(out _) is { Kind: not HostingCredentialKind.None };
 
 	/// <summary>
 	/// Gets or initializes the transport this provider issues HTTP requests through, or
@@ -125,9 +145,29 @@ public abstract class GitProvider : IGitHostingProvider
 	/// <exception cref="InvalidOperationException">
 	/// A credential was resolved whose runtime type is not one this method recognises.
 	/// </exception>
-	internal HostingCredential ResolveCredential()
+	internal HostingCredential ResolveCredential() =>
+		ResolveRecognisedCredential(out Credential? credential) ?? throw new InvalidOperationException(
+			$"Provider '{Name}' resolved a credential of type '{credential!.GetType()}', which this library does not recognise.");
+
+	/// <summary>
+	/// Resolves this provider's credential, reporting an unrecognised <see cref="Credential"/>
+	/// subtype as <see langword="null"/> rather than by throwing.
+	/// </summary>
+	/// <remarks>
+	/// The single place the credential table lives. <see cref="ResolveCredential"/> turns the
+	/// <see langword="null"/> into its <see cref="InvalidOperationException"/>, and
+	/// <see cref="IsAuthenticated"/> reads it as "no credential a request could carry" — a property
+	/// getter must not throw, so it needs the non-throwing form, and having it repeat the subtype
+	/// list instead would let the two answers drift apart as subtypes are added.
+	/// </remarks>
+	/// <param name="credential">
+	/// When this method returns, contains the raw credential the cache held, which is
+	/// non-<see langword="null"/> whenever this method returns <see langword="null"/>.
+	/// </param>
+	/// <returns>The resolved credential, or <see langword="null"/> for an unrecognised subtype.</returns>
+	private HostingCredential? ResolveRecognisedCredential(out Credential? credential)
 	{
-		if (!TryGetCredential(out Credential? credential) || credential is null or CredentialWithNothing)
+		if (!TryGetCredential(out credential) || credential is null or CredentialWithNothing)
 		{
 			return HostingCredential.None;
 		}
@@ -136,8 +176,7 @@ public abstract class GitProvider : IGitHostingProvider
 		{
 			CredentialWithToken token => HostingCredential.FromToken(token.Token.WeakString),
 			CredentialWithUsernamePassword usernamePassword => HostingCredential.FromUsernamePassword(usernamePassword.Username.WeakString, usernamePassword.Password.WeakString),
-			_ => throw new InvalidOperationException(
-				$"Provider '{Name}' resolved a credential of type '{credential.GetType()}', which this library does not recognise."),
+			_ => null,
 		};
 	}
 
@@ -145,14 +184,65 @@ public abstract class GitProvider : IGitHostingProvider
 	/// Creates an <see cref="HttpClient"/> for this provider to issue requests through.
 	/// </summary>
 	/// <remarks>
-	/// Returns a client over <see cref="Handler"/> when a test has set one, or a real client
-	/// otherwise. The returned client owns its handler exactly when it constructed one — passing
-	/// <see langword="true"/> for a caller-supplied handler would dispose a handler this provider
-	/// does not own and a later request would reuse.
+	/// <para>
+	/// The client is per call and the transport underneath it is not. This client never owns its
+	/// handler, whichever branch supplied it: an injected <see cref="Handler"/> belongs to whoever
+	/// supplied it, and <see cref="SharedHandler"/> has to outlive every call this provider makes.
+	/// One unconditional <see langword="false"/> covers both, so there is no branch here for a later
+	/// change to get wrong.
+	/// </para>
+	/// <para>
+	/// A per-call client is cheap precisely because it no longer brings a connection pool with it.
+	/// Disposing a per-call client that owned its own handler is the other half of the socket
+	/// exhaustion antipattern, not a fix for it, since every pool torn down leaves its sockets in
+	/// <c>TIME_WAIT</c>.
+	/// </para>
+	/// <para>
+	/// <see cref="GitHubProvider"/> reaches the same outcome by a different route, because Octokit's
+	/// <c>HttpClientAdapter</c> exposes no equivalent flag and needs a non-owning wrapper to say the
+	/// same thing. Both providers share one handler apiece and dispose neither.
+	/// </para>
 	/// </remarks>
-	/// <returns>An <see cref="HttpClient"/> ready to issue requests.</returns>
-	protected HttpClient CreateHttpClient() =>
-		Handler is null ? new HttpClient() : new HttpClient(Handler, disposeHandler: false);
+	/// <returns>An <see cref="HttpClient"/> ready to issue requests, which the caller disposes.</returns>
+	protected HttpClient CreateHttpClient() => new(Handler ?? SharedHandler, disposeHandler: false);
+
+	/// <summary>
+	/// Creates a transport carrying the settings every provider in this library wants of a shared,
+	/// long-lived handler.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// <see cref="SocketsHttpHandler.PooledConnectionLifetime"/> is the setting that makes a
+	/// process-lifetime handler safe. A pooled connection is otherwise kept indefinitely, so the
+	/// handler would go on using a host's original address long after DNS moved it. Two minutes
+	/// matches the handler lifetime <c>IHttpClientFactory</c> applies for the same reason.
+	/// </para>
+	/// <para>
+	/// <see cref="SocketsHttpHandler.AllowAutoRedirect"/> and
+	/// <see cref="SocketsHttpHandler.AutomaticDecompression"/> reproduce what
+	/// <c>Octokit.Internal.HttpMessageHandlerFactory.CreateDefault()</c> configures, so
+	/// <see cref="GitHubProvider"/> loses nothing by sharing this shape instead of calling that
+	/// factory per request. Following redirects is off because an API that answers a request with a
+	/// redirect is reporting something the caller needs to see, not a detour to take silently.
+	/// </para>
+	/// <para>
+	/// Never disposed, and deliberately so: the instances built from this are held in
+	/// <see langword="static"/> fields for the life of the process, which is exactly the lifetime
+	/// they are meant to have, and the operating system reclaims their sockets when it ends.
+	/// </para>
+	/// </remarks>
+	/// <returns>A handler ready to be shared across every call a provider makes.</returns>
+	/// <remarks>
+	/// <see langword="internal"/> rather than <see langword="private protected"/>: the shared
+	/// instances built from this are private statics no test can reach, so this factory is the only
+	/// place their settings can be asserted, and the test assembly is not a derived type.
+	/// </remarks>
+	internal static SocketsHttpHandler CreateDefaultHandler() => new()
+	{
+		PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+		AllowAutoRedirect = false,
+		AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+	};
 }
 
 /// <summary>

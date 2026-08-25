@@ -29,20 +29,24 @@ public sealed class GitHubProviderTests
 
 	/// <summary>
 	/// Wraps the single captured pull request fixture in a one-element array — the shape
-	/// <c>GetAllForRepository</c> actually returns — varying <c>state</c>, <c>merged</c>, and
-	/// <c>merged_at</c> to exercise each of the three <see cref="GitPullRequestState"/> mappings from
-	/// one captured payload. GitHub's <c>state</c> field is only ever <c>open</c> or <c>closed</c>;
-	/// <c>merged</c> is what tells the two closed outcomes apart. <c>merged_at</c> is varied alongside
-	/// it because Octokit's own <c>PullRequest.Merged</c> is computed from whether <c>MergedAt</c> is
-	/// non-null rather than read from the <c>merged</c> field directly — a real merged pull request
-	/// always carries both, so this keeps the fixture internally consistent the way a real captured
-	/// merged response would be. The payload's shape is untouched — only these field values change.
+	/// <c>GetAllForRepository</c> actually returns — varying <c>state</c>, <c>merged</c>,
+	/// <c>merged_at</c>, and <c>draft</c> from one captured payload. GitHub's <c>state</c> field is
+	/// only ever <c>open</c> or <c>closed</c>; <c>merged</c> is what tells the two closed outcomes
+	/// apart. <c>merged_at</c> is varied alongside it because Octokit's own <c>PullRequest.Merged</c>
+	/// is computed from whether <c>MergedAt</c> is non-null rather than read from the <c>merged</c>
+	/// field directly — a real merged pull request always carries both, so this keeps the fixture
+	/// internally consistent the way a real captured merged response would be. <c>draft</c> is
+	/// varied for a different reason: the captured value is <c>false</c>, which is also what
+	/// <see cref="GitPullRequest.IsDraft"/> holds when nothing assigns it, so asserting the captured
+	/// value would pass even with the mapping deleted. The payload's shape is untouched — only these
+	/// field values change.
 	/// </summary>
-	private static string SinglePullRequestArray(string state, bool merged)
+	private static string SinglePullRequestArray(string state, bool merged, bool draft = false)
 	{
 		string json = Fixture("github-pullrequest-created.json")
 			.Replace("\"state\": \"open\"", $"\"state\": \"{state}\"", StringComparison.Ordinal)
-			.Replace("\"merged\": false", $"\"merged\": {(merged ? "true" : "false")}", StringComparison.Ordinal);
+			.Replace("\"merged\": false", $"\"merged\": {(merged ? "true" : "false")}", StringComparison.Ordinal)
+			.Replace("\"draft\": false", $"\"draft\": {(draft ? "true" : "false")}", StringComparison.Ordinal);
 
 		if (merged)
 		{
@@ -78,6 +82,12 @@ public sealed class GitHubProviderTests
 
 		IReadOnlyList<GitRepository> repositories =
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// The route this provider calls is a documented part of its contract, not an Octokit detail:
+		// GET /users/{login}/repos is exactly why GetRepositoriesAsync returns public repositories
+		// only, and GET /user/repos would silently return the token's own repositories instead of the
+		// configured owner's. Nothing else in the suite pins it.
+		Assert.AreEqual("/users/contoso/repos", handler.Requests[0].Uri.AbsolutePath);
 
 		// Asserted on the parsed fields of the first two entries, against the fixture's real
 		// values — a count-only assertion would pass even if every field were dropped.
@@ -139,7 +149,7 @@ public sealed class GitHubProviderTests
 	public async Task MapsEveryFieldOfAPullRequestAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SinglePullRequestArray("open", merged: false), ("Content-Type", "application/json"));
+			.Respond(HttpStatusCode.OK, SinglePullRequestArray("open", merged: false, draft: true), ("Content-Type", "application/json"));
 		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
 
 		IReadOnlyList<GitPullRequest> pullRequests = await provider
@@ -158,7 +168,9 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual("main".As<GitBranchName>(), pullRequest.TargetBranch);
 		Assert.AreEqual("example-user-1".As<GitPullRequestAuthor>(), pullRequest.Author);
 		Assert.AreEqual(GitPullRequestState.Open, pullRequest.State);
-		Assert.IsFalse(pullRequest.IsDraft);
+		// Asserted true, against a fixture varied to "draft": true: false is GitPullRequest.IsDraft's
+		// own default, so asserting the captured false would still pass with the mapping deleted.
+		Assert.IsTrue(pullRequest.IsDraft);
 		Assert.AreEqual("https://github.com/contoso/example-repo/pull/132594".As<GitPullRequestWebURI>(), pullRequest.WebURI);
 		Assert.AreEqual(new DateTimeOffset(2026, 8, 21, 0, 43, 5, TimeSpan.Zero), pullRequest.CreatedAt);
 	}
@@ -245,6 +257,80 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task TranslatesAPlainForbiddenResponseToGitHostingAuthenticationExceptionAsync()
+	{
+		// GitHub's most common auth failure: a token that authenticated fine but is not scoped for
+		// this resource. Octokit reports it as ForbiddenException, which does NOT derive from
+		// AuthorizationException, so without its own arm in Translate it would land on
+		// GitHostingRequestException and a host-agnostic catch (GitHostingAuthenticationException)
+		// would miss on GitHub what it catches on Azure DevOps.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"Resource not accessible by personal access token\"}",
+				("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingAuthenticationException exception = await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "Resource not accessible by personal access token");
+	}
+
+	[TestMethod]
+	public async Task TranslatesASecondaryRateLimitResponseToGitHostingRateLimitExceptionAsync()
+	{
+		// Octokit routes a 403 whose body names a secondary rate limit to
+		// SecondaryRateLimitExceededException, which derives from ForbiddenException. It must
+		// therefore be matched before the ForbiddenException arm, or it would be reported as an
+		// authentication failure. GitHub sends no reset time with it, so ResetsAt is null.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"You have exceeded a secondary rate limit\"}",
+				("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnAbuseDetectionResponseToGitHostingRateLimitExceptionAsync()
+	{
+		// The third ForbiddenException subtype, and the only one carrying a relative delay rather
+		// than an absolute instant. Bracketed against readings taken either side of the call because
+		// the mapping anchors Retry-After to UtcNow, so no single exact value exists to assert.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"You have triggered an abuse detection mechanism\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "60"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "abuse detection mechanism");
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsInRange(before.AddSeconds(60), after.AddSeconds(60), exception.ResetsAt.Value);
+	}
+
+	[TestMethod]
 	public async Task TranslatesANotFoundResponseToGitHostingNotFoundExceptionAsync()
 	{
 		// Octokit's GET path (used by GetRepositoriesAsync/GetPullRequestsAsync) reports a 404
@@ -278,6 +364,34 @@ public sealed class GitHubProviderTests
 
 		Assert.AreEqual(HttpStatusCode.UnprocessableEntity, exception.StatusCode);
 		StringAssert.Contains(exception.ResponseBody, "Validation Failed");
+	}
+
+	[TestMethod]
+	public async Task LeavesAnInjectedHandlerUndisposedAndUsableForASecondCallAsync()
+	{
+		// The transport seam's load-bearing property. Each call builds its own HttpClientAdapter and
+		// disposes it, and HttpClientAdapter tears down whatever handler its factory produced, so
+		// without NonOwningHandler standing in between, the first call would dispose the injected
+		// handler and the second would fail. It equally protects the shared default handler, which
+		// a test cannot observe directly.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"))
+			.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		IReadOnlyList<GitRepository> first =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(handler.WasDisposed);
+
+		IReadOnlyList<GitRepository> second =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(handler.WasDisposed);
+
+		// Both calls really reached the handler and really parsed, so this cannot pass on a second
+		// call that silently returned nothing.
+		Assert.AreEqual(2, handler.Requests.Count);
+		Assert.AreEqual("example-repo-1".As<GitRepositoryName>(), first[0].Name);
+		Assert.AreEqual("example-repo-1".As<GitRepositoryName>(), second[0].Name);
 	}
 
 	public TestContext TestContext { get; set; } = null!;
