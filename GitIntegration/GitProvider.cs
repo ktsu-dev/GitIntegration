@@ -230,13 +230,13 @@ public abstract class GitProvider : IGitHostingProvider
 	/// <see langword="static"/> fields for the life of the process, which is exactly the lifetime
 	/// they are meant to have, and the operating system reclaims their sockets when it ends.
 	/// </para>
-	/// </remarks>
-	/// <returns>A handler ready to be shared across every call a provider makes.</returns>
-	/// <remarks>
+	/// <para>
 	/// <see langword="internal"/> rather than <see langword="private protected"/>: the shared
 	/// instances built from this are private statics no test can reach, so this factory is the only
 	/// place their settings can be asserted, and the test assembly is not a derived type.
+	/// </para>
 	/// </remarks>
+	/// <returns>A handler ready to be shared across every call a provider makes.</returns>
 	internal static SocketsHttpHandler CreateDefaultHandler() => new()
 	{
 		PooledConnectionLifetime = TimeSpan.FromMinutes(2),

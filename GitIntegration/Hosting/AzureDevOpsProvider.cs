@@ -123,9 +123,11 @@ public sealed class AzureDevOpsProvider : GitProvider
 		}
 		finally
 		{
-			// This client owns its handler exactly when it constructed one — CreateHttpClient's
-			// disposeHandler flag is false for every handler this provider did not construct, so
-			// disposing here never tears down a handler a later call would reuse.
+			// This client never owns its handler, and never constructs one. Both handlers it can be
+			// given are owned elsewhere: the shared default has to outlive every call, and an
+			// injected one belongs to whoever supplied it. CreateHttpClient passes
+			// disposeHandler: false unconditionally for exactly that reason, so disposing the client
+			// after every request never tears down a transport a later call would reuse.
 			client.Dispose();
 		}
 	}
