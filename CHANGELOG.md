@@ -1,6 +1,31 @@
-## v2.4.0
+## v2.5.0 (minor)
 
-No significant changes detected since v2.4.0.
+Changes since v2.4.0:
+
+- [patch] Fold local path containment into a single helper ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Contain hosting repository local paths and clean up transport disposal ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Correct two stale documentation claims on the transport ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Fix the final review findings on the hosting layer ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Fix a false CreateHttpClient claim in CLAUDE.md and README.md ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Register and document the hosting layer ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Stop justifying the repositoryId substitution with a false parallel ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add Azure DevOps pull requests and hosting error mapping ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Pin System.Text.Json to a net9.0-safe assembly version ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the Azure DevOps provider with repository enumeration ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the pull request create builder ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Document that GitProvider cannot be subclassed outside this assembly ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Configure the credential test cache once, not once per test ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Replace the dead provider members with a real hosting contract ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Add a fake HTTP handler that records requests as well as scripting responses ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the hosting exception hierarchy ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Reject empty pull request number, author, and web URI ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Add the pull request model and its semantic types ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Redact the real repo tagline, default branch, and area labels ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Close redaction gaps and fix a transcription bug in the hosting fixtures ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Pin the stable api-version and settle the web-link finding ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Capture the hosting API response fixtures and REST findings ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Add the Phase 5b hosting layer implementation plan ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Add the Phase 5b hosting layer design ([@matt-edmondson](https://github.com/matt-edmondson))
 
 ## v2.4.0 (minor)
 
