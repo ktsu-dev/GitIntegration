@@ -331,6 +331,60 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task TranslatesATooManyRequestsResponseToGitHostingRateLimitExceptionAsync()
+	{
+		// Octokit has no dedicated type for a bare 429: it surfaces as a plain ApiException, so
+		// without an arm matching on status this would reach GitHostingRequestException while
+		// AzureDevOpsProvider maps the same status to GitHostingRateLimitException. Same cross-host
+		// divergence as the plain 403, at the other rate-limit status.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "90"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "exceeded a rate limit");
+
+		// Retry-After is read from the response and converted to an absolute instant, the same way
+		// AbuseException's own relative delay is. Bracketed rather than exact, because the mapping
+		// anchors to UtcNow.
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsInRange(before.AddSeconds(90), after.AddSeconds(90), exception.ResetsAt.Value);
+	}
+
+	[TestMethod]
+	public async Task LeavesResetsAtNullWhenATooManyRequestsResponseCarriesNoRetryAfterAsync()
+	{
+		// The companion to the test above. A 429 without a Retry-After leaves ResetsAt unset rather
+		// than carrying an instant this library invented, since null already means "the host did not
+		// report one" and a guessed reset time is worse than no reset time.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
 	public async Task TranslatesANotFoundResponseToGitHostingNotFoundExceptionAsync()
 	{
 		// Octokit's GET path (used by GetRepositoriesAsync/GetPullRequestsAsync) reports a 404

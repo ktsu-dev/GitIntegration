@@ -302,6 +302,18 @@ same 403 to `GitHostingAuthenticationException`. `RateLimitExceededException`,
 a relative delay (`RetryAfterSeconds`) rather than an absolute instant, so it is anchored to
 `DateTimeOffset.UtcNow`; `SecondaryRateLimitExceededException` carries no reset time at all.
 
+**A bare `429` needs a fourth arm, matched on status rather than on type.** Octokit has no dedicated
+exception for it: a `429` surfaces as a plain `ApiException`, so it reached
+`GitHostingRequestException` while Azure DevOps mapped the same status to
+`GitHostingRateLimitException` — the same divergence as the 403, at the other rate-limit status.
+The arm sits *below* the three `ForbiddenException`-derived ones, because a type test is the more
+specific claim and a 429 carried by one of those subtypes should still be answered by its own arm.
+Its reset time comes from the response's `Retry-After` header, read case-insensitively rather than by
+key: HTTP header names are case-insensitive and Octokit's header dictionary compares ordinally, so a
+keyed lookup would work only because `HttpResponseMessage` happens to canonicalise this header's
+casing. A `Retry-After` carrying an HTTP date rather than seconds yields `null`, since an unset
+`ResetsAt` is better than an invented one.
+
 **Azure DevOps pull request operations require `Project`; repository enumeration does not.** Azure
 DevOps nests repositories under a project — GitHub has no equivalent — so
 `AzureDevOpsProvider.Project` is optional: unset, `GetRepositoriesAsync` enumerates the whole
@@ -422,6 +434,23 @@ KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 GIT_CONFIG_NOSYSTEM=1 dotnet test --filter
 The durable fix is for each test to pin whatever host config it depends on into the throwaway
 repository itself, the way `GitRemoteSyncTests.CreateWorkingCopyAsync` pins `user.name`,
 `user.email`, `commit.gpgsign`, and `pull.rebase`.
+
+### If you mutation-check a fix, mutate by substitution, never by deletion
+
+Breaking the production code to confirm a test fails is the only way to know a test is load-bearing,
+and this repository's hosting tests were verified that way. The hazard is the revert, not the
+mutation: a harness that removes a line reverts by replacing the empty string, which matches
+everywhere and nowhere, so a guard on "exactly one occurrence" fails and the revert silently does
+nothing. That already happened here once and left three `GitHubProvider.Translate` arms deleted. It
+was caught only because the next build failed with `IDE0051: ToResetTime is unused`.
+
+Two rules follow. **Express every mutation as a substitution**, so the revert has a real anchor to
+match. **Re-verify the tree after each mutation run** rather than trusting the revert reported
+success, especially when its output is being filtered or suppressed.
+
+Some fixes cannot be mutation-checked at all, and that is a property of the code rather than a gap in
+the test: removing an arm that is a member's only caller fails the build before any test can fail.
+Substituting the arm's *result* instead of deleting the arm is usually the way through.
 
 **Remember:** plain `dotnet test`, never `dotnet test --nologo` — see Build Commands above.
 

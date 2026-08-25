@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -317,7 +318,17 @@ public sealed class GitHubProvider : GitProvider
 	/// The arm order is load-bearing. <see cref="RateLimitExceededException"/>,
 	/// <see cref="SecondaryRateLimitExceededException"/>, and <see cref="AbuseException"/> all derive
 	/// from <see cref="ForbiddenException"/>, so the three specific arms must precede the general one
-	/// or a rate-limit failure would be reported as an authentication failure instead.
+	/// or a rate-limit failure would be reported as an authentication failure instead. The
+	/// <see cref="HttpStatusCode.TooManyRequests"/> arm matches on status rather than on type, so it
+	/// sits below all three: a type test is the more specific claim, and a hypothetical 429 carried
+	/// by one of those subtypes should still be answered by its own arm.
+	/// </para>
+	/// <para>
+	/// Octokit has no dedicated type for a bare <c>429</c> — it surfaces as a plain
+	/// <see cref="ApiException"/>, verified against the Octokit 14 assembly — so without that arm it
+	/// would reach <see cref="GitHostingRequestException"/> while Azure DevOps maps the same status
+	/// to <see cref="GitHostingRateLimitException"/>. That is the same cross-host divergence this
+	/// method's <see cref="ForbiddenException"/> arm exists to remove, at the other rate-limit status.
 	/// </para>
 	/// <para>
 	/// <see cref="ForbiddenException"/> maps to <see cref="GitHostingAuthenticationException"/>, and
@@ -343,6 +354,7 @@ public sealed class GitHubProvider : GitProvider
 			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset),
 			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null),
 			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds)),
+			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception))),
 			AuthorizationException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
 			ForbiddenException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
 			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody),
@@ -367,4 +379,41 @@ public sealed class GitHubProvider : GitProvider
 	/// <returns>The absolute reset time, or <see langword="null"/> when no delay was reported.</returns>
 	private static DateTimeOffset? ToResetTime(int? retryAfterSeconds) =>
 		retryAfterSeconds is int seconds ? DateTimeOffset.UtcNow.AddSeconds(seconds) : null;
+
+	/// <summary>
+	/// Reads a failed response's <c>Retry-After</c> delay, in seconds.
+	/// </summary>
+	/// <remarks>
+	/// Scanned case-insensitively rather than looked up by key. HTTP header names are
+	/// case-insensitive, and Octokit's header dictionary compares them ordinally, so a keyed lookup
+	/// would work only because <see cref="System.Net.Http.HttpResponseMessage"/> happens to
+	/// canonicalise this particular header's casing on the way in. That is an assumption about a
+	/// vendor's transport rather than a property of the header, and the collection is a handful of
+	/// entries, so scanning costs nothing worth saving.
+	///
+	/// <c>Retry-After</c> may also carry an HTTP date rather than a delay in seconds. GitHub sends
+	/// seconds, and a value that does not parse as seconds yields <see langword="null"/>, so an
+	/// unrecognised form leaves <see cref="GitHostingRateLimitException.ResetsAt"/> unset rather than
+	/// carrying an invented instant.
+	/// </remarks>
+	/// <param name="exception">The failure Octokit reported.</param>
+	/// <returns>The delay in seconds, or <see langword="null"/> when absent or not a whole number of seconds.</returns>
+	private static int? TryGetRetryAfterSeconds(ApiException exception)
+	{
+		if (exception.HttpResponse?.Headers is not IReadOnlyDictionary<string, string> headers)
+		{
+			return null;
+		}
+
+		foreach (KeyValuePair<string, string> header in headers)
+		{
+			if (header.Key.Equals("Retry-After", StringComparison.OrdinalIgnoreCase)
+				&& int.TryParse(header.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int seconds))
+			{
+				return seconds;
+			}
+		}
+
+		return null;
+	}
 }
