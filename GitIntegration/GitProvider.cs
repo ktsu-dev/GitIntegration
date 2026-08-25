@@ -241,14 +241,14 @@ public abstract class GitProvider : IGitHostingProvider
 	/// derived leaf segment of <paramref name="repositoryName"/>.
 	/// </returns>
 	/// <exception cref="GitHostingRequestException">
-	/// <paramref name="repositoryName"/> is <see langword="null"/>, empty, or a name from which no
-	/// directory segment can be derived.
+	/// <paramref name="repositoryName"/> is <see langword="null"/>, empty, consists only of
+	/// whitespace, or is a name from which no directory segment can otherwise be derived.
 	/// </exception>
 	internal static AbsoluteDirectoryPath ToLocalRepositoryPath(string? repositoryName, GitProviderName providerName)
 	{
 		string leaf = Path.GetFileName(repositoryName ?? string.Empty);
 
-		if (string.IsNullOrEmpty(leaf) || leaf is "." or "..")
+		if (string.IsNullOrWhiteSpace(leaf) || leaf is "." or "..")
 		{
 			throw new GitHostingRequestException(
 				$"{providerName} reported a repository name '{repositoryName}' that cannot be represented as a local directory.");
