@@ -101,35 +101,28 @@ public sealed class AzureDevOpsProvider : GitProvider
 		Uri requestUri = BuildRepositoriesUri();
 		HostingCredential credential = ResolveCredential();
 
-		HttpClient client = CreateHttpClient();
+		// This client never owns its handler, and never constructs one. Both handlers it can be
+		// given are owned elsewhere: the shared default has to outlive every call, and an injected
+		// one belongs to whoever supplied it. CreateHttpClient passes disposeHandler: false
+		// unconditionally for exactly that reason, so disposing the client after every request never
+		// tears down a transport a later call would reuse.
+		using HttpClient client = CreateHttpClient();
 
-		try
+		using HttpRequestMessage request = new(HttpMethod.Get, requestUri);
+		ApplyAuthentication(request, credential);
+
+		using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+		string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+		if (!response.IsSuccessStatusCode)
 		{
-			using HttpRequestMessage request = new(HttpMethod.Get, requestUri);
-			ApplyAuthentication(request, credential);
-
-			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-			string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-			if (!response.IsSuccessStatusCode)
-			{
-				throw Translate(response, body);
-			}
-
-			AzureDevOpsRepositoryListResponse? parsed = DeserializeSuccessBody(
-				body, AzureDevOpsJsonContext.Default.AzureDevOpsRepositoryListResponse, response.StatusCode);
-
-			return parsed is null ? [] : [.. parsed.Value.Select(ToGitRepository)];
+			throw Translate(response, body);
 		}
-		finally
-		{
-			// This client never owns its handler, and never constructs one. Both handlers it can be
-			// given are owned elsewhere: the shared default has to outlive every call, and an
-			// injected one belongs to whoever supplied it. CreateHttpClient passes
-			// disposeHandler: false unconditionally for exactly that reason, so disposing the client
-			// after every request never tears down a transport a later call would reuse.
-			client.Dispose();
-		}
+
+		AzureDevOpsRepositoryListResponse? parsed = DeserializeSuccessBody(
+			body, AzureDevOpsJsonContext.Default.AzureDevOpsRepositoryListResponse, response.StatusCode);
+
+		return parsed is null ? [] : [.. parsed.Value.Select(ToGitRepository)];
 	}
 
 	/// <inheritdoc/>
@@ -168,48 +161,41 @@ public sealed class AzureDevOpsProvider : GitProvider
 
 		HostingCredential credential = ResolveCredential();
 
-		HttpClient client = CreateHttpClient();
+		using HttpClient client = CreateHttpClient();
 
-		try
+		List<GitPullRequest> pullRequests = [];
+		int skip = 0;
+		bool morePages = true;
+
+		while (morePages)
 		{
-			List<GitPullRequest> pullRequests = [];
-			int skip = 0;
-			bool morePages = true;
+			using HttpRequestMessage request = new(HttpMethod.Get, BuildPullRequestListUri(repositoryName, skip));
+			ApplyAuthentication(request, credential);
 
-			while (morePages)
+			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+			string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+			if (!response.IsSuccessStatusCode)
 			{
-				using HttpRequestMessage request = new(HttpMethod.Get, BuildPullRequestListUri(repositoryName, skip));
-				ApplyAuthentication(request, credential);
-
-				using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-				string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-				if (!response.IsSuccessStatusCode)
-				{
-					throw Translate(response, body);
-				}
-
-				AzureDevOpsPullRequestListResponse? parsed = DeserializeSuccessBody(
-					body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestListResponse, response.StatusCode);
-
-				IReadOnlyList<AzureDevOpsPullRequest> page = parsed?.Value ?? [];
-				pullRequests.AddRange(page.Select(ToGitPullRequest));
-
-				// Advanced by what actually arrived rather than by the page size asked for, so a
-				// service returning more than $top would skip past the entries it already sent
-				// instead of requesting them a second time. A page short of the size asked for is
-				// the last one, and an empty page ends the loop without advancing forever, since a
-				// continuing page always advances skip by at least PullRequestPageSize.
-				skip += page.Count;
-				morePages = page.Count >= PullRequestPageSize;
+				throw Translate(response, body);
 			}
 
-			return pullRequests;
+			AzureDevOpsPullRequestListResponse? parsed = DeserializeSuccessBody(
+				body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestListResponse, response.StatusCode);
+
+			IReadOnlyList<AzureDevOpsPullRequest> page = parsed?.Value ?? [];
+			pullRequests.AddRange(page.Select(ToGitPullRequest));
+
+			// Advanced by what actually arrived rather than by the page size asked for, so a
+			// service returning more than $top would skip past the entries it already sent
+			// instead of requesting them a second time. A page short of the size asked for is
+			// the last one, and an empty page ends the loop without advancing forever, since a
+			// continuing page always advances skip by at least PullRequestPageSize.
+			skip += page.Count;
+			morePages = page.Count >= PullRequestPageSize;
 		}
-		finally
-		{
-			client.Dispose();
-		}
+
+		return pullRequests;
 	}
 
 	/// <inheritdoc/>
@@ -244,38 +230,31 @@ public sealed class AzureDevOpsProvider : GitProvider
 			IsDraft = specification.IsDraft,
 		};
 
-		HttpClient client = CreateHttpClient();
+		using HttpClient client = CreateHttpClient();
 
-		try
+		string requestJson = JsonSerializer.Serialize(requestBody, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestCreateRequest);
+
+		using HttpRequestMessage request = new(HttpMethod.Post, requestUri)
 		{
-			string requestJson = JsonSerializer.Serialize(requestBody, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestCreateRequest);
+			Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
+		};
+		ApplyAuthentication(request, credential);
 
-			using HttpRequestMessage request = new(HttpMethod.Post, requestUri)
-			{
-				Content = new StringContent(requestJson, Encoding.UTF8, "application/json"),
-			};
-			ApplyAuthentication(request, credential);
+		using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+		string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-			string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-			if (!response.IsSuccessStatusCode)
-			{
-				throw Translate(response, body);
-			}
-
-			AzureDevOpsPullRequest? parsed = DeserializeSuccessBody(
-				body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequest, response.StatusCode);
-
-			return parsed is null
-				? throw new GitHostingRequestException(
-					"Azure DevOps reported success but returned no pull request body.", Name, response.StatusCode, body)
-				: ToGitPullRequest(parsed);
-		}
-		finally
+		if (!response.IsSuccessStatusCode)
 		{
-			client.Dispose();
+			throw Translate(response, body);
 		}
+
+		AzureDevOpsPullRequest? parsed = DeserializeSuccessBody(
+			body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequest, response.StatusCode);
+
+		return parsed is null
+			? throw new GitHostingRequestException(
+				"Azure DevOps reported success but returned no pull request body.", Name, response.StatusCode, body)
+			: ToGitPullRequest(parsed);
 	}
 
 	/// <summary>
@@ -445,18 +424,17 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// </remarks>
 	/// <param name="repository">The repository Azure DevOps returned.</param>
 	/// <returns>The equivalent <see cref="GitRepository"/>.</returns>
-	private static GitRepository ToGitRepository(AzureDevOpsRepository repository)
+	/// <exception cref="GitHostingRequestException">
+	/// <paramref name="repository"/>'s name is missing or cannot be represented as a local directory.
+	/// See <see cref="GitProvider.ToLocalDirectoryLeaf(string, GitProviderName)"/>.
+	/// </exception>
+	private GitRepository ToGitRepository(AzureDevOpsRepository repository) => new()
 	{
-		string name = repository.Name ?? string.Empty;
-
-		return new GitRepository
-		{
-			LocalPath = Path.Combine(Environment.CurrentDirectory, name).As<AbsoluteDirectoryPath>(),
-			Name = repository.Name is string repositoryName ? repositoryName.As<GitRepositoryName>() : null,
-			WebURI = repository.WebUrl is string webUrl ? webUrl.As<GitRepositoryWebURI>() : null,
-			RemotePath = repository.RemoteUrl is string remoteUrl ? remoteUrl.As<GitRepositoryRemotePath>() : null,
-		};
-	}
+		LocalPath = Path.Combine(Environment.CurrentDirectory, ToLocalDirectoryLeaf(repository.Name, Name)).As<AbsoluteDirectoryPath>(),
+		Name = repository.Name is string repositoryName ? repositoryName.As<GitRepositoryName>() : null,
+		WebURI = repository.WebUrl is string webUrl ? webUrl.As<GitRepositoryWebURI>() : null,
+		RemotePath = repository.RemoteUrl is string remoteUrl ? remoteUrl.As<GitRepositoryRemotePath>() : null,
+	};
 
 	/// <summary>
 	/// Maps an Azure DevOps pull request onto this library's model.

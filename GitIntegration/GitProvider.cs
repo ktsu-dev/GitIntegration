@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -205,6 +206,47 @@ public abstract class GitProvider : IGitHostingProvider
 	/// </remarks>
 	/// <returns>An <see cref="HttpClient"/> ready to issue requests, which the caller disposes.</returns>
 	protected HttpClient CreateHttpClient() => new(Handler ?? SharedHandler, disposeHandler: false);
+
+	/// <summary>
+	/// Derives the single leaf directory segment a repository name maps to, so that combining it
+	/// under <see cref="Environment.CurrentDirectory"/> can never point outside that directory.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="Path.Combine(string, string)"/> silently discards every earlier argument when a
+	/// later one is rooted, so combining <see cref="Environment.CurrentDirectory"/> with a repository
+	/// name of <c>C:\Windows</c> or <c>/etc</c> would otherwise report a
+	/// <see cref="GitRepository.LocalPath"/> that points there instead of under the current
+	/// directory. <see cref="Path.GetFileName(string)"/> resolves that half of the problem by
+	/// stripping every rooted prefix and directory component, but not the other half:
+	/// <see cref="Path.GetFileName(string)"/> called on <c>../..</c> still returns <c>..</c>, which
+	/// still escapes upward once combined. A repository name comes from a remote host's response, and
+	/// <see cref="GitRepository.LocalPath"/> is a value a caller might hand straight to a clone or a
+	/// file operation, so a name from which no safe leaf can be derived is treated as the host having
+	/// reported something this library cannot represent as a directory — this throws rather than
+	/// returning a value that looks safe but is not.
+	/// </remarks>
+	/// <param name="repositoryName">The repository name a host reported, which may be <see langword="null"/>.</param>
+	/// <param name="providerName">
+	/// The provider that reported <paramref name="repositoryName"/>, named in the exception thrown
+	/// when no leaf can be derived.
+	/// </param>
+	/// <returns>The leaf segment, safe to combine under <see cref="Environment.CurrentDirectory"/>.</returns>
+	/// <exception cref="GitHostingRequestException">
+	/// <paramref name="repositoryName"/> is <see langword="null"/>, empty, or a name from which no
+	/// directory segment can be derived.
+	/// </exception>
+	internal static string ToLocalDirectoryLeaf(string? repositoryName, GitProviderName providerName)
+	{
+		string leaf = Path.GetFileName(repositoryName ?? string.Empty);
+
+		if (string.IsNullOrEmpty(leaf) || leaf is "." or "..")
+		{
+			throw new GitHostingRequestException(
+				$"{providerName} reported a repository name '{repositoryName}' that cannot be represented as a local directory.");
+		}
+
+		return leaf;
+	}
 
 	/// <summary>
 	/// Creates a transport carrying the settings every provider in this library wants of a shared,

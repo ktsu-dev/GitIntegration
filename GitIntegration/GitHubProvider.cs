@@ -61,7 +61,8 @@ public sealed class GitHubProvider : GitProvider
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		(GitHubClient client, IDisposable transport) = CreateClient();
+		(GitHubClient client, IDisposable createdTransport) = CreateClient();
+		using IDisposable transport = createdTransport;
 
 		try
 		{
@@ -72,10 +73,6 @@ public sealed class GitHubProvider : GitProvider
 		{
 			throw Translate(exception);
 		}
-		finally
-		{
-			transport.Dispose();
-		}
 	}
 
 	/// <inheritdoc/>
@@ -84,7 +81,8 @@ public sealed class GitHubProvider : GitProvider
 		Ensure.NotNull(repositoryName);
 		cancellationToken.ThrowIfCancellationRequested();
 
-		(GitHubClient client, IDisposable transport) = CreateClient();
+		(GitHubClient client, IDisposable createdTransport) = CreateClient();
+		using IDisposable transport = createdTransport;
 
 		try
 		{
@@ -104,10 +102,6 @@ public sealed class GitHubProvider : GitProvider
 		{
 			throw Translate(exception);
 		}
-		finally
-		{
-			transport.Dispose();
-		}
 	}
 
 	/// <inheritdoc/>
@@ -117,7 +111,8 @@ public sealed class GitHubProvider : GitProvider
 		Ensure.NotNull(specification);
 		cancellationToken.ThrowIfCancellationRequested();
 
-		(GitHubClient client, IDisposable transport) = CreateClient();
+		(GitHubClient client, IDisposable createdTransport) = CreateClient();
+		using IDisposable transport = createdTransport;
 
 		try
 		{
@@ -140,10 +135,6 @@ public sealed class GitHubProvider : GitProvider
 		catch (ApiException exception)
 		{
 			throw Translate(exception);
-		}
-		finally
-		{
-			transport.Dispose();
 		}
 	}
 
@@ -255,9 +246,13 @@ public sealed class GitHubProvider : GitProvider
 	/// </remarks>
 	/// <param name="repository">The repository Octokit returned.</param>
 	/// <returns>The equivalent <see cref="GitRepository"/>.</returns>
-	private static GitRepository ToGitRepository(Repository repository) => new()
+	/// <exception cref="GitHostingRequestException">
+	/// <paramref name="repository"/>'s name cannot be represented as a local directory. See
+	/// <see cref="GitProvider.ToLocalDirectoryLeaf(string, GitProviderName)"/>.
+	/// </exception>
+	private GitRepository ToGitRepository(Repository repository) => new()
 	{
-		LocalPath = Path.Combine(Environment.CurrentDirectory, repository.Name).As<AbsoluteDirectoryPath>(),
+		LocalPath = Path.Combine(Environment.CurrentDirectory, ToLocalDirectoryLeaf(repository.Name, Name)).As<AbsoluteDirectoryPath>(),
 		Name = repository.Name.As<GitRepositoryName>(),
 		WebURI = repository.HtmlUrl.As<GitRepositoryWebURI>(),
 		RemotePath = repository.CloneUrl.As<GitRepositoryRemotePath>(),
@@ -405,10 +400,10 @@ public sealed class GitHubProvider : GitProvider
 			return null;
 		}
 
-		foreach (KeyValuePair<string, string> header in headers)
+		foreach (KeyValuePair<string, string> header in headers.Where(
+			candidate => candidate.Key.Equals("Retry-After", StringComparison.OrdinalIgnoreCase)))
 		{
-			if (header.Key.Equals("Retry-After", StringComparison.OrdinalIgnoreCase)
-				&& int.TryParse(header.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int seconds))
+			if (int.TryParse(header.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int seconds))
 			{
 				return seconds;
 			}
