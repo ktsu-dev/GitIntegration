@@ -1,6 +1,4 @@
-## v2.5.1 (patch)
+## v2.5.1
 
-Changes since v2.5.0:
-
-- [patch] Reject a whitespace-only repository name from a host ([@matt-edmondson](https://github.com/matt-edmondson))
+No significant changes detected since v2.5.1.
 
