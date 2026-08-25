@@ -24,8 +24,8 @@ with code 5 instead of failing loudly. Always invoke plain `dotnet test`.
 ## Project Structure
 
 This is a .NET library (`ktsu.GitIntegration`) with two layers: a local layer that wraps the `git`
-executable found on `PATH`, and a hosting layer that talks to remote Git providers (currently
-GitHub, via Octokit). The solution uses:
+executable found on `PATH`, and a hosting layer that talks to remote Git providers (GitHub, via
+Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
 
 - **ktsu.Sdk** — custom SDK providing shared build configuration
 - **MSTest.Sdk** — test project SDK with Microsoft Testing Platform
@@ -60,9 +60,22 @@ GitHub, via Octokit). The solution uses:
 - `GitIntegration/Parsing/` — internal parsers turning raw git output into the `Models/` records,
   including `GitFetchParser` and `GitPushParser` for the two porcelain formats `fetch --porcelain`
   and `push --porcelain` emit.
-- `GitIntegration/SemanticTypes/` — the 13 `ktsu.Semantics` wrapper types for git identifiers.
-- `GitIntegration/GitProvider.cs`, `GitIntegration/GitHubProvider.cs` — the hosting layer.
-- `GitIntegration/ServiceCollectionExtensions.cs` — `AddGitIntegration()` DI registration.
+- `GitIntegration/SemanticTypes/` — the `ktsu.Semantics` wrapper types for git identifiers, including
+  the pull-request types (`GitPullRequestNumber`, `GitPullRequestTitle`, `GitPullRequestAuthor`,
+  `GitPullRequestWebURI`) added in Phase 5b.
+- `GitIntegration/GitProvider.cs` — the abstract hosting base: credential resolution
+  (`TryGetCredential`, `ResolveCredential`), the internal `HttpMessageHandler? Handler` transport
+  seam, and `CreatePullRequest(GitRepositoryName)`.
+- `GitIntegration/GitHubProvider.cs` — the GitHub implementation, over Octokit.
+- `GitIntegration/Hosting/` — `IGitHostingProvider` and `IGitPullRequestCreateBuilder` (the public
+  hosting contracts), `AzureDevOpsProvider` (the Azure DevOps implementation, over a raw
+  `HttpClient`), `AzureDevOpsJson.cs` (its `JsonSerializerContext` and wire-format DTOs),
+  `GitPullRequestCreateBuilder` (the one shared builder implementation both providers use), and
+  `GitHostingExceptions.cs` (the `GitHostingException` hierarchy).
+- `GitIntegration/Models/GitPullRequest.cs` — `GitPullRequest` and `GitPullRequestState`.
+- `GitIntegration/ServiceCollectionExtensions.cs` — `AddGitIntegration()` DI registration. Registers
+  only the local layer — see the Hosting layer section below for why the hosting layer is not
+  registered.
 
 ### Dependencies
 
@@ -76,6 +89,10 @@ GitHub, via Octokit). The solution uses:
   see the KTSU0006 note below.
 - `ktsu.CredentialCache` — resolves hosting-provider credentials from the host's native keyring.
 - `Octokit` — GitHub API client backing `GitHubProvider`.
+- `System.Text.Json` (`PrivateAssets="all"`) — `AzureDevOpsProvider` and `AzureDevOpsJson` use
+  `JsonSerializer`/`JsonSerializerContext` directly to build and parse Azure DevOps's REST payloads
+  by hand; see the KTSU0006 note below for why this reference needs its own careful version pin even
+  though the package ships in-box.
 - `Microsoft.Extensions.DependencyInjection.Abstractions` — DI registration surface.
 - `Polyfill` (`PrivateAssets="all"`) — backports newer BCL APIs to the older target frameworks.
 
@@ -98,6 +115,57 @@ never backward, so a compiled reference to a higher version than what's actually
 and even in its nuspec; it only surfaces when something actually consumes the packed artifact.
 **Verifying the nuspec is not sufficient.** Any future `PackageReference` added solely to satisfy an
 analyzer needs this same treatment, not just this one.
+
+### A second KTSU0006 mechanism: the shared framework as the lower resolver
+
+The `Testably.Abstractions.FileSystem.Interface` case above is one way a `VersionOverride`-shaped
+hazard shows up: **another package** pins a lower version than central package management floats.
+Phase 5b hit a **second** mechanism with the identical outcome, and it nearly shipped.
+
+`AzureDevOpsProvider` and `AzureDevOpsJson` call `JsonSerializer`/`JsonSerializerContext` directly,
+which KTSU0006 treats the same way it treats `GitCloneBuilder`'s filesystem calls: direct use of a
+transitively-available package requiring its own `PackageReference`. Adding
+`<PackageReference Include="System.Text.Json" PrivateAssets="all" />` with no version pin resolved
+the package's real **10.0.2** assembly on **net9.0** — overriding the net9.0 shared framework's own
+9.0.x `System.Text.Json` — while `PrivateAssets="all"` correctly kept the package out of the nupkg.
+A net9.0 consumer would then run on a 9.0.x shared framework carrying `System.Text.Json` 9.0.0.0,
+against a compiled reference to 10.0.0.0. CoreCLR rolls binds forward but never backward:
+`FileNotFoundException` for every net9.0 consumer.
+
+**The documented check does not catch this.** "Does another package pin a lower version?" answers
+*no* here — nothing else in the graph pins `System.Text.Json` at all — and reads as safe. The
+resolver forcing the low bound this time was not another package; it was **the target framework's
+own shared framework**, which the first mechanism's check never looks at.
+
+The check that does catch it: read `obj/<TargetFramework>/project.assets.json` and confirm what each
+target framework actually resolves for the reference's `compile` asset.
+
+- `"compile": { "lib/net9.0/_._": {} }` (an empty placeholder) means the framework wins — the
+  package contributes nothing at compile time for that target, and the reference is safe as-is.
+- A real assembly path (e.g. `"lib/net9.0/System.Text.Json.dll"`) means the package is overriding
+  the framework, and the reference needs a version pinned to what the **lowest-supported** framework
+  ships.
+
+This repository's fix pins `System.Text.Json` centrally, in `Directory.Packages.props`, to `9.0.13`
+— confirmed via `project.assets.json`'s `compile` asset resolving to the empty `lib/net9.0/_._`
+placeholder for **both** `net9.0` and `net10.0`, and confirmed a second way by inspecting the built
+assemblies' own references: `bin/Debug/net9.0/ktsu.GitIntegration.dll` references `System.Text.Json`
+`9.0.0.0`, `bin/Debug/net10.0/ktsu.GitIntegration.dll` references `10.0.0.0` — each exactly matching
+what that target framework's own shared framework ships. No `VersionOverride` was needed here,
+unlike the `Testably.Abstractions` case: nothing else in the graph pins `System.Text.Json` to a
+conflicting version, so a single central `PackageVersion` below both frameworks' floor is enough.
+
+One consequence of pinning it centrally rather than on the one project: this repo sets
+`CentralPackageTransitivePinningEnabled`, so `9.0.13` now applies to any future **transitive**
+dependency on `System.Text.Json` too, repo-wide. That is a note rather than a hazard, because a
+package needing a higher version would fail restore loudly rather than resolve to something
+unexpected. Raising the pin is then the fix, subject to the same `project.assets.json` check above.
+
+This fix also needs `NoWarn="NU1510"`, scoped to that one `PackageReference` item. Pinning to a
+version the SDK's package-pruning feature recognises as already covered by the framework makes NuGet
+warn "Remove this PackageReference" — the opposite of what KTSU0006 demands. Both diagnostics are
+correct from where each analyzer sits; `NoWarn="NU1510"` on the item is what lets both be satisfied
+at once without a project-wide suppression.
 
 ## Architecture
 
@@ -167,18 +235,148 @@ Two non-obvious, load-bearing design points:
    `commit` sets with "nothing to commit" on stderr-vs-stdout, and `LC_ALL=C` is what makes matching
    the literal word dependable.
 
-**Hosting layer.** `GitProvider` is an abstract base with a `GitHubProvider` implementation over
-Octokit. `IsAuthenticated` and `RefreshRemoteRepositories()` both go through `TryGetCredential`,
-which resolves a `Credential` from `ktsu.CredentialCache` keyed by `PersonaGUID`. Azure DevOps
-hosting support is **not implemented** — `AzureDevOpsProjectName` exists as a semantic type but
-there is no `AzureDevOpsProvider`. The two Azure DevOps client packages were deliberately not
-referenced, because they pull `System.Data.SqlClient` (a package with a known high-severity
-advisory) into the published package as a direct dependency. Do not add Azure DevOps hosting
-support without resolving that dependency concern first.
+**Hosting layer.** `GitProvider` is an abstract base with two implementations: `GitHubProvider` over
+Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
+library uses (see the dependency note below). Both go through the same shape: every request-issuing
+method resolves a credential via `TryGetCredential`/`ResolveCredential`, which reads a `Credential`
+from `ktsu.CredentialCache` keyed by `PersonaGUID`, and every request goes through the provider's own
+`HttpClient`-based transport — the two providers differ in how they build it, which the next point
+covers.
 
-**Planned, not yet implemented (do not document as present):** Azure DevOps hosting support.
-Deliberately out of scope even later: `commit --amend`, `add --force`, `switch` (see
-`IGitCheckoutBuilder`'s remarks for why `checkout` was chosen instead), and submodule support.
+**`IsAuthenticated` answers "would a request carry a credential", not "does the cache hold an
+entry".** A resolved `CredentialWithNothing` is an entry that means "proceed unauthenticated", and a
+subtype `ResolveCredential` does not recognise is one no request can ever carry. Both report `false`.
+The unrecognised case is *reported* rather than thrown, because a property getter that throws makes a
+plain `if (provider.IsAuthenticated)` a hazard, and CA1065 rightly objects. Both it and
+`ResolveCredential` go through one private `ResolveRecognisedCredential`, whose only difference is
+that it returns `null` for an unrecognised subtype where `ResolveCredential` throws — so the two
+answers cannot drift apart as `Credential` subtypes are added.
+
+**One shared `SocketsHttpHandler` per provider type, and a short-lived client or adapter per call.**
+A handler owns a connection pool, so building and disposing one per call tears the pool down each
+time and leaves its sockets in `TIME_WAIT` — the same socket-exhaustion antipattern as never
+disposing anything, approached from the other side. `GitProvider.CreateDefaultHandler` builds both
+instances so their settings cannot drift, and sets `PooledConnectionLifetime` (two minutes, matching
+`IHttpClientFactory`) so a process-lifetime handler does not go on using a host's original address
+after DNS moves it. Neither shared handler is ever disposed, and neither provider is `IDisposable`.
+
+The two providers express "this transport is not mine to dispose" differently, and that asymmetry is
+forced, not accidental. `GitProvider.CreateHttpClient` passes `disposeHandler: false` to
+`HttpClient`'s own constructor. `GitHubProvider` cannot: Octokit's `HttpClientAdapter` disposes
+whatever its factory produced and offers no equivalent flag, so it wraps in `NonOwningHandler`
+instead. Wrapping on both sides was tried and rejected — CA2000 cannot see that `HttpClient` takes
+ownership of a handler passed to it, so the uniform version needs a suppression, and this repository
+allows none.
+
+**One transport seam fakes both providers.** `GitProvider`'s `internal HttpMessageHandler? Handler`
+init property is the only test seam this layer has. `AzureDevOpsProvider` uses it directly, building
+an `HttpClient` over it. `GitHubProvider` hands the *same* handler to Octokit through
+`HttpClientAdapter` (Octokit's own transport abstraction), so a test never has to fake two different
+transports for two different vendor SDKs — one `FakeHttpMessageHandler` covers both providers'
+tests.
+
+**`GetPullRequestsAsync` returns open pull requests only, requested explicitly of each host.** Both
+GitHub and Azure DevOps happen to default to open/active when a caller sends no filter, but
+`IGitHostingProvider`'s contract is defined by this library, not by restating whatever a vendor
+happens to default to today — GitHub gets `PullRequestRequest { State = ItemStateFilter.Open }`,
+Azure DevOps gets `searchCriteria.status=active` on the query string, both sent unconditionally.
+
+**Azure DevOps pull request listing pages; repository enumeration does not.**
+`GET .../pullrequests` documents `$top`/`$skip` and no continuation-token header, so a short page is
+the only end-of-results signal there is, and `$top` has to be sent on the first page too — without
+it, a short page could equally mean the service applied its own default, and the provider could not
+tell a last page from a truncated one. `GetPullRequestsAsync` therefore loops until a page comes back
+holding fewer than `PullRequestPageSize` entries, advancing `$skip` by what actually arrived rather
+than by the size asked for. `GET .../repositories` documents no pagination at all and issues exactly
+one request. Octokit pages GitHub's listing itself, so both providers answer the same question the
+same way under one interface.
+
+**A plain 403 maps to `GitHostingAuthenticationException` on both hosts, and GitHub needs an explicit
+arm to get there.** Octokit's `AuthorizationException` derives from `ApiException`, *not* from
+`ForbiddenException` — verified by reflection against the Octokit 14 assembly, not assumed. Without
+its own `ForbiddenException` arm, GitHub's most common auth failure ("resource not accessible by
+personal access token") falls through to `GitHostingRequestException` while Azure DevOps maps the
+same 403 to `GitHostingAuthenticationException`. `RateLimitExceededException`,
+`SecondaryRateLimitExceededException`, and `AbuseException` all derive from `ForbiddenException`, so
+**arm order is load-bearing**: the three specific ones must precede it. Only `AbuseException` carries
+a relative delay (`RetryAfterSeconds`) rather than an absolute instant, so it is anchored to
+`DateTimeOffset.UtcNow`; `SecondaryRateLimitExceededException` carries no reset time at all.
+
+**A bare `429` needs a fourth arm, matched on status rather than on type.** Octokit has no dedicated
+exception for it: a `429` surfaces as a plain `ApiException`, so it reached
+`GitHostingRequestException` while Azure DevOps mapped the same status to
+`GitHostingRateLimitException` — the same divergence as the 403, at the other rate-limit status.
+The arm sits *below* the three `ForbiddenException`-derived ones, because a type test is the more
+specific claim and a 429 carried by one of those subtypes should still be answered by its own arm.
+Its reset time comes from the response's `Retry-After` header, read case-insensitively rather than by
+key: HTTP header names are case-insensitive and Octokit's header dictionary compares ordinally, so a
+keyed lookup would work only because `HttpResponseMessage` happens to canonicalise this header's
+casing. A `Retry-After` carrying an HTTP date rather than seconds yields `null`, since an unset
+`ResetsAt` is better than an invented one.
+
+**Azure DevOps pull request operations require `Project`; repository enumeration does not.** Azure
+DevOps nests repositories under a project — GitHub has no equivalent — so
+`AzureDevOpsProvider.Project` is optional: unset, `GetRepositoriesAsync` enumerates the whole
+organisation; set, it scopes to that project. Pull requests have no project-less endpoint at all, so
+`GetPullRequestsAsync` and pull-request creation both throw `InvalidOperationException` immediately
+when `Project` is null, rather than guessing a project by re-enumerating and matching repository
+names (rejected: an extra call, and ambiguous whenever two projects share a repository name).
+
+**GitHub's `GetRepositoriesAsync` returns public repositories only, and a token does not widen
+that.** It calls `GET /users/{login}/repos`, which does not honour authentication to reveal an
+owner's private repositories the way `GET /user/repos` would for the *token's own* account — and
+switching to that endpoint would silently stop honouring the configured `Owner`, since it always
+describes the token's own repositories regardless of which owner was asked for. Azure DevOps has no
+equivalent restriction: its enumeration returns everything the supplied token can see. Two
+implementations of the same `IGitHostingProvider.GetRepositoriesAsync` contract genuinely differ
+here — do not assume GitHub coverage matches Azure DevOps's, or vice versa.
+
+**A success status code is not a promise the body is JSON.** A proxy interstitial, a captive portal,
+or a single sign-on redirect page all arrive as HTML under a `200`. `AzureDevOpsProvider`'s three
+success-path deserializations go through `DeserializeSuccessBody`, which turns a `JsonException` into
+a `GitHostingRequestException` carrying the status and the original body — a public method whose
+documented failure surface is the `GitHostingException` hierarchy must not leak
+`System.Text.Json.JsonException`. Failure bodies already had this covered by `ExtractMessage`, which
+treats an unparsable body as the message itself. Octokit wraps its own deserialization failures in
+`ApiException`, so GitHub needs no equivalent.
+
+**This layer has no integration tier.** Every other tier in this repository that talks to a real
+external system (git itself) has one; the hosting layer does not, because hitting real GitHub and
+real Azure DevOps needs credentials and network access CI does not have. Its tests — including the
+captured-fixture tests — verify this layer's client code against *this project's understanding* of
+each API's documented contract, not against the APIs themselves. Fixtures captured from real
+responses (see `docs/superpowers/research/2026-08-21-azure-devops-rest-findings.md`) narrow the gap
+between "matches our understanding" and "matches reality," but they do not close it: a fixture is a
+snapshot, and a vendor can change undocumented behaviour a snapshot never captured. Treat every test
+in `GitIntegration.Test/Hosting/` as handler-level verification, never as end-to-end assurance that
+either host still behaves this way.
+
+**No DI registration for the hosting layer, and that is deliberate — see
+`ServiceCollectionExtensions`'s remarks.** Neither `GitHubProvider` nor `AzureDevOpsProvider` has a
+constructor dependency a container could supply: `Owner` is a caller-supplied value with no
+sensible default, credential resolution goes through the process-wide `CredentialCache.Instance`
+rather than an injected service, and each provider builds its own `HttpClient`. A registered factory
+would only wrap `new GitHubProvider { Owner = owner }` — no wiring, no value — so construct a
+provider directly instead:
+
+```csharp
+GitHubProvider github = new() { Owner = "ktsu-dev".As<GitProviderOwner>() };
+AzureDevOpsProvider azure = new() { Owner = "my-org".As<GitProviderOwner>(), Project = "my-project".As<AzureDevOpsProjectName>() };
+```
+
+Azure DevOps hosting support does **not** use `Microsoft.TeamFoundationServer.Client` or the other
+official TFS/Azure DevOps client package — both were deliberately left off. They pull
+`System.Data.SqlClient` (a package with a known high-severity advisory, GHSA-98g6-xh36-x2p7) into
+the published package as a direct transitive dependency. `AzureDevOpsProvider` instead builds and
+parses every request by hand against Azure DevOps's REST API (`api-version=7.1`), over the same raw
+`HttpClient` seam `GitProvider` already provides — the package concern is resolved by not needing
+the package, not by working around it.
+
+**Deliberately out of scope for the hosting layer:** merging or completing a pull request, comments,
+reviews, repository creation, and webhooks — none of these are implemented, and none should be
+documented as present. Deliberately out of scope for the local layer, even later: `commit --amend`,
+`add --force`, `switch` (see `IGitCheckoutBuilder`'s remarks for why `checkout` was chosen instead),
+and submodule support.
 
 ## Testing
 
@@ -236,6 +434,23 @@ KTSU_GIT_INTEGRATION_TESTS_REQUIRED=1 GIT_CONFIG_NOSYSTEM=1 dotnet test --filter
 The durable fix is for each test to pin whatever host config it depends on into the throwaway
 repository itself, the way `GitRemoteSyncTests.CreateWorkingCopyAsync` pins `user.name`,
 `user.email`, `commit.gpgsign`, and `pull.rebase`.
+
+### If you mutation-check a fix, mutate by substitution, never by deletion
+
+Breaking the production code to confirm a test fails is the only way to know a test is load-bearing,
+and this repository's hosting tests were verified that way. The hazard is the revert, not the
+mutation: a harness that removes a line reverts by replacing the empty string, which matches
+everywhere and nowhere, so a guard on "exactly one occurrence" fails and the revert silently does
+nothing. That already happened here once and left three `GitHubProvider.Translate` arms deleted. It
+was caught only because the next build failed with `IDE0051: ToResetTime is unused`.
+
+Two rules follow. **Express every mutation as a substitution**, so the revert has a real anchor to
+match. **Re-verify the tree after each mutation run** rather than trusting the revert reported
+success, especially when its output is being filtered or suppressed.
+
+Some fixes cannot be mutation-checked at all, and that is a property of the code rather than a gap in
+the test: removing an arm that is a member's only caller fails the build before any test can fail.
+Substituting the arm's *result* instead of deleting the arm is usually the way through.
 
 **Remember:** plain `dotnet test`, never `dotnet test --nologo` — see Build Commands above.
 
