@@ -38,11 +38,15 @@ builds and parses its requests by hand instead.
   `IsRepositoryAsync`, `OpenAsync`, `DiscoverAsync` — and creates new ones — `Init(...)`,
   `Clone(...)` — by delegating every invocation to `ktsu.RunCommand`.
 - **Fluent Verb Builders**: `GitRepository` exposes one builder per read-only verb — `Status()`,
-  `Log()`, `Diff()`, `Branches()`, `Remotes()`, `RevParse(...)` — and one per mutating verb —
-  `Add()`, `Commit(...)`, `CreateBranch(...)`, `DeleteBranch(...)`, `Checkout(...)`,
-  `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()` — each
-  configurable via chained method calls and run with `ExecuteAsync` or the non-throwing
-  `TryExecuteAsync`.
+  `Log()`, `Diff()`, `Branches()`, `Tags()`, `Remotes()`, `Submodules()`, `RevParse(...)`,
+  `RevList(...)`, `Divergence(...)` — and one per mutating verb — `Add()`, `Commit(...)`,
+  `CreateBranch(...)`, `DeleteBranch(...)`, `CreateTag(...)`, `DeleteTag(...)`, `Checkout(...)`,
+  `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()`,
+  `UpdateSubmodules()` — each configurable via chained method calls and run with `ExecuteAsync` or
+  the non-throwing `TryExecuteAsync`.
+- **Tags and Submodules**: `Tags()`, `CreateTag(...)`, and `DeleteTag(...)` cover both lightweight
+  and annotated tags; `Submodules()` reports each submodule's recorded gitlink alongside what is
+  actually checked out, and `UpdateSubmodules()` checks the recorded commits out.
 - **Remote Sync**: `Fetch()` downloads objects and refs without touching the working tree,
   `Pull()` fetches and integrates into the current branch, and `Push()` sends local commits —
   `fetch` and `push` report a machine-readable, per-reference account of what happened via
@@ -242,6 +246,137 @@ await repository.Checkout("feature/new-thing".As<GitRefName>()).ExecuteAsync();
 await repository.DeleteBranch("feature/new-thing".As<GitBranchName>())
     .Force()
     .ExecuteAsync();
+```
+
+### Tagging a Release
+
+Git has two kinds of tag, and `GitTag` describes both. A lightweight tag points straight at a
+commit; an annotated tag points at a tag object carrying its own tagger, date, and message.
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+// Lightweight: just a reference.
+await repository.CreateTag("v1.2.3".As<GitTagName>()).ExecuteAsync();
+
+// Annotated: the message is what makes it annotated, so the two are one call.
+await repository.CreateTag("v1.3.0".As<GitTagName>())
+    .Annotating("Release 1.3.0".As<GitCommitMessage>())
+    .At("main".As<GitRefName>())
+    .ExecuteAsync();
+
+IReadOnlyList<GitTag> tags = await repository.Tags().ExecuteAsync();
+
+foreach (GitTag tag in tags)
+{
+    // Sha is the commit the tag ultimately names, dereferenced through the tag object where there
+    // is one, so it is directly comparable with a GitBranch.Sha. ObjectSha is what the reference
+    // itself points at, which differs only for an annotated tag.
+    Console.WriteLine($"{tag.Name} -> {tag.Sha} ({(tag.IsAnnotated ? tag.Message : "lightweight")})");
+}
+
+await repository.DeleteTag("v1.2.3".As<GitTagName>()).ExecuteAsync();
+```
+
+### Inspecting and Updating Submodules
+
+`Submodules()` reports what the superproject *records* alongside what is actually checked out. The
+two disagree whenever someone has committed inside a submodule without updating the gitlink.
+
+```csharp
+using ktsu.GitIntegration;
+
+IReadOnlyList<GitSubmodule> submodules = await repository.Submodules().ExecuteAsync();
+
+foreach (GitSubmodule submodule in submodules)
+{
+    Console.WriteLine($"{submodule.Path}: {submodule.State}");
+
+    if (submodule.State == GitSubmoduleState.DifferentCommit)
+    {
+        Console.WriteLine($"  recorded {submodule.Sha}, checked out {submodule.CheckedOutSha}");
+    }
+}
+
+// Check out the recorded commits, initialising any submodule added upstream since this clone.
+await repository.UpdateSubmodules()
+    .Initialise()
+    .Recursive()
+    .ExecuteAsync();
+```
+
+A failure here does **not** mean the repository is unchanged: the update walks the submodules in
+turn, so one failing after others succeeded leaves a state that is neither the old nor the intended
+new one. Ask `Submodules()` again to find out how far it got.
+
+### Checking for Work That Exists Nowhere Else
+
+Before discarding a working copy, the question worth asking is whether it holds commits no remote
+has.
+
+```csharp
+using ktsu.GitIntegration;
+
+IReadOnlyList<GitCommit> atRisk = await repository.Log()
+    .IncludingAllRefs()
+    .ExcludingRemoteTrackingRefs()
+    .ExecuteAsync();
+
+if (atRisk.Count > 0)
+{
+    Console.WriteLine($"{atRisk.Count} commit(s) exist only here:");
+
+    foreach (GitCommit commit in atRisk)
+    {
+        Console.WriteLine($"  {commit.Sha} {commit.Subject}");
+    }
+}
+```
+
+`IncludingAllRefs()` emits `--all` rather than the narrower `--branches`, which would miss a commit
+on a detached HEAD — the normal state of a submodule working directory, and exactly the case where a
+wrong answer costs work.
+
+### Counting Commits Without Listing Them
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+// One integer from git, rather than building a full GitCommit for every commit in the range.
+int behindMain = await repository.RevList("HEAD..main".As<GitRefName>()).ExecuteAsync();
+
+// Ahead and behind for any two revisions, where GitStatus answers it only for HEAD against its
+// own configured upstream.
+GitDivergence divergence = await repository
+    .Divergence("origin/main".As<GitRefName>(), "HEAD".As<GitRefName>())
+    .ExecuteAsync();
+
+Console.WriteLine($"ahead {divergence.Ahead}, behind {divergence.Behind}");
+```
+
+### Line Counts on a Diff
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+IReadOnlyList<GitDiffEntry> entries = await repository.Diff()
+    .Between("HEAD~1".As<GitRefName>(), "HEAD".As<GitRefName>())
+    .WithLineCounts()
+    .ExecuteAsync();
+
+foreach (GitDiffEntry entry in entries)
+{
+    // Null rather than zero for a binary file: git declines to count one, and a binary change is
+    // not a zero-line change.
+    string counts = entry.Insertions is int added && entry.Deletions is int removed
+        ? $"+{added} -{removed}"
+        : "binary";
+
+    Console.WriteLine($"{entry.Kind} {entry.Path} {counts}");
+}
 ```
 
 ### Managing Remotes
@@ -544,14 +679,25 @@ IReadOnlyList<string> arguments = repository.Status().BuildArguments();
 ### Metadata-Only Repositories
 
 A `GitRepository` produced by a hosting provider (rather than `IGitClient.OpenAsync` or
-`DiscoverAsync`) carries hosting metadata but no `ProcessRunner`. Calling any verb on it throws
+`DiscoverAsync`) carries hosting metadata but neither a `ProcessRunner` nor a `LocalPath` — it
+describes a repository that has never been cloned. Calling any verb on it throws
 `InvalidOperationException` immediately, rather than failing later inside git:
 
 ```csharp
-GitRepository metadataOnly = new() { LocalPath = somePath, Name = "GitIntegration".As<GitRepositoryName>() };
+GitRepository metadataOnly = new() { Name = "GitIntegration".As<GitRepositoryName>() };
 
 // Throws InvalidOperationException — obtain a runnable repository from IGitClient first.
 _ = metadataOnly.Status();
+```
+
+Cloning one needs a destination, since there is no local path to infer:
+
+```csharp
+IGitCloneBuilder clone = client.Clone(
+    metadataOnly.RemotePath!,
+    "/src/GitIntegration".As<AbsoluteDirectoryPath>());
+
+GitRepository working = await clone.ExecuteAsync();
 ```
 
 ## API Reference
@@ -574,14 +720,15 @@ The entry point to the local layer: finds and opens repositories, and reports on
 
 ### `GitRepository`
 
-Carries `LocalPath` plus optional hosting metadata, and exposes one builder factory per verb.
+Carries an optional `LocalPath` plus optional hosting metadata, and exposes one builder factory per verb.
 
 #### Properties
 
 | Name | Type | Description |
 |------|------|-------------|
-| `LocalPath` | `AbsoluteDirectoryPath` | The working tree's local filesystem path. |
+| `LocalPath` | `AbsoluteDirectoryPath?` | The working tree's local filesystem path; `null` on a repository a hosting provider enumerated, which has never been cloned. |
 | `Name` | `GitRepositoryName?` | The repository name, when known. |
+| `HostRepositoryId` | `GitHostRepositoryId?` | The host's own identifier, when known — what Azure DevOps's `{repositoryId}` path parameter is documented to take. |
 | `WebURI` | `GitRepositoryWebURI?` | The browser-facing URI, when known. |
 | `RemotePath` | `GitRepositoryRemotePath?` | The remote clone path, when known. |
 | `ProcessRunner` | `IGitProcessRunner?` | The runner this repository's verbs execute through; `null` on a metadata-only repository. |
@@ -594,12 +741,18 @@ Carries `LocalPath` plus optional hosting metadata, and exposes one builder fact
 | `Log()` | `IGitLogBuilder` | Builds `git log -z` with this library's pinned format. |
 | `Diff()` | `IGitDiffBuilder` | Builds `git diff --name-status -z`. |
 | `Branches()` | `IGitBranchListBuilder` | Builds `git for-each-ref` over the branch namespaces. |
+| `Tags()` | `IGitTagListBuilder` | Builds `git for-each-ref` over `refs/tags`. |
 | `Remotes()` | `IGitRemoteListBuilder` | Builds `git remote -v`. |
+| `Submodules()` | `IGitSubmoduleListBuilder` | Reads `git ls-files --stage -z` for the recorded gitlinks and `git submodule status` for what is checked out. |
 | `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision. |
+| `RevList(GitRefName)` | `IGitRevListBuilder` | Builds `git rev-list --count`, counting commits without listing them. |
+| `Divergence(GitRefName, GitRefName)` | `IGitRevListDivergenceBuilder` | Builds `git rev-list --count --left-right`, reporting ahead and behind for any two revisions. |
 | `Add()` | `IGitAddBuilder` | Builds `git add`. |
 | `Commit(GitCommitMessage)` | `IGitCommitBuilder` | Builds `git commit`, then reads the new commit back with `git log -1`. |
 | `CreateBranch(GitBranchName)` | `IGitBranchCreateBuilder` | Builds `git branch <name> [<start-point>]`. |
 | `DeleteBranch(GitBranchName)` | `IGitBranchDeleteBuilder` | Builds `git branch --delete <name>`. |
+| `CreateTag(GitTagName)` | `IGitTagCreateBuilder` | Builds `git tag`, lightweight or annotated. |
+| `DeleteTag(GitTagName)` | `IGitTagDeleteBuilder` | Builds `git tag --delete <name>`. |
 | `Checkout(GitRefName)` | `IGitCheckoutBuilder` | Builds `git checkout`. |
 | `AddRemote(GitRemoteName, GitRepositoryRemotePath)` | `IGitRemoteAddBuilder` | Builds `git remote add <name> <url>`. |
 | `RemoveRemote(GitRemoteName)` | `IGitRemoteRemoveBuilder` | Builds `git remote remove <name>`. |
@@ -607,6 +760,7 @@ Carries `LocalPath` plus optional hosting metadata, and exposes one builder fact
 | `Fetch()` | `IGitFetchBuilder` | Builds `git fetch`, with `--porcelain` where the installed git supports it. |
 | `Pull()` | `IGitPullBuilder` | Builds `git pull`. |
 | `Push()` | `IGitPushBuilder` | Builds `git push --porcelain`. |
+| `UpdateSubmodules()` | `IGitSubmoduleUpdateBuilder` | Builds `git submodule update`. |
 | `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree. |
 | `OpenWebClient()` | `void` | Opens `WebURI` in the default browser, when it is an absolute `http`/`https` URI. |
 
@@ -627,24 +781,31 @@ The shared contract every verb builder implements. A builder is single-use and n
 | Interface | Extra Methods | Result |
 |-----------|----------------|--------|
 | `IGitStatusBuilder` | `WithUntrackedFiles(GitUntrackedFilesMode)`, `IncludeIgnored()` | `GitStatus` |
-| `IGitLogBuilder` | `Take(int)`, `Skip(int)`, `ForRevision(GitRefName)`, `ForPath(RelativeFilePath)`, `FirstParentOnly()` | `IReadOnlyList<GitCommit>` |
-| `IGitDiffBuilder` | `Staged()`, `Against(GitRefName)`, `Between(GitRefName, GitRefName)`, `DetectRenames()`, `DetectCopies()`, `ForPath(RelativeFilePath)` | `IReadOnlyList<GitDiffEntry>` |
+| `IGitLogBuilder` | `Take(int)`, `Skip(int)`, `ForRevision(GitRefName)`, `ForPath(RelativeFilePath)`, `FirstParentOnly()`, `IncludingAllRefs()`, `ExcludingRemoteTrackingRefs()` | `IReadOnlyList<GitCommit>` |
+| `IGitDiffBuilder` | `Staged()`, `Against(GitRefName)`, `Between(GitRefName, GitRefName)`, `DetectRenames()`, `DetectCopies()`, `ForPath(RelativeFilePath)`, `WithLineCounts()` | `IReadOnlyList<GitDiffEntry>` |
 | `IGitBranchListBuilder` | `LocalOnly()`, `RemoteOnly()` | `IReadOnlyList<GitBranch>` |
+| `IGitTagListBuilder` | *(none)* | `IReadOnlyList<GitTag>` |
 | `IGitRemoteListBuilder` | *(none)* | `IReadOnlyList<GitRemote>` |
+| `IGitSubmoduleListBuilder` | *(none)* | `IReadOnlyList<GitSubmodule>` |
 | `IGitRevParseBuilder` | *(none — revision supplied via `GitRepository.RevParse`)* | `GitCommitSha` |
+| `IGitRevListBuilder` | `FirstParentOnly()`, `ForPath(RelativeFilePath)` | `int` |
+| `IGitRevListDivergenceBuilder` | *(none — revisions supplied via `GitRepository.Divergence`)* | `GitDivergence` |
 | `IGitInitBuilder` | `Bare()`, `WithInitialBranch(GitBranchName)` | `GitInitResult` |
-| `IGitCloneBuilder` | `WithBranch(GitBranchName)`, `WithDepth(int)`, `Bare()`, `ReportingProgress(IProgress<string>)` | `GitRepository` |
+| `IGitCloneBuilder` | `WithBranch(GitBranchName)`, `WithDepth(int)`, `Bare()`, `RecursingSubmodules()`, `ReportingProgress(IProgress<string>)` | `GitRepository` |
 | `IGitAddBuilder` | `ForPath(RelativeFilePath)`, `All()`, `UpdateTrackedOnly()` | `GitCompleted` |
 | `IGitCommitBuilder` | `WithBody(string)`, `AllowEmpty()`, `StageTrackedFiles()`, `WithAuthor(GitAuthorName, GitAuthorEmail)` | `GitCommit` |
 | `IGitBranchCreateBuilder` | `StartingAt(GitRefName)`, `Force()` | `GitCompleted` |
 | `IGitBranchDeleteBuilder` | `Force()` | `GitCompleted` |
-| `IGitCheckoutBuilder` | `CreatingBranch()`, `Force()`, `Detach()` | `GitCompleted` |
+| `IGitTagCreateBuilder` | `At(GitRefName)`, `Annotating(GitCommitMessage)`, `Force()` | `GitCompleted` |
+| `IGitTagDeleteBuilder` | *(none)* | `GitCompleted` |
+| `IGitCheckoutBuilder` | `CreatingBranch()`, `Force()`, `Detach()`, `RecursingSubmodules()` | `GitCompleted` |
 | `IGitRemoteAddBuilder` | `WithFetch()` | `GitCompleted` |
 | `IGitRemoteRemoveBuilder` | *(none)* | `GitCompleted` |
 | `IGitRemoteSetUrlBuilder` | `ForPushOnly()` | `GitCompleted` |
-| `IGitFetchBuilder` | `FromRemote(GitRemoteName)`, `AllRemotes()`, `Prune()`, `WithTags()`, `WithDepth(int)`, `ReportingProgress(IProgress<string>)` | `GitFetchResult` |
-| `IGitPullBuilder` | `FromRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `FastForwardOnly()`, `Rebase()`, `Prune()`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
-| `IGitPushBuilder` | `ToRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `SettingUpstream()`, `Force()`, `ForceWithLease()`, `DeletingRemoteBranch()`, `DryRun()`, `ReportingProgress(IProgress<string>)` | `GitPushResult` |
+| `IGitFetchBuilder` | `FromRemote(GitRemoteName)`, `AllRemotes()`, `Prune()`, `WithTags()`, `WithDepth(int)`, `RecursingSubmodules(GitSubmoduleRecursion)`, `ReportingProgress(IProgress<string>)` | `GitFetchResult` |
+| `IGitPullBuilder` | `FromRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `FastForwardOnly()`, `Rebase()`, `Merge()`, `Prune()`, `RecursingSubmodules(GitSubmoduleRecursion)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
+| `IGitPushBuilder` | `ToRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `SettingUpstream()`, `Force()`, `ForceWithLease()`, `DeletingRemoteBranch()`, `DryRun()`, `CheckingSubmodules(GitSubmodulePushCheck)`, `ReportingProgress(IProgress<string>)` | `GitPushResult` |
+| `IGitSubmoduleUpdateBuilder` | `Initialise()`, `Recursive()`, `FromRemote()`, `Force()`, `WithDepth(int)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
 
 ### Result and Execution Models
 
