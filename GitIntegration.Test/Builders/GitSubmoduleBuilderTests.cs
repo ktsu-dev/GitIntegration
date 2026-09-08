@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
 
+using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
 using Testably.Abstractions.Testing;
@@ -66,7 +67,7 @@ public class GitSubmoduleListBuilderTests
 			await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.AreEqual(1, submodules.Count);
-		Assert.AreEqual("libs/sub", submodules[0].Path.WeakString);
+		Assert.AreEqual("libs/sub".As<RelativeDirectoryPath>(), submodules[0].Path);
 		Assert.AreEqual(GitSubmoduleState.InSync, submodules[0].State);
 		Assert.AreEqual(submodules[0].Sha, submodules[0].CheckedOutSha);
 		Assert.AreEqual("heads/master", submodules[0].Describe);
@@ -126,7 +127,7 @@ public class GitSubmoduleListBuilderTests
 		IReadOnlyList<GitSubmodule> submodules =
 			await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual("libs/sub (old)", submodules[0].Path.WeakString);
+		Assert.AreEqual("libs/sub (old)".As<RelativeDirectoryPath>(), submodules[0].Path);
 		Assert.AreEqual(GitSubmoduleState.InSync, submodules[0].State);
 		Assert.AreEqual("heads/master", submodules[0].Describe);
 	}
@@ -166,6 +167,30 @@ public class GitSubmoduleListBuilderTests
 
 		Assert.AreEqual(1, submodules.Count);
 		Assert.AreEqual(GitSubmoduleState.Unknown, submodules[0].State);
+	}
+
+	[TestMethod]
+	public void MatchesAStatusLineAgainstGitsOwnSpellingOfThePath()
+	{
+		// git prints a path with forward slashes on every platform, but RelativeDirectoryPath
+		// canonicalises to the *platform's* separator — so on Windows the gitlink is "libs\sub" here
+		// and "libs/sub" in the status output, and matching the two naively fails. That left every
+		// submodule Unknown on Windows and nowhere else, which no POSIX run could ever catch.
+		//
+		// This assertion is trivially satisfied on a POSIX host, where the two spellings coincide, and
+		// load-bearing on Windows, where CI runs it — the only place the bug can appear. It is written
+		// as a nested path so the separator is actually exercised there rather than absent.
+		IReadOnlyList<GitSubmodule> gitlinks = GitSubmoduleParser.ParseGitlinks(
+			"160000 1f2bee80cfcf06ee5ba820b17fe3b6ddca460915 0\tlibs/nested/sub\0");
+
+		IReadOnlyList<GitSubmodule> resolved = GitSubmoduleParser.ApplyStatus(
+			gitlinks,
+			" 1f2bee80cfcf06ee5ba820b17fe3b6ddca460915 libs/nested/sub (heads/master)\n");
+
+		Assert.AreEqual(1, resolved.Count);
+		Assert.AreEqual(GitSubmoduleState.InSync, resolved[0].State);
+		Assert.AreEqual("heads/master", resolved[0].Describe);
+		Assert.AreEqual("libs/nested/sub".As<RelativeDirectoryPath>(), resolved[0].Path);
 	}
 
 	[TestMethod]

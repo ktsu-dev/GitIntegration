@@ -105,7 +105,7 @@ public class GitSubmoduleTests
 			await super.Submodules().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.AreEqual(1, submodules.Count);
-		Assert.AreEqual("libs/sub", submodules[0].Path.WeakString);
+		Assert.AreEqual("libs/sub".As<RelativeDirectoryPath>(), submodules[0].Path);
 
 		// The leading-space marker. This is the assertion that fails if the status output is ever
 		// trimmed before it reaches the parser, since the marker is itself a space.

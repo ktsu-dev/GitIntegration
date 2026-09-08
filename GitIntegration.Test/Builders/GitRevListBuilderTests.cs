@@ -48,7 +48,11 @@ public class GitRevListBuilderTests
 
 		Assert.IsTrue(Array.IndexOf(arguments, "--first-parent") < separator);
 		Assert.IsTrue(Array.IndexOf(arguments, "a..b") < separator);
-		Assert.AreEqual("src/a.txt", arguments[separator + 1]);
+
+		// Compared against the canonicalised form rather than the literal, matching
+		// GitLogBuilderTests: RelativeFilePath canonicalises to the platform's separator, so the
+		// literal "src/a.txt" is what reaches the vector on POSIX and "src\a.txt" on Windows.
+		Assert.AreEqual("src/a.txt".As<RelativeFilePath>().WeakString, arguments[separator + 1]);
 	}
 
 	[TestMethod]

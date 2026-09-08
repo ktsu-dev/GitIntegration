@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// Reads <c>git for-each-ref</c> emitted with <see cref="GitOutputFormats.ForEachTagFormat"/>.
@@ -38,10 +39,8 @@ internal static class GitTagParser
 
 		List<GitTag> tags = [];
 
-		foreach (string line in output.Split('\n'))
+		foreach (string record in output.Split('\n').Select(static line => line.TrimEnd('\r')))
 		{
-			string record = line.TrimEnd('\r');
-
 			if (record.Length == 0)
 			{
 				continue;

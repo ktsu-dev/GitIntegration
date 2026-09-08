@@ -4,6 +4,9 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+
+using ktsu.Semantics.Paths;
 
 /// <summary>
 /// Reads a repository's submodules from two invocations: <c>git ls-files --stage -z</c> for the
@@ -136,7 +139,7 @@ internal static class GitSubmoduleParser
 
 		foreach (GitSubmodule submodule in submodules)
 		{
-			string path = submodule.Path.WeakString;
+			string path = ToGitSpelling(submodule.Path);
 
 			// An exact match first: a submodule with no describe suffix leaves the remainder equal to
 			// the path itself. Otherwise the remainder is the path followed by " (describe)", and
@@ -220,6 +223,27 @@ internal static class GitSubmoduleParser
 			: GitParseValues.ToSemantic<GitCommitSha>(status.ObjectId, "submodule checked-out object id"),
 		Describe = describe,
 	};
+
+	/// <summary>
+	/// Spells a path the way git prints it, so a status line can be matched against it.
+	/// </summary>
+	/// <remarks>
+	/// git always prints a path with forward slashes, on every platform. <see cref="RelativeDirectoryPath"/>
+	/// canonicalises to the <em>platform's</em> separator, so on Windows the same submodule is
+	/// <c>libs\sub</c> here and <c>libs/sub</c> in the status output, and every match would fail —
+	/// leaving every submodule <see cref="GitSubmoduleState.Unknown"/> on Windows and nowhere else.
+	/// The bug is invisible on a POSIX host, where the two spellings coincide.
+	/// <para>
+	/// Converting <see cref="Path.DirectorySeparatorChar"/> rather than a literal backslash is what
+	/// makes this safe on POSIX too: there the separator is already <c>/</c>, so this is a no-op, and
+	/// a backslash that is a legitimate character in a POSIX filename is left alone rather than being
+	/// rewritten into a separator.
+	/// </para>
+	/// </remarks>
+	/// <param name="path">The canonicalised path read from <c>ls-files</c>.</param>
+	/// <returns>The same path spelled as git prints it.</returns>
+	private static string ToGitSpelling(RelativeDirectoryPath path) =>
+		path.WeakString.Replace(Path.DirectorySeparatorChar, '/');
 
 	private static GitSubmoduleState ToState(char marker) => marker switch
 	{
