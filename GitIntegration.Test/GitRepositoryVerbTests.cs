@@ -28,6 +28,8 @@ public class GitRepositoryVerbTests
 			[.. repository.Remotes().BuildArguments()],
 			[.. repository.RevParse("HEAD".As<GitRefName>()).BuildArguments()],
 			[.. repository.Tags().BuildArguments()],
+			[.. repository.RevList("HEAD".As<GitRefName>()).BuildArguments()],
+			[.. repository.Divergence("origin/main".As<GitRefName>(), "HEAD".As<GitRefName>()).BuildArguments()],
 		];
 
 		foreach (string[] vector in vectors)
@@ -72,6 +74,9 @@ public class GitRepositoryVerbTests
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Branches());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Remotes());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Tags());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.RevList("HEAD".As<GitRefName>()));
+		_ = Assert.ThrowsExactly<InvalidOperationException>(
+			() => _ = repository.Divergence("origin/main".As<GitRefName>(), "HEAD".As<GitRefName>()));
 
 		// A valid revision, so the guard is what fires rather than the null check.
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.RevParse("HEAD".As<GitRefName>()));

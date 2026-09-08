@@ -134,6 +134,46 @@ public class GitRepository
 		return new GitRevParseBuilder(RequireRunner(), RequireLocalPath(), revision);
 	}
 
+	/// <summary>Counts the commits a revision or range names.</summary>
+	/// <remarks>
+	/// Cheaper than <c>Log()</c> for a count, and unable to fail the way it can — see
+	/// <see cref="IGitRevListBuilder"/>. For how far the current branch has diverged from its own
+	/// upstream, <see cref="GitStatus.Ahead"/> and <see cref="GitStatus.Behind"/> already answer it
+	/// from a single <see cref="Status"/> call.
+	/// </remarks>
+	/// <param name="revision">The revision or range to count, such as <c>HEAD</c> or <c>a..b</c>.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="revision"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRevListBuilder RevList(GitRefName revision)
+	{
+		Ensure.NotNull(revision);
+
+		return new GitRevListBuilder(RequireRunner(), RequireLocalPath(), revision);
+	}
+
+	/// <summary>Counts how far two revisions have diverged from each other.</summary>
+	/// <remarks>
+	/// Answers ahead-and-behind for an arbitrary pair of revisions, where <see cref="Status"/>
+	/// answers it only for HEAD against its configured upstream. The two parameters are named so the
+	/// mapping onto <see cref="GitDivergence.Ahead"/> and <see cref="GitDivergence.Behind"/> cannot
+	/// be read backwards.
+	/// </remarks>
+	/// <param name="upstream">The revision whose exclusive commits are counted as behind.</param>
+	/// <param name="local">The revision whose exclusive commits are counted as ahead.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="upstream"/> or <paramref name="local"/> is <see langword="null"/>.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRevListDivergenceBuilder Divergence(GitRefName upstream, GitRefName local)
+	{
+		Ensure.NotNull(upstream);
+		Ensure.NotNull(local);
+
+		return new GitRevListDivergenceBuilder(RequireRunner(), RequireLocalPath(), upstream, local);
+	}
+
 	/// <summary>Lists branch references.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>

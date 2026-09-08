@@ -91,6 +91,142 @@ public class GitRemoteSyncTests
 	}
 
 	[TestMethod]
+	public async Task ReportsOnlyTheCommitsNoRemoteHasAsync()
+	{
+		// The query this pair of options exists for, run against a real bare remote so the answer is
+		// git's rather than this library's idea of it. The argument-order tests pin the vector; this
+		// pins that the vector means what it is meant to mean — and it is the test that would fail if
+		// the closing --not were dropped, since the revision would then fall inside the negation.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "pushed", cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Everything is on the remote, so nothing is at stake yet.
+		IReadOnlyList<GitCommit> beforeLocalWork = await repository.Log()
+			.IncludingAllRefs()
+			.ExcludingRemoteTrackingRefs()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(0, beforeLocalWork.Count);
+
+		GitCommit unpushed = await CommitFileAsync(
+			repository, workingDirectory, "b.txt", "two\n", "unpushed", cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> afterLocalWork = await repository.Log()
+			.IncludingAllRefs()
+			.ExcludingRemoteTrackingRefs()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Exactly the one commit the remote has never seen — not the whole history, and not nothing.
+		Assert.AreEqual(1, afterLocalWork.Count);
+		Assert.AreEqual(unpushed.Sha, afterLocalWork[0].Sha);
+	}
+
+	[TestMethod]
+	public async Task NarrowsTheUnpushedQueryToARevisionWithoutNegatingItAsync()
+	{
+		// Combining ExcludingRemoteTrackingRefs with ForRevision is the case the closing --not
+		// protects. Without it git would read "--not --remotes <revision>" as asking for commits in
+		// neither, and answer zero — which looks exactly like a correct "nothing unpushed".
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "pushed", cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommit unpushed = await CommitFileAsync(
+			repository, workingDirectory, "b.txt", "two\n", "unpushed", cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> commits = await repository.Log()
+			.ExcludingRemoteTrackingRefs()
+			.ForRevision("HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, commits.Count);
+		Assert.AreEqual(unpushed.Sha, commits[0].Sha);
+	}
+
+	[TestMethod]
+	public async Task CountsCommitsAndDivergenceAgainstARealRemoteAsync()
+	{
+		// Runs both rev-list builders against a real repository, so the ahead/behind mapping is
+		// checked against git's actual output rather than against a scripted string. Divergence is
+		// also cross-checked against GitStatus, which answers the same question by a different route
+		// — if the two disagree, one of them is reading git backwards.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "b.txt", "two\n", "c2", cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(repository, workingDirectory, "c.txt", "three\n", "c3", cancellationToken).ConfigureAwait(false);
+
+		int total = await repository.RevList("HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(3, total);
+
+		// A range counts only what the right side has and the left does not.
+		int unpushed = await repository.RevList("origin/main..HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(2, unpushed);
+
+		// A pathspec narrows the count to commits touching that path.
+		int touchingB = await repository.RevList("HEAD".As<GitRefName>())
+			.ForPath("b.txt".As<RelativeFilePath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(1, touchingB);
+
+		GitDivergence divergence = await repository
+			.Divergence("origin/main".As<GitRefName>(), "HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(2, divergence.Ahead);
+		Assert.AreEqual(0, divergence.Behind);
+		Assert.IsFalse(divergence.IsInSync);
+
+		// The same numbers GitStatus reports for HEAD against its configured upstream. Reversing the
+		// left/right mapping would make these disagree.
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(status.Ahead, divergence.Ahead);
+		Assert.AreEqual(status.Behind, divergence.Behind);
+	}
+
+	[TestMethod]
 	public async Task PushCreatesTheBranchOnTheRemoteAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
