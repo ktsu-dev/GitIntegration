@@ -28,14 +28,26 @@ internal sealed class AzureDevOpsRepositoryListResponse
 /// </summary>
 /// <remarks>
 /// Only the fields <see cref="AzureDevOpsProvider"/> maps onto <see cref="GitRepository"/> are
-/// declared here; the rest of the documented schema (<c>id</c>, <c>sshUrl</c>,
-/// <c>defaultBranch</c>, <c>project</c>, and so on) is left unread because nothing in this
-/// library's model needs it. Field names come from findings section 2. <see cref="WebUrl"/> is
-/// documented-by-schema-only there: no example response the findings could check populates it, so
-/// treat a populated value as unconfirmed shape even though the field name itself is confirmed.
+/// declared here; the rest of the documented schema (<c>sshUrl</c>, <c>defaultBranch</c>,
+/// <c>project</c>, and so on) is left unread because nothing in this library's model needs it.
+/// Field names come from findings section 2. <see cref="WebUrl"/> is documented-by-schema-only
+/// there: no example response the findings could check populates it, so treat a populated value as
+/// unconfirmed shape even though the field name itself is confirmed.
 /// </remarks>
 internal sealed class AzureDevOpsRepository
 {
+	/// <summary>
+	/// Gets the repository's host-assigned id, or <see langword="null"/> when the host omitted it.
+	/// </summary>
+	/// <remarks>
+	/// Typed <c>string (uuid)</c> by Microsoft's schema, and read as a string here rather than as a
+	/// <see cref="System.Guid"/>: the value is handed straight back to Azure DevOps as a path
+	/// segment and never inspected, so parsing it would only add a way for a well-formed response to
+	/// fail. It fills <see cref="GitRepository.HostRepositoryId"/>, which is what the
+	/// <c>{repositoryId}</c> path parameter is documented to take.
+	/// </remarks>
+	public string? Id { get; init; }
+
 	/// <summary>Gets the repository's name, or <see langword="null"/> when the host omitted it.</summary>
 	public string? Name { get; init; }
 

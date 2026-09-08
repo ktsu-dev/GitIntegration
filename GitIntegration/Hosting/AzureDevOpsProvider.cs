@@ -44,7 +44,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	private const string ApiVersion = "7.1";
 
 	/// <summary>
-	/// The number of pull requests each page of <see cref="GetPullRequestsAsync"/> asks for, sent as
+	/// The number of pull requests each page of <see cref="GetPullRequestsCoreAsync"/> asks for, sent as
 	/// <c>$top</c>.
 	/// </summary>
 	/// <remarks>
@@ -89,7 +89,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// same endpoint with the project path segment present or absent, not two different routes, which
 	/// is exactly what <see cref="Project"/> being optional models.
 	/// Pull request operations are the asymmetric case: Azure DevOps has no project-less pull-request
-	/// endpoint, so <see cref="GetPullRequestsAsync"/> and <see cref="CreatePullRequestCoreAsync"/>
+	/// endpoint, so <see cref="GetPullRequestsCoreAsync"/> and <see cref="CreatePullRequestCoreAsync"/>
 	/// both require <see cref="Project"/> to be set and throw <see cref="InvalidOperationException"/>
 	/// otherwise. Resolving it automatically by re-enumerating repositories and matching names was
 	/// rejected: it costs an extra call and is ambiguous whenever two projects hold a repository of
@@ -103,7 +103,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// the project path segment appears only when <see cref="Project"/> is set. This endpoint
 	/// documents no pagination parameters at all: the response is the complete repository list for
 	/// the organisation or project on every call, so this method issues exactly one request. That is
-	/// what makes it differ from <see cref="GetPullRequestsAsync"/>, which must page.
+	/// what makes it differ from <see cref="GetPullRequestsCoreAsync"/>, which must page.
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
 	{
@@ -145,7 +145,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <para>
 	/// Calls <c>GET .../repositories/{repositoryId}/pullrequests</c> with
 	/// <c>searchCriteria.status=active</c> sent explicitly. The endpoint's documented default is
-	/// already <c>active</c>, but <see cref="IGitHostingProvider.GetPullRequestsAsync"/>'s contract is
+	/// already <c>active</c>, but <see cref="IGitHostingProvider.GetPullRequestsAsync(GitRepositoryName, CancellationToken)"/>'s contract is
 	/// defined by this library, not by restating whatever a host happens to default to today.
 	/// </para>
 	/// <para>
@@ -156,21 +156,23 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// needs none of this, because its endpoint documents no pagination at all.
 	/// </para>
 	/// <para>
-	/// <c>{repositoryId}</c> is filled with <paramref name="repositoryName"/>, which is unconfirmed
-	/// against the documented schema, not sanctioned by it: Microsoft's reference types that parameter
-	/// as a repository <b>id</b> (<c>GitRepository.id</c> is a <c>string (uuid)</c>), and draws an
-	/// explicit id-or-name distinction for the sibling <c>project</c> parameter without drawing one
-	/// here — a distinction Microsoft states where it applies reads as deliberate where it is
-	/// withheld. This library passes the name anyway because <see cref="IGitHostingProvider"/> exposes
-	/// no repository id for a caller to supply. It very likely works today; that is a different
-	/// property from being specified, and only the specified kind survives a vendor's next change
-	/// unannounced.
+	/// <c>{repositoryId}</c> is filled with <paramref name="repositoryIdentifier"/>, which the caller's
+	/// choice of overload decides. Microsoft's reference types that parameter as a repository
+	/// <b>id</b> (<c>GitRepository.id</c> is a <c>string (uuid)</c>), and draws an explicit
+	/// id-or-name distinction for the sibling <c>project</c> parameter without drawing one here — a
+	/// distinction Microsoft states where it applies reads as deliberate where it is withheld.
+	/// <see cref="GitProvider.GetPullRequestsAsync(GitRepository, CancellationToken)"/> therefore
+	/// passes <see cref="GitRepository.HostRepositoryId"/>, which is exactly what the schema
+	/// documents. <see cref="GitProvider.GetPullRequestsAsync(GitRepositoryName, CancellationToken)"/>
+	/// still passes a name, since that is all it is given; that very likely works today, but working
+	/// and being specified are different properties, and only the second survives a vendor's next
+	/// change unannounced.
 	/// </para>
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
-	public override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default)
+	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryName);
+		Ensure.NotNull(repositoryIdentifier);
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();
 
@@ -184,7 +186,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 
 		while (morePages)
 		{
-			using HttpRequestMessage request = new(HttpMethod.Get, BuildPullRequestListUri(repositoryName, skip));
+			using HttpRequestMessage request = new(HttpMethod.Get, BuildPullRequestListUri(repositoryIdentifier, skip));
 			ApplyAuthentication(request, credential);
 
 			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -226,14 +228,14 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="HttpResponseMessage.IsSuccessStatusCode"/> rather than a specific status code.
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
-	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken)
+	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryName);
+		Ensure.NotNull(repositoryIdentifier);
 		Ensure.NotNull(specification);
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();
 
-		Uri requestUri = BuildPullRequestCreateUri(repositoryName);
+		Uri requestUri = BuildPullRequestCreateUri(repositoryIdentifier);
 		HostingCredential credential = ResolveCredential();
 
 		AzureDevOpsPullRequestCreateRequest requestBody = new()
@@ -276,7 +278,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// Throws when a pull request operation is attempted without <see cref="Project"/> set.
 	/// </summary>
 	/// <remarks>
-	/// Both <see cref="GetPullRequestsAsync"/> and <see cref="CreatePullRequestCoreAsync"/> call this
+	/// Both <see cref="GetPullRequestsCoreAsync"/> and <see cref="CreatePullRequestCoreAsync"/> call this
 	/// before building a request, since neither has a project-less pull-request endpoint to fall back
 	/// to — see <see cref="Project"/>'s remarks for why this is not resolved automatically instead.
 	/// </remarks>
@@ -313,11 +315,11 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <c>$top</c> is sent on every page, including the first, so a short page always means the last
 	/// page rather than possibly meaning a defaulted one. See <see cref="PullRequestPageSize"/>.
 	/// </remarks>
-	/// <param name="repositoryName">The repository the URI is scoped to.</param>
+	/// <param name="repositoryIdentifier">The repository the URI is scoped to.</param>
 	/// <param name="skip">How many pull requests the service should pass over before filling this page.</param>
 	/// <returns>The request URI, carrying <see cref="ApiVersion"/>.</returns>
-	private Uri BuildPullRequestListUri(GitRepositoryName repositoryName, int skip) =>
-		new($"{PullRequestsPath(repositoryName)}?searchCriteria.status=active&$top={PullRequestPageSize}&$skip={skip.ToString(CultureInfo.InvariantCulture)}&api-version={ApiVersion}");
+	private Uri BuildPullRequestListUri(string repositoryIdentifier, int skip) =>
+		new($"{PullRequestsPath(repositoryIdentifier)}?searchCriteria.status=active&$top={PullRequestPageSize}&$skip={skip.ToString(CultureInfo.InvariantCulture)}&api-version={ApiVersion}");
 
 	/// <summary>
 	/// Builds the URI a pull request is created against.
@@ -326,10 +328,10 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// The same path as the listing, without the listing's query parameters: Microsoft's reference
 	/// documents no search criteria and no pagination on the creating <c>POST</c>.
 	/// </remarks>
-	/// <param name="repositoryName">The repository the pull request is opened against.</param>
+	/// <param name="repositoryIdentifier">The repository the pull request is opened against.</param>
 	/// <returns>The request URI, carrying <see cref="ApiVersion"/>.</returns>
-	private Uri BuildPullRequestCreateUri(GitRepositoryName repositoryName) =>
-		new($"{PullRequestsPath(repositoryName)}?api-version={ApiVersion}");
+	private Uri BuildPullRequestCreateUri(string repositoryIdentifier) =>
+		new($"{PullRequestsPath(repositoryIdentifier)}?api-version={ApiVersion}");
 
 	/// <summary>
 	/// Builds the pull request endpoint's path for a repository, scoped to this provider's
@@ -340,13 +342,16 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="EnsureProjectIsSet"/> — since a pull request URI has no project-less form to fall
 	/// back to.
 	/// </remarks>
-	/// <param name="repositoryName">The repository the path is scoped to.</param>
+	/// <param name="repositoryIdentifier">
+	/// The repository the path is scoped to, already resolved to the host's own id where one was
+	/// known — see <see cref="GitProvider.GetPullRequestsAsync(GitRepository, CancellationToken)"/>.
+	/// </param>
 	/// <returns>The endpoint path, with no query string.</returns>
-	private string PullRequestsPath(GitRepositoryName repositoryName)
+	private string PullRequestsPath(string repositoryIdentifier)
 	{
 		string organization = Uri.EscapeDataString(Owner.WeakString);
 		string project = Uri.EscapeDataString(Project!.WeakString);
-		string repository = Uri.EscapeDataString(repositoryName.WeakString);
+		string repository = Uri.EscapeDataString(repositoryIdentifier);
 
 		return $"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repository}/pullrequests";
 	}
@@ -434,23 +439,25 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// Maps an Azure DevOps repository onto this library's model.
 	/// </summary>
 	/// <remarks>
-	/// <see cref="GitRepository.LocalPath"/> is required, but a repository this provider enumerates
-	/// from the host has never been cloned, so there is no real path to report — mirrors
-	/// <see cref="GitHubProvider"/>'s own mapping, using the same destination a bare
-	/// <c>git clone &lt;url&gt;</c> would pick.
+	/// <see cref="GitRepository.LocalPath"/> is left unset, because a repository this provider
+	/// enumerates from the host has never been cloned and there is no local path to report —
+	/// mirroring <see cref="GitHubProvider"/>'s own mapping. Both used to invent one under the
+	/// process's current directory, which made the same remote repository yield a different record
+	/// depending on when it was enumerated, and needed a containment guard to keep a name from a
+	/// remote response from escaping that directory.
+	/// <para>
+	/// <see cref="GitRepository.HostRepositoryId"/> carries Azure DevOps's own <c>id</c>, which is
+	/// what its <c>{repositoryId}</c> path parameter is documented to take.
+	/// </para>
 	/// </remarks>
 	/// <param name="repository">The repository Azure DevOps returned.</param>
 	/// <returns>The equivalent <see cref="GitRepository"/>.</returns>
-	/// <exception cref="GitHostingRequestException">
-	/// <paramref name="repository"/>'s name is missing or cannot be represented as a local directory.
-	/// See <see cref="GitProvider.ToLocalRepositoryPath(string, GitProviderName)"/>.
-	/// </exception>
 	private GitRepository ToGitRepository(AzureDevOpsRepository repository) => new()
 	{
-		LocalPath = ToLocalRepositoryPath(repository.Name, Name),
-		Name = repository.Name is string repositoryName ? repositoryName.As<GitRepositoryName>() : null,
-		WebURI = repository.WebUrl is string webUrl ? webUrl.As<GitRepositoryWebURI>() : null,
-		RemotePath = repository.RemoteUrl is string remoteUrl ? remoteUrl.As<GitRepositoryRemotePath>() : null,
+		Name = ToHostValue<GitRepositoryName>(repository.Name, Name, "repository name"),
+		HostRepositoryId = ToHostValue<GitHostRepositoryId>(repository.Id, Name, "repository id"),
+		WebURI = ToHostValue<GitRepositoryWebURI>(repository.WebUrl, Name, "repository web URI"),
+		RemotePath = ToHostValue<GitRepositoryRemotePath>(repository.RemoteUrl, Name, "repository remote path"),
 	};
 
 	/// <summary>

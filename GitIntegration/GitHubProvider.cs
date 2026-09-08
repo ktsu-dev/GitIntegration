@@ -84,9 +84,9 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <inheritdoc/>
-	public override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default)
+	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryName);
+		Ensure.NotNull(repositoryIdentifier);
 		cancellationToken.ThrowIfCancellationRequested();
 
 		(GitHubClient client, IDisposable createdTransport) = CreateClient();
@@ -101,7 +101,7 @@ public sealed class GitHubProvider : GitProvider
 			PullRequestRequest request = new() { State = ItemStateFilter.Open };
 
 			IReadOnlyList<PullRequest> pullRequests = await client.PullRequest
-				.GetAllForRepository(Owner.WeakString, repositoryName.WeakString, request)
+				.GetAllForRepository(Owner.WeakString, repositoryIdentifier, request)
 				.ConfigureAwait(false);
 
 			return [.. pullRequests.Select(ToGitPullRequest)];
@@ -113,9 +113,9 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <inheritdoc/>
-	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken)
+	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryName);
+		Ensure.NotNull(repositoryIdentifier);
 		Ensure.NotNull(specification);
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -135,7 +135,7 @@ public sealed class GitHubProvider : GitProvider
 			};
 
 			PullRequest created = await client.PullRequest
-				.Create(Owner.WeakString, repositoryName.WeakString, newPullRequest)
+				.Create(Owner.WeakString, repositoryIdentifier, newPullRequest)
 				.ConfigureAwait(false);
 
 			return ToGitPullRequest(created);
@@ -246,24 +246,26 @@ public sealed class GitHubProvider : GitProvider
 	/// Maps an Octokit repository onto this library's model.
 	/// </summary>
 	/// <remarks>
-	/// <see cref="GitRepository.LocalPath"/> is required, but a repository this provider enumerates
-	/// from the host has never been cloned, so there is no real path to report. This uses the same
-	/// destination <c>git clone &lt;url&gt;</c> would pick with no destination argument of its own — a
-	/// subdirectory named after the repository, under the current directory — which matches
-	/// <see cref="GitRepository.LocalPath"/>'s own documented "or is intended to be, cloned" meaning.
+	/// <see cref="GitRepository.LocalPath"/> is left unset, because a repository this provider
+	/// enumerates from the host has never been cloned and there is no local path to report. It used
+	/// to be filled with the destination <c>git clone &lt;url&gt;</c> would pick given no destination
+	/// of its own — a subdirectory of the process's current directory — which made the same remote
+	/// repository yield a different record depending on when it was enumerated, and needed a
+	/// containment guard to keep a name from a remote response from escaping that directory. Saying
+	/// "not known" needs neither.
+	/// <para>
+	/// <see cref="GitRepository.HostRepositoryId"/> carries GitHub's own numeric repository id, so a
+	/// caller can address the repository the way GitHub documents rather than by name.
+	/// </para>
 	/// </remarks>
 	/// <param name="repository">The repository Octokit returned.</param>
 	/// <returns>The equivalent <see cref="GitRepository"/>.</returns>
-	/// <exception cref="GitHostingRequestException">
-	/// <paramref name="repository"/>'s name cannot be represented as a local directory. See
-	/// <see cref="GitProvider.ToLocalRepositoryPath(string, GitProviderName)"/>.
-	/// </exception>
 	private GitRepository ToGitRepository(Repository repository) => new()
 	{
-		LocalPath = ToLocalRepositoryPath(repository.Name, Name),
-		Name = repository.Name.As<GitRepositoryName>(),
-		WebURI = repository.HtmlUrl.As<GitRepositoryWebURI>(),
-		RemotePath = repository.CloneUrl.As<GitRepositoryRemotePath>(),
+		Name = ToHostValue<GitRepositoryName>(repository.Name, Name, "repository name"),
+		HostRepositoryId = ToHostValue<GitHostRepositoryId>(repository.Id.ToString(CultureInfo.InvariantCulture), Name, "repository id"),
+		WebURI = ToHostValue<GitRepositoryWebURI>(repository.HtmlUrl, Name, "repository web URI"),
+		RemotePath = ToHostValue<GitRepositoryRemotePath>(repository.CloneUrl, Name, "repository remote path"),
 	};
 
 	/// <summary>

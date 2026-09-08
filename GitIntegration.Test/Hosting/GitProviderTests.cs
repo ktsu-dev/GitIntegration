@@ -215,10 +215,10 @@ public sealed class GitProviderTests
 		public override Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException("Not exercised by these tests.");
 
-		public override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default) =>
+		internal override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken) =>
 			throw new NotSupportedException("Not exercised by these tests.");
 
-		internal override Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken) =>
+		internal override Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken) =>
 			throw new NotSupportedException("Not exercised by these tests.");
 
 		public HostingCredential CallResolveCredential() => ResolveCredential();

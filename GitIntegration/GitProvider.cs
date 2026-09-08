@@ -4,13 +4,11 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
 using ktsu.CredentialCache;
-using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
 /// <summary>
@@ -78,16 +76,82 @@ public abstract class GitProvider : IGitHostingProvider
 	public abstract Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default);
 
 	/// <inheritdoc/>
-	public abstract Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default);
+	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default) =>
+		GetPullRequestsCoreAsync(Ensure.NotNull(repositoryName).WeakString, cancellationToken);
+
+	/// <inheritdoc/>
+	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepository repository, CancellationToken cancellationToken = default) =>
+		GetPullRequestsCoreAsync(ToRepositoryIdentifier(repository), cancellationToken);
 
 	/// <inheritdoc/>
 	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepositoryName repositoryName)
 	{
-		Ensure.NotNull(repositoryName);
+		string identifier = Ensure.NotNull(repositoryName).WeakString;
 
 		return new GitPullRequestCreateBuilder((specification, cancellationToken) =>
-			CreatePullRequestCoreAsync(repositoryName, specification, cancellationToken));
+			CreatePullRequestCoreAsync(identifier, specification, cancellationToken));
 	}
+
+	/// <inheritdoc/>
+	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepository repository)
+	{
+		string identifier = ToRepositoryIdentifier(repository);
+
+		return new GitPullRequestCreateBuilder((specification, cancellationToken) =>
+			CreatePullRequestCoreAsync(identifier, specification, cancellationToken));
+	}
+
+	/// <summary>
+	/// Chooses how a repository is addressed in a request path: by the host's own identifier when
+	/// one is known, and by name otherwise.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="GitRepository.HostRepositoryId"/> is what a host documents its own API in terms of.
+	/// Azure DevOps types its <c>{repositoryId}</c> path parameter as <c>string (uuid)</c>, and draws
+	/// an explicit id-or-name distinction for the sibling <c>project</c> parameter while withholding
+	/// it here — so substituting a name there is unconfirmed against the documented schema rather
+	/// than sanctioned by it. Preferring the id closes that gap for every repository a caller got
+	/// from <c>GetRepositoriesAsync</c>, which is the normal way to obtain one.
+	/// <para>
+	/// Falling back to <see cref="GitRepository.Name"/> rather than requiring the id, because a
+	/// caller may legitimately have constructed a <see cref="GitRepository"/> by hand from a name
+	/// alone. That fallback is the same unconfirmed substitution the name-taking overloads make, and
+	/// it is no worse than what those overloads already do.
+	/// </para>
+	/// </remarks>
+	/// <param name="repository">The repository to address.</param>
+	/// <returns>The path segment identifying the repository.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="repository"/> is <see langword="null"/>.</exception>
+	/// <exception cref="ArgumentException">
+	/// <paramref name="repository"/> carries neither a <see cref="GitRepository.HostRepositoryId"/>
+	/// nor a <see cref="GitRepository.Name"/>, so there is nothing to address it by.
+	/// </exception>
+	private static string ToRepositoryIdentifier(GitRepository repository)
+	{
+		Ensure.NotNull(repository);
+
+		return repository.HostRepositoryId?.WeakString
+			?? repository.Name?.WeakString
+			?? throw new ArgumentException(
+				"The repository carries neither a HostRepositoryId nor a Name, so there is no way to " +
+				"address it on the host.",
+				nameof(repository));
+	}
+
+	/// <summary>
+	/// Retrieves the open pull requests for the repository a path segment identifies.
+	/// </summary>
+	/// <remarks>
+	/// The single implementation behind both public overloads, so the two cannot answer the same
+	/// question differently. Takes the finished path segment rather than a
+	/// <see cref="GitRepositoryName"/> or a <see cref="GitRepository"/>, because choosing between an
+	/// id and a name is a decision that belongs in one place — <see cref="ToRepositoryIdentifier"/> —
+	/// rather than repeated in each provider.
+	/// </remarks>
+	/// <param name="repositoryIdentifier">The path segment identifying the repository.</param>
+	/// <param name="cancellationToken">A token to cancel the request.</param>
+	/// <returns>The repository's open pull requests, as reported by the host.</returns>
+	internal abstract Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken);
 
 	/// <summary>
 	/// Creates the pull request a finished <see cref="IGitPullRequestCreateBuilder"/> describes.
@@ -99,11 +163,14 @@ public abstract class GitProvider : IGitHostingProvider
 	/// this library ships lives in this assembly, so nothing outside it needs to implement this
 	/// member.
 	/// </remarks>
-	/// <param name="repositoryName">The repository the pull request is opened against.</param>
+	/// <param name="repositoryIdentifier">
+	/// The path segment identifying the repository the pull request is opened against, already chosen
+	/// by <see cref="ToRepositoryIdentifier"/> or taken from a caller-supplied name.
+	/// </param>
 	/// <param name="specification">The pull request's finished configuration.</param>
 	/// <param name="cancellationToken">A token to cancel the request.</param>
 	/// <returns>The pull request as the host reports it after creation.</returns>
-	internal abstract Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken);
+	internal abstract Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken);
 
 	/// <summary>
 	/// Attempts to retrieve the credential for this provider from the credential cache.
@@ -228,51 +295,53 @@ public abstract class GitProvider : IGitHostingProvider
 	private protected abstract HttpMessageHandler DefaultHandler { get; }
 
 	/// <summary>
-	/// Builds the local path a repository name maps to under
-	/// <see cref="Environment.CurrentDirectory"/>, guaranteeing by construction that the result can
-	/// never point outside it.
+	/// Converts a field a host reported into a semantic value, reporting a value this library's own
+	/// validation rejects as a hosting failure rather than an argument failure.
 	/// </summary>
 	/// <remarks>
-	/// Owns the whole operation rather than deriving a safe leaf and leaving the combine step to each
-	/// caller: a helper that only half-solves containment trusts every caller to get the other half
-	/// right, and a future provider could call it and forget to combine, or combine against something
-	/// other than <see cref="Environment.CurrentDirectory"/>. <see cref="Path.Combine(string, string)"/>
-	/// silently discards every earlier argument when a later one is rooted, so combining
-	/// <see cref="Environment.CurrentDirectory"/> with a repository name of <c>C:\Windows</c> or
-	/// <c>/etc</c> directly would otherwise report a <see cref="GitRepository.LocalPath"/> that points
-	/// there instead of under the current directory. <see cref="Path.GetFileName(string)"/> resolves
-	/// that half of the problem by stripping every rooted prefix and directory component, but not the
-	/// other half: <see cref="Path.GetFileName(string)"/> called on <c>../..</c> still returns
-	/// <c>..</c>, which still escapes upward once combined. A repository name comes from a remote
-	/// host's response, and <see cref="GitRepository.LocalPath"/> is a value a caller might hand
-	/// straight to a clone or a file operation, so a name from which no safe leaf can be derived is
-	/// treated as the host having reported something this library cannot represent as a directory —
-	/// this throws rather than returning a value that looks safe but is not.
+	/// <para>
+	/// The hosting counterpart to <c>GitParseValues.ToSemantic</c>, and it exists for the same reason:
+	/// a value arriving from outside is data to be validated, not an argument a caller got wrong.
+	/// Calling <c>As&lt;T&gt;()</c> directly on a host's response would throw
+	/// <see cref="ArgumentException"/> out of a public hosting method, whose documented failure
+	/// surface is the <see cref="GitHostingException"/> hierarchy — the same rule that makes
+	/// <c>AzureDevOpsProvider.DeserializeSuccessBody</c> wrap a <c>JsonException</c> rather than let
+	/// it escape.
+	/// </para>
+	/// <para>
+	/// A <see langword="null"/> or absent field is not a failure: every field this converts is
+	/// optional on <see cref="GitRepository"/>, and a host omitting one is ordinary. Only a field the
+	/// host did report and this library cannot represent is an error worth raising, because that is
+	/// the case where silently dropping the value would hide a real mismatch between this library's
+	/// model and what the host actually sends.
+	/// </para>
 	/// </remarks>
-	/// <param name="repositoryName">The repository name a host reported, which may be <see langword="null"/>.</param>
-	/// <param name="providerName">
-	/// The provider that reported <paramref name="repositoryName"/>, named in the exception thrown
-	/// when no leaf can be derived.
-	/// </param>
-	/// <returns>
-	/// The local path under <see cref="Environment.CurrentDirectory"/>, one directory named after the
-	/// derived leaf segment of <paramref name="repositoryName"/>.
-	/// </returns>
+	/// <typeparam name="TSemantic">The semantic string type to produce.</typeparam>
+	/// <param name="value">The raw field as the host reported it, which may be <see langword="null"/>.</param>
+	/// <param name="providerName">The provider that reported it, named in the exception.</param>
+	/// <param name="description">What the field is, used in the failure message.</param>
+	/// <returns>The converted value, or <see langword="null"/> when the host reported none.</returns>
 	/// <exception cref="GitHostingRequestException">
-	/// <paramref name="repositoryName"/> is <see langword="null"/>, empty, consists only of
-	/// whitespace, or is a name from which no directory segment can otherwise be derived.
+	/// <paramref name="value"/> is non-null but fails <typeparamref name="TSemantic"/>'s validation.
 	/// </exception>
-	internal static AbsoluteDirectoryPath ToLocalRepositoryPath(string? repositoryName, GitProviderName providerName)
+	private protected static TSemantic? ToHostValue<TSemantic>(string? value, GitProviderName providerName, string description)
+		where TSemantic : SemanticString<TSemantic>, new()
 	{
-		string leaf = Path.GetFileName(repositoryName ?? string.Empty);
-
-		if (string.IsNullOrWhiteSpace(leaf) || leaf is "." or "..")
+		if (value is null)
 		{
-			throw new GitHostingRequestException(
-				$"{providerName} reported a repository name '{repositoryName}' that cannot be represented as a local directory.");
+			return null;
 		}
 
-		return Path.Combine(Environment.CurrentDirectory, leaf).As<AbsoluteDirectoryPath>();
+		// Called on the constructed base type rather than as TSemantic.TryCreate, for the reason
+		// GitParseValues.ToSemantic gives: TryCreate is a plain static method rather than a static
+		// abstract interface member, so invoking it through the type parameter is CS0704.
+		if (SemanticString<TSemantic>.TryCreate(value, out TSemantic? result) && result is not null)
+		{
+			return result;
+		}
+
+		throw new GitHostingRequestException(
+			$"{providerName} reported a {description} this library cannot represent: '{value}'.");
 	}
 
 	/// <summary>

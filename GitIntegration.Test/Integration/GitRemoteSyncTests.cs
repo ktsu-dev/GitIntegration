@@ -40,6 +40,11 @@ public class GitRemoteSyncTests
 
 		Assert.IsFalse(init.AlreadyExisted);
 
+		// LocalPath is nullable on GitRepository because a repository a hosting provider enumerated
+		// has none. One that Init produced always does — it is the path Init was given — so this
+		// asserts rather than propagating the nullability into every caller of this helper.
+		Assert.IsNotNull(init.Repository.LocalPath);
+
 		return init.Repository.LocalPath;
 	}
 

@@ -145,6 +145,18 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 				"The repository has no RemotePath, so there is nothing to clone from.",
 				nameof(repository));
 
-		return Clone(source, repository.LocalPath);
+		// LocalPath is nullable, and a repository a hosting provider enumerated has none: it has
+		// never been cloned, and the providers no longer invent a path under the process's current
+		// directory to fill the gap. Reported the same way the missing RemotePath is, rather than
+		// resurrecting that invented default here — where the working copy goes is the caller's
+		// decision, and the two-argument overload is where they make it.
+		AbsoluteDirectoryPath destination = repository.LocalPath
+			?? throw new ArgumentException(
+				"The repository has no LocalPath, so there is nowhere to clone it to. Repositories " +
+				"enumerated from a hosting provider carry no local path; use the overload taking an " +
+				"explicit destination.",
+				nameof(repository));
+
+		return Clone(source, destination);
 	}
 }

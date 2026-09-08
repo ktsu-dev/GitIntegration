@@ -94,11 +94,55 @@ public interface IGitHostingProvider
 	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default);
 
 	/// <summary>
+	/// Retrieves the open pull requests for a repository, addressing it the way its host documents.
+	/// </summary>
+	/// <remarks>
+	/// The overload to prefer when the caller has a <see cref="GitRepository"/> from
+	/// <see cref="GetRepositoriesAsync"/>. It addresses the repository by
+	/// <see cref="GitRepository.HostRepositoryId"/> when one is known, which is what a host documents
+	/// its own API in terms of — Azure DevOps types its <c>{repositoryId}</c> path parameter as
+	/// <c>string (uuid)</c> and never sanctions a name there. The name-taking overload substitutes a
+	/// name into that same position, which works today but is unconfirmed against the documented
+	/// schema; this one is not. Everything else about the two is identical, including the open-only
+	/// filter described above.
+	/// </remarks>
+	/// <param name="repository">
+	/// The repository to list pull requests for, carrying a <see cref="GitRepository.HostRepositoryId"/>
+	/// or at least a <see cref="GitRepository.Name"/>.
+	/// </param>
+	/// <param name="cancellationToken">A token to cancel the request.</param>
+	/// <returns>The repository's open pull requests, as reported by the host.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="repository"/> is <see langword="null"/>.</exception>
+	/// <exception cref="System.ArgumentException">
+	/// <paramref name="repository"/> carries neither identifier.
+	/// </exception>
+	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepository repository, CancellationToken cancellationToken = default);
+
+	/// <summary>
 	/// Starts building a pull request for a repository.
 	/// </summary>
 	/// <param name="repositoryName">The repository the pull request is opened against.</param>
 	/// <returns>A builder that collects the pull request's details before submitting it.</returns>
 	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepositoryName repositoryName);
+
+	/// <summary>
+	/// Starts building a pull request for a repository, addressing it the way its host documents.
+	/// </summary>
+	/// <remarks>
+	/// The overload to prefer when the caller has a <see cref="GitRepository"/> from
+	/// <see cref="GetRepositoriesAsync"/>, for the same reason as
+	/// <see cref="GetPullRequestsAsync(GitRepository, CancellationToken)"/>.
+	/// </remarks>
+	/// <param name="repository">
+	/// The repository the pull request is opened against, carrying a
+	/// <see cref="GitRepository.HostRepositoryId"/> or at least a <see cref="GitRepository.Name"/>.
+	/// </param>
+	/// <returns>A builder that collects the pull request's details before submitting it.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="repository"/> is <see langword="null"/>.</exception>
+	/// <exception cref="System.ArgumentException">
+	/// <paramref name="repository"/> carries neither identifier.
+	/// </exception>
+	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepository repository);
 }
 
 /// <summary>

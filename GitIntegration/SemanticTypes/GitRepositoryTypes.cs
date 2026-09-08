@@ -31,3 +31,22 @@ public sealed record GitRepositoryWebURI : SemanticString<GitRepositoryWebURI> {
 [HasNonWhitespaceContent]
 [NotAnOption]
 public sealed record GitRepositoryRemotePath : SemanticString<GitRepositoryRemotePath> { }
+
+/// <summary>
+/// A strongly-typed identifier a host assigns to a repository, as distinct from its human-facing
+/// name.
+/// </summary>
+/// <remarks>
+/// A string rather than a <see cref="System.Guid"/>, because the two hosts do not agree on its
+/// shape: Azure DevOps types its <c>{repositoryId}</c> path parameter as <c>string (uuid)</c>,
+/// while GitHub's repository id is a decimal number. The value is opaque to this library — it is
+/// obtained from a host and handed back to that same host, never parsed — so a type that insisted
+/// on one host's shape would simply exclude the other.
+/// <para>
+/// Validated as a single path segment for the same reason <see cref="GitRepositoryName"/> is: it is
+/// substituted directly into a request path.
+/// </para>
+/// </remarks>
+[HasNonWhitespaceContent]
+[IsSinglePathSegment]
+public sealed record GitHostRepositoryId : SemanticString<GitHostRepositoryId> { }

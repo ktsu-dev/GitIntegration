@@ -172,12 +172,12 @@ public sealed class GitPullRequestCreateBuilderTests
 
 	/// <summary>
 	/// Records the repository and specification handed to <c>CreatePullRequestCoreAsync</c>, so the
-	/// routing test can assert on what <see cref="GitProvider.CreatePullRequest"/> actually passed
+	/// routing test can assert on what <see cref="GitProvider.CreatePullRequest(GitRepositoryName)"/> actually passed
 	/// through, not merely that it was called.
 	/// </summary>
 	private sealed class RecordingProvider : GitProvider
 	{
-		public GitRepositoryName? Repository { get; private set; }
+		public string? Repository { get; private set; }
 
 		public GitPullRequestSpecification? Specification { get; private set; }
 
@@ -192,12 +192,12 @@ public sealed class GitPullRequestCreateBuilderTests
 		public override Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException("Not exercised by the routing test.");
 
-		public override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default) =>
+		internal override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken) =>
 			throw new NotSupportedException("Not exercised by the routing test.");
 
-		internal override Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryName repositoryName, GitPullRequestSpecification specification, CancellationToken cancellationToken)
+		internal override Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken)
 		{
-			Repository = repositoryName;
+			Repository = repositoryIdentifier;
 			Specification = specification;
 			return Task.FromResult(CannedPullRequest);
 		}

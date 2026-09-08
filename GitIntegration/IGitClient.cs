@@ -87,15 +87,23 @@ public interface IGitClient
 	/// </summary>
 	/// <remarks>
 	/// This is the one seam between the library's two layers: a provider produces a
-	/// <see cref="GitRepository"/> carrying remote metadata and an intended local path, and this
-	/// turns it into a working copy.
+	/// <see cref="GitRepository"/> carrying remote metadata, and this turns it into a working copy.
+	/// <para>
+	/// Both <see cref="GitRepository.RemotePath"/> and <see cref="GitRepository.LocalPath"/> must be
+	/// set. A repository straight from a hosting provider carries the first and not the second — it
+	/// has never been cloned, so there is no local path to report and the providers no longer invent
+	/// one under the process's current directory. Supply a destination with
+	/// <c>repository with { LocalPath = … }</c>, or use
+	/// <see cref="Clone(GitRepositoryRemotePath, AbsoluteDirectoryPath)"/> directly.
+	/// </para>
 	/// </remarks>
 	/// <param name="repository">The repository to clone, carrying a non-null
-	/// <see cref="GitRepository.RemotePath"/>.</param>
+	/// <see cref="GitRepository.RemotePath"/> and <see cref="GitRepository.LocalPath"/>.</param>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="repository"/> is <see langword="null"/>.</exception>
 	/// <exception cref="ArgumentException">
-	/// <paramref name="repository"/> has no <see cref="GitRepository.RemotePath"/>.
+	/// <paramref name="repository"/> has no <see cref="GitRepository.RemotePath"/>, or no
+	/// <see cref="GitRepository.LocalPath"/>.
 	/// </exception>
 	public IGitCloneBuilder Clone(GitRepository repository);
 }

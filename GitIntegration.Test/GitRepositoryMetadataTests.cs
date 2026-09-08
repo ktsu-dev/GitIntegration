@@ -96,6 +96,35 @@ public class GitRepositoryMetadataTests
 		Assert.IsFalse(GitRepository.IsBrowsableUri(null, out Uri? uri));
 		Assert.IsNull(uri);
 	}
+
+	[TestMethod]
+	public void ReportsTheMissingLocalPathWhenAVerbIsCalledWithoutOne()
+	{
+		// LocalPath is nullable so a hosting provider need not invent one. Every verb needs a path, so
+		// each throws for a missing one exactly as it already does for a missing ProcessRunner. Both
+		// properties are public init accessors, so a caller can supply one and not the other and each
+		// check has to stand on its own — this repository carries a runner and no path.
+		GitRepository repository = new() { ProcessRunner = new RecordingGitProcessRunner() };
+
+		InvalidOperationException exception =
+			Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Status());
+
+		StringAssert.Contains(exception.Message, "no local path");
+	}
+
+	[TestMethod]
+	public void ReportsTheMissingRunnerFirstWhenARepositoryHasNeither()
+	{
+		// RequireRunner is evaluated before RequireLocalPath at every call site, so a repository
+		// carrying hosting metadata only reports the runner — the more specific thing to have got
+		// wrong, and the one whose message names how to obtain a usable repository.
+		GitRepository repository = new() { Name = "example".As<GitRepositoryName>() };
+
+		InvalidOperationException exception =
+			Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Status());
+
+		StringAssert.Contains(exception.Message, "no process runner");
+	}
 }
 
 /// <summary>Paths that exist on every platform the tests run on.</summary>
