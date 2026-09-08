@@ -52,9 +52,10 @@ internal sealed class TemporaryRepository : IDisposable
 	public void DeleteFile(string relativePath) => File.Delete(CombineUnderRoot(relativePath));
 
 	/// <summary>
-	/// Combines a relative path with <see cref="RootPath"/>, refusing a rooted one.
+	/// Joins a relative path onto <see cref="RootPath"/>, refusing a rooted one.
 	/// </summary>
 	/// <remarks>
+	/// <para>
 	/// <see cref="Path.Combine(string, string)"/> silently discards every earlier argument when a
 	/// later one is rooted, so combining <see cref="RootPath"/> with <c>/etc</c> or <c>C:\Windows</c>
 	/// yields that path rather than one inside the throwaway repository. For <see cref="WriteFile"/>
@@ -62,20 +63,29 @@ internal sealed class TemporaryRepository : IDisposable
 	/// outside it. Rejecting a rooted path is the same guard this library used to need in
 	/// <c>GitProvider</c> for a repository name a host reported, and it is worth having here for the
 	/// same reason: the failure is silent and the blast radius is a real filesystem.
+	/// </para>
+	/// <para>
+	/// Two defences rather than one, and the second is what makes the first unnecessary to trust.
+	/// <see cref="Path.Join(string, string)"/> is the API that means "append these segments" — it has
+	/// no discarding behaviour to guard against at all, so the escape is impossible by construction
+	/// rather than merely checked for. The explicit rejection is kept above it because a rooted path
+	/// reaching here is a mistake in the calling test worth naming, and silently nesting it under the
+	/// root would hide that.
+	/// </para>
 	/// </remarks>
 	/// <param name="relativePath">The path relative to the repository root.</param>
-	/// <returns>The combined path, guaranteed to be under <see cref="RootPath"/>.</returns>
+	/// <returns>The joined path, guaranteed to be under <see cref="RootPath"/>.</returns>
 	/// <exception cref="ArgumentException"><paramref name="relativePath"/> is rooted.</exception>
 	private string CombineUnderRoot(string relativePath)
 	{
 		if (Path.IsPathRooted(relativePath))
 		{
 			throw new ArgumentException(
-				$"'{relativePath}' is rooted, so combining it would escape the temporary repository.",
+				$"'{relativePath}' is rooted, so joining it would escape the temporary repository.",
 				nameof(relativePath));
 		}
 
-		return Path.Combine(RootPath, relativePath);
+		return Path.Join(RootPath, relativePath);
 	}
 
 	public void Dispose()
