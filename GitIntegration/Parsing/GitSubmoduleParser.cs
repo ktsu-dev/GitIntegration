@@ -150,23 +150,21 @@ internal static class GitSubmoduleParser
 				continue;
 			}
 
+			// FirstOrDefault rather than a loop that breaks on its first iteration. Only one status
+			// line can describe a given path, so "the first match, if any" is the whole operation, and
+			// saying it directly is both clearer than a loop-and-break and free of the flag that
+			// carried the result out of one.
 			string prefix = path + " (";
-			bool matched = false;
 
-			foreach (KeyValuePair<string, StatusLine> candidate in byPath.Where(
+			KeyValuePair<string, StatusLine> match = byPath.FirstOrDefault(
 				candidate => candidate.Key.StartsWith(prefix, StringComparison.Ordinal) &&
-					candidate.Key.EndsWith(')', StringComparison.Ordinal)))
-			{
-				string describe = candidate.Key[prefix.Length..^1];
-				resolved.Add(Apply(submodule, candidate.Value, describe));
-				matched = true;
-				break;
-			}
+					candidate.Key.EndsWith(')', StringComparison.Ordinal));
 
-			if (!matched)
-			{
-				resolved.Add(submodule);
-			}
+			// A no-match default leaves Key null, since Key is a string. The submodule is then kept
+			// with its Unknown state rather than dropped — see this method's remarks.
+			resolved.Add(match.Key is null
+				? submodule
+				: Apply(submodule, match.Value, match.Key[prefix.Length..^1]));
 		}
 
 		return resolved;
