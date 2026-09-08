@@ -4,7 +4,9 @@ namespace ktsu.GitIntegration.Test;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -170,6 +172,31 @@ public sealed class GitProviderTests
 			handler.AutomaticDecompression);
 	}
 
+	[TestMethod]
+	public void EachProviderOwnsItsSharedTransportRatherThanInheritingOne()
+	{
+		// GitProvider used to hold one static SocketsHttpHandler that every subclass shared. That was
+		// equivalent to per-provider only by accident, because AzureDevOpsProvider was its sole user
+		// and GitHubProvider already had its own; adding a third provider would have silently
+		// enrolled it in Azure DevOps's connection pool with nothing in the code to notice.
+		//
+		// Reflection rather than reading DefaultHandler directly, because that member is
+		// private protected and this test class is not a derived type. It also pins the property that
+		// actually matters — where the handler is declared — rather than what one instance returns.
+		Assert.IsFalse(
+			typeof(GitProvider).GetFields(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+				.Any(field => typeof(HttpMessageHandler).IsAssignableFrom(field.FieldType)),
+			"GitProvider must not hold a transport its subclasses would share implicitly.");
+
+		foreach (Type providerType in new[] { typeof(GitHubProvider), typeof(AzureDevOpsProvider) })
+		{
+			Assert.IsTrue(
+				providerType.GetFields(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+					.Any(field => typeof(HttpMessageHandler).IsAssignableFrom(field.FieldType)),
+				$"{providerType.Name} must declare its own shared transport.");
+		}
+	}
+
 	private sealed class UnrecognisedCredential : Credential;
 
 	// The minimal subclass a test needs to reach GitProvider's protected members. Its own three
@@ -178,6 +205,12 @@ public sealed class GitProviderTests
 	private sealed class TestProvider : GitProvider
 	{
 		public override GitProviderName Name => "TestProvider".As<GitProviderName>();
+
+		// Never reached: these tests either inject a Handler or never issue a request at all. The
+		// member is abstract so that each real provider has to name its own shared transport rather
+		// than inherit one, which is the point of it existing.
+		private protected override HttpMessageHandler DefaultHandler =>
+			throw new NotSupportedException("Not exercised by these tests.");
 
 		public override Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException("Not exercised by these tests.");

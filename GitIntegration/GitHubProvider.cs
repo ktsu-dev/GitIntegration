@@ -43,7 +43,16 @@ public sealed class GitHubProvider : GitProvider
 	public override GitProviderName Name => "GitHub".As<GitProviderName>();
 
 	/// <inheritdoc/>
+	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
+
+	/// <inheritdoc/>
 	/// <remarks>
+	/// Adds to the interface's remarks rather than restating them.
+	/// <see cref="IGitHostingProvider.GetRepositoriesAsync"/> says only that implementations differ
+	/// in coverage and points here for this host's specifics, so the two texts have one job each and
+	/// neither is a copy of the other. An edit that moves this explanation must leave that pointer
+	/// aimed somewhere real.
+	/// <para>
 	/// Calls GitHub's <c>GET /users/{login}/repos</c>, which returns only <see cref="GitProvider.Owner"/>'s
 	/// <b>public</b> repositories. Supplying a token does not widen this: that endpoint does not
 	/// honour authentication to reveal private repositories the way <c>GET /user/repos</c> would for
@@ -54,6 +63,7 @@ public sealed class GitHubProvider : GitProvider
 	/// through this provider today; do not assume this method's coverage matches an
 	/// <c>AzureDevOpsProvider</c> equivalent, whose token can see everything it has access to under
 	/// the same interface.
+	/// </para>
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
 	{
@@ -175,7 +185,7 @@ public sealed class GitHubProvider : GitProvider
 		Credentials credentials = ToOctokitCredentials(ResolveCredential());
 		ProductHeaderValue product = new(AppDomain.CurrentDomain.FriendlyName);
 
-		HttpMessageHandler transport = Handler ?? SharedHandler;
+		HttpMessageHandler transport = Handler ?? DefaultHandler;
 		HttpClientAdapter adapter = new(() => new NonOwningHandler(transport));
 
 		GitHubClient client = new(new Connection(product, adapter)) { Credentials = credentials };
@@ -332,6 +342,14 @@ public sealed class GitHubProvider : GitProvider
 	/// host-agnostic <c>catch (GitHostingAuthenticationException)</c> would then handle that failure
 	/// on Azure DevOps and miss it on GitHub, and the two providers exist to be interchangeable.
 	/// </para>
+	/// <para>
+	/// Every arm keeps the Octokit exception as the inner exception. This hierarchy carries the
+	/// provider, the status code, and the response body, which is enough to reproduce a failure by
+	/// hand — but not everything the host supplied. <c>ApiError.Errors</c> is often the only place
+	/// GitHub explains what was actually wrong with a request, and Octokit's synthetic 404 carries
+	/// no <c>HttpResponse</c> at all, so without the inner exception that failure would reach a
+	/// caller with an empty <see cref="GitHostingException.ResponseBody"/> and nothing else to go on.
+	/// </para>
 	/// </remarks>
 	/// <param name="exception">The failure Octokit reported.</param>
 	/// <returns>The equivalent <see cref="GitHostingException"/>, ready to throw.</returns>
@@ -344,14 +362,14 @@ public sealed class GitHubProvider : GitProvider
 
 		return exception switch
 		{
-			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset),
-			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null),
-			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds)),
-			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception))),
-			AuthorizationException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
-			ForbiddenException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody),
-			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody),
-			_ => new GitHostingRequestException(exception.Message, Name, exception.StatusCode, responseBody),
+			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset, exception),
+			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null, exception),
+			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds), exception),
+			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception)), exception),
+			AuthorizationException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody, exception),
+			ForbiddenException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody, exception),
+			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody, exception),
+			_ => new GitHostingRequestException(exception.Message, Name, exception.StatusCode, responseBody, exception),
 		};
 	}
 

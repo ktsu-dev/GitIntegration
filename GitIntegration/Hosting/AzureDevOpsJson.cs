@@ -205,6 +205,16 @@ internal sealed class AzureDevOpsPullRequestCreateRequest
 	public required string Title { get; init; }
 
 	/// <summary>Gets the pull request's description, or <see langword="null"/> to omit one.</summary>
+	/// <remarks>
+	/// Omitted from the payload entirely when unset, rather than sent as <c>"description": null</c>.
+	/// Microsoft's own documented sample request simply leaves the field out when there is no
+	/// description, and this attribute is what makes "or <see langword="null"/> to omit one" literally
+	/// true of the bytes on the wire rather than merely of this property's meaning. Applied here
+	/// rather than as a context-wide default: the response DTOs deserialize rather than serialize, so
+	/// a global setting would say nothing about them while quietly changing how any future request
+	/// type behaves.
+	/// </remarks>
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public string? Description { get; init; }
 
 	/// <summary>Gets a value indicating whether the pull request should be created as a draft.</summary>

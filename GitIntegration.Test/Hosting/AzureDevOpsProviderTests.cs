@@ -32,6 +32,15 @@ public sealed class AzureDevOpsProviderTests
 	// parallelism. This class must not add a second call site.
 
 	/// <summary>Reads a captured fixture's raw JSON text from the test output's Fixtures directory.</summary>
+	/// <remarks>
+	/// The Azure DevOps fixtures keep two things from Microsoft's own documented samples that look
+	/// like oversights and are not. The synthetic user <c>npaulk</c> is Microsoft's placeholder, kept
+	/// so a reader comparing a fixture against the published sample sees the same value rather than
+	/// wondering which fields this library altered; and <c>homepage</c> retains the real
+	/// <c>docs.microsoft.com</c> domain with only the organisation path segment swapped, for the same
+	/// reason. Neither is a credential or an internal hostname, both are test-only assets that are
+	/// never packed, and no request is ever issued against either.
+	/// </remarks>
 	private static string Fixture(string name) =>
 		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 

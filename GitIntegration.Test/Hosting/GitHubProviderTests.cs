@@ -12,6 +12,8 @@ using ktsu.CredentialCache;
 using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
+using Octokit;
+
 // System.Net (for HttpStatusCode) and ktsu.CredentialCache both declare a type named
 // CredentialCache; this alias resolves the ambiguity in favour of the credential store.
 using CredentialCache = ktsu.CredentialCache.CredentialCache;
@@ -467,6 +469,69 @@ public sealed class GitHubProviderTests
 
 		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
 		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task LeavesResetsAtNullWhenRetryAfterCarriesAnHttpDateAsync()
+	{
+		// Retry-After may carry an HTTP date rather than a delay in seconds. GitHub sends seconds, so
+		// TryGetRetryAfterSeconds parses only that form and a date yields null — correct by
+		// inspection, and now pinned. An invented instant derived from a form this library does not
+		// actually parse would be worse than no instant at all.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task KeepsTheOctokitFailureAsTheInnerExceptionAsync()
+	{
+		// The hierarchy carries the provider, status, and body, which is enough to reproduce a
+		// failure by hand — but not everything the host supplied. ApiError.Errors is often the only
+		// place GitHub says what was actually wrong with a request, and it has no field here, so
+		// discarding the Octokit exception discards it too.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.Forbidden,
+				"{\"message\":\"Resource not accessible by personal access token\"}",
+				("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingAuthenticationException exception = await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.IsInstanceOfType<ApiException>(exception.InnerException);
+	}
+
+	[TestMethod]
+	public async Task KeepsTheInnerExceptionEvenWhenOctokitAttachedNoResponseAsync()
+	{
+		// The worst case the inner exception exists for. Octokit reports a 404 on a GET through a
+		// synthetic exception with no HttpResponse, so ResponseBody is empty and there is no other
+		// context to fall back on — without the inner exception this failure reaches a caller
+		// carrying only a message.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.NotFound, "{\"message\":\"Not Found\"}", ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingNotFoundException exception = await Assert.ThrowsExactlyAsync<GitHostingNotFoundException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(string.Empty, exception.ResponseBody);
+		Assert.IsInstanceOfType<ApiException>(exception.InnerException);
 	}
 
 	[TestMethod]

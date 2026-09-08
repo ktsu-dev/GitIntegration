@@ -24,7 +24,12 @@ using System.Threading.Tasks;
 /// </remarks>
 internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
-	private readonly Queue<QueuedResponse> _responses = new();
+	// Concurrent for the same reason _requests is: SendAsync is the one member a caller does not
+	// control the timing of, and nothing stops a provider issuing two requests through one handler at
+	// once. Both providers currently await sequentially, so there is no live race — but a plain Queue
+	// read and dequeued inside SendAsync is one concurrent provider away from corrupting, and the
+	// reasoning that made _requests concurrent applies here verbatim.
+	private readonly ConcurrentQueue<QueuedResponse> _responses = new();
 
 	// A concurrent queue rather than a List: SendAsync is the one member a caller does not control
 	// the timing of, and nothing stops a provider issuing two requests through one handler at once.
@@ -99,14 +104,16 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
 		// Running out of queued responses means the code under test issued a request the test did
 		// not anticipate. Failing here names that request; returning a default would hide it.
-		if (_responses.Count == 0)
+		//
+		// TryDequeue rather than a Count check followed by a Dequeue: on a concurrent queue those two
+		// steps are separately atomic but not atomic together, so the emptiness a Count check observes
+		// is already stale by the time the Dequeue runs.
+		if (!_responses.TryDequeue(out QueuedResponse queued))
 		{
 			throw new InvalidOperationException(
 				$"No queued response for {request.Method} {request.RequestUri}: " +
 				$"{_totalQueued} queued, {_requests.Count} arrived.");
 		}
-
-		QueuedResponse queued = _responses.Dequeue();
 
 		HttpResponseMessage response = new(queued.Status)
 		{
@@ -130,10 +137,15 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 				// a second value, which would make HttpContentHeaders.ContentType unparsable.
 				response.Content.Headers.Remove(name);
 
-				if (!response.Content.Headers.TryAddWithoutValidation(name, value))
-				{
-					throw new InvalidOperationException($"Header '{name}' fits neither response nor content headers.");
-				}
+				// An assertion rather than a throw guarding an "it fits neither collection" branch.
+				// That branch was unreachable: TryAddWithoutValidation skips name and value validation
+				// entirely, and reaching this catch at all means response.Headers.Add already accepted
+				// the name as a well-formed header token before rejecting it for being a content
+				// header. Untestable defensive code invites the reader to work out when it fires;
+				// an assertion says plainly that it never should.
+				Assert.IsTrue(
+					response.Content.Headers.TryAddWithoutValidation(name, value),
+					$"Header '{name}' fits neither response nor content headers.");
 			}
 		}
 

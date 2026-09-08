@@ -57,6 +57,23 @@ public sealed class AzureDevOpsProvider : GitProvider
 	private const int PullRequestPageSize = 100;
 
 	/// <summary>
+	/// The transport every <see cref="AzureDevOpsProvider"/> call shares when no
+	/// <see cref="GitProvider.Handler"/> was injected.
+	/// </summary>
+	/// <remarks>
+	/// Its own instance rather than one held on <see cref="GitProvider"/>, so that adding a third
+	/// provider cannot silently enrol it in this one's connection pool. The two providers never talk
+	/// to the same hosts and a connection pool is per host anyway, so nothing is lost by keeping them
+	/// separate; what matters is that this is one handler for the process rather than one per call.
+	/// <see cref="GitProvider.CreateDefaultHandler"/> is what keeps the providers' settings from
+	/// drifting apart.
+	/// </remarks>
+	private static readonly SocketsHttpHandler SharedHandler = CreateDefaultHandler();
+
+	/// <inheritdoc/>
+	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
+
+	/// <summary>
 	/// Gets the name of this Git provider.
 	/// </summary>
 	public override GitProviderName Name => "AzureDevOps".As<GitProviderName>();
@@ -361,13 +378,15 @@ public sealed class AzureDevOpsProvider : GitProvider
 		}
 		catch (JsonException exception)
 		{
-			// The parse failure's own message is folded into the text rather than carried as an inner
-			// exception, because this hierarchy's four-argument constructors take no inner exception.
+			// The parse failure travels as the inner exception, so its path and line offset survive for
+			// anyone debugging a malformed body. Its message is also folded into the text, because a
+			// caller who only logs Message would otherwise see nothing about what failed to parse.
 			throw new GitHostingRequestException(
 				$"Azure DevOps reported success but returned a body that is not the expected JSON: {exception.Message}",
 				Name,
 				statusCode,
-				body);
+				body,
+				exception);
 		}
 	}
 

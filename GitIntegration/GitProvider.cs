@@ -31,18 +31,6 @@ using ktsu.Semantics.Strings;
 /// </remarks>
 public abstract class GitProvider : IGitHostingProvider
 {
-	/// <summary>
-	/// The transport every provider built on <see cref="CreateHttpClient"/> shares when no
-	/// <see cref="Handler"/> was injected.
-	/// </summary>
-	/// <remarks>
-	/// One handler for the process, not one per call. A handler owns a connection pool, so building
-	/// and disposing one per call tears down that pool each time and leaves its sockets in
-	/// <c>TIME_WAIT</c> — a caller looping over a hundred repositories would build and destroy a
-	/// hundred pools. See <see cref="CreateDefaultHandler"/> for why it is never disposed.
-	/// </remarks>
-	private static readonly SocketsHttpHandler SharedHandler = CreateDefaultHandler();
-
 	/// <inheritdoc/>
 	public abstract GitProviderName Name { get; }
 
@@ -190,7 +178,7 @@ public abstract class GitProvider : IGitHostingProvider
 	/// <para>
 	/// The client is per call and the transport underneath it is not. This client never owns its
 	/// handler, whichever branch supplied it: an injected <see cref="Handler"/> belongs to whoever
-	/// supplied it, and <see cref="SharedHandler"/> has to outlive every call this provider makes.
+	/// supplied it, and <see cref="DefaultHandler"/> has to outlive every call this provider makes.
 	/// One unconditional <see langword="false"/> covers both, so there is no branch here for a later
 	/// change to get wrong.
 	/// </para>
@@ -207,7 +195,37 @@ public abstract class GitProvider : IGitHostingProvider
 	/// </para>
 	/// </remarks>
 	/// <returns>An <see cref="HttpClient"/> ready to issue requests, which the caller disposes.</returns>
-	protected HttpClient CreateHttpClient() => new(Handler ?? SharedHandler, disposeHandler: false);
+	protected HttpClient CreateHttpClient() => new(Handler ?? DefaultHandler, disposeHandler: false);
+
+	/// <summary>
+	/// Gets the transport this provider's calls share when no <see cref="Handler"/> was injected.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Abstract rather than a shared <see langword="static"/> field on this base class, so each
+	/// provider states which handler is its own. A single field here would have every provider
+	/// deriving from <see cref="GitProvider"/> share one connection pool — which is what this
+	/// library did while <see cref="AzureDevOpsProvider"/> was the only provider using it, so the
+	/// sharing was accidental and invisible rather than intended. Adding a third provider would have
+	/// silently enrolled it in Azure DevOps's pool, with nothing in the code to notice.
+	/// </para>
+	/// <para>
+	/// Each implementation is expected to return one process-lifetime instance built by
+	/// <see cref="CreateDefaultHandler"/>, not a fresh handler per read. A handler owns a connection
+	/// pool, so building and disposing one per call tears down that pool each time and leaves its
+	/// sockets in <c>TIME_WAIT</c> — a caller looping over a hundred repositories would build and
+	/// destroy a hundred pools. See <see cref="CreateDefaultHandler"/> for why they are never
+	/// disposed.
+	/// </para>
+	/// <para>
+	/// <see langword="private protected"/> rather than <see langword="protected"/>: every provider
+	/// this library ships lives in this assembly, and no externally-defined subclass can be
+	/// instantiated anyway, so widening this member's reach would add public API surface nothing can
+	/// use.
+	/// </para>
+	/// </remarks>
+	/// <value>The handler shared across this provider's calls.</value>
+	private protected abstract HttpMessageHandler DefaultHandler { get; }
 
 	/// <summary>
 	/// Builds the local path a repository name maps to under

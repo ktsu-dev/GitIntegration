@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration.Test;
 
 using System;
 using System.Collections.Generic;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -181,6 +182,12 @@ public sealed class GitPullRequestCreateBuilderTests
 		public GitPullRequestSpecification? Specification { get; private set; }
 
 		public override GitProviderName Name => "RecordingProvider".As<GitProviderName>();
+
+		// Never reached: these tests either inject a Handler or never issue a request at all. The
+		// member is abstract so that each real provider has to name its own shared transport rather
+		// than inherit one, which is the point of it existing.
+		private protected override HttpMessageHandler DefaultHandler =>
+			throw new NotSupportedException("Not exercised by these tests.");
 
 		public override Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException("Not exercised by the routing test.");
