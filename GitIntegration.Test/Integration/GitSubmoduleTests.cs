@@ -135,14 +135,18 @@ public class GitSubmoduleTests
 		// move, so the two ids diverge — which is the whole reason the model carries both.
 		GitRepository checkout = new()
 		{
-			LocalPath = System.IO.Path.Combine(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
+			// Path.Join rather than Path.Combine: the intent is "append these segments to this base",
+			// and Combine resets to a later segment if one is ever rooted.
+			LocalPath = System.IO.Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
 			ProcessRunner = super.ProcessRunner,
 		};
 
 		await IntegrationGitFixture.ConfigureIdentityAsync(checkout, AuthorName, AuthorEmail, cancellationToken)
 			.ConfigureAwait(false);
 
-		superDirectory.WriteFile(System.IO.Path.Combine("libs", "sub", "s.txt"), "two\n");
+		// A single relative literal: WriteFile combines it under the fixture root itself, and git and
+		// both platforms accept a forward slash here.
+		superDirectory.WriteFile("libs/sub/s.txt", "two\n");
 		_ = await checkout.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		GitCommit moved = await checkout.Commit("c2".As<GitCommitMessage>())
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);

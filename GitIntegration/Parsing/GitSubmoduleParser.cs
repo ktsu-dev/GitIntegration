@@ -5,6 +5,7 @@ namespace ktsu.GitIntegration;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 using ktsu.Semantics.Paths;
 
@@ -122,10 +123,8 @@ internal static class GitSubmoduleParser
 
 		Dictionary<string, StatusLine> byPath = [];
 
-		foreach (string line in output.Split('\n'))
+		foreach (string record in output.Split('\n').Select(static line => line.TrimEnd('\r')))
 		{
-			string record = line.TrimEnd('\r');
-
 			if (record.Length == 0)
 			{
 				continue;
@@ -154,16 +153,14 @@ internal static class GitSubmoduleParser
 			string prefix = path + " (";
 			bool matched = false;
 
-			foreach (KeyValuePair<string, StatusLine> candidate in byPath)
+			foreach (KeyValuePair<string, StatusLine> candidate in byPath.Where(
+				candidate => candidate.Key.StartsWith(prefix, StringComparison.Ordinal) &&
+					candidate.Key.EndsWith(')', StringComparison.Ordinal)))
 			{
-				if (candidate.Key.StartsWith(prefix, StringComparison.Ordinal) &&
-					candidate.Key.EndsWith(')', StringComparison.Ordinal))
-				{
-					string describe = candidate.Key[prefix.Length..^1];
-					resolved.Add(Apply(submodule, candidate.Value, describe));
-					matched = true;
-					break;
-				}
+				string describe = candidate.Key[prefix.Length..^1];
+				resolved.Add(Apply(submodule, candidate.Value, describe));
+				matched = true;
+				break;
 			}
 
 			if (!matched)
