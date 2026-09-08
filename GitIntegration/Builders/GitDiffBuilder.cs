@@ -48,10 +48,35 @@ public interface IGitDiffBuilder : IGitCommandBuilder<IReadOnlyList<GitDiffEntry
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
 	public IGitDiffBuilder ForPath(RelativeFilePath path);
+
+	/// <summary>
+	/// Reports how many lines each change added and removed, in
+	/// <see cref="GitDiffEntry.Insertions"/> and <see cref="GitDiffEntry.Deletions"/>.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Opt-in rather than always on. Without it the command and its output volume are unchanged for
+	/// the many callers that only want the path list, and nothing about the default result shifts.
+	/// </para>
+	/// <para>
+	/// Switches the command from <c>--name-status</c> to <c>--raw --numstat</c>, because the two
+	/// display formats a caller might expect to combine do not: asking for <c>--name-status</c> and
+	/// <c>--numstat</c> together makes the last one win rather than producing both. <c>--raw</c> is
+	/// the form that does combine, and it carries everything <c>--name-status</c> does — the change
+	/// letter and the similarity score — so nothing is lost and no second invocation is needed.
+	/// </para>
+	/// <para>
+	/// Counting how many <em>files</em> changed needs none of this: the result already holds one
+	/// entry per path, so <c>Count</c> is the file count.
+	/// </para>
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitDiffBuilder WithLineCounts();
 }
 
 /// <summary>
-/// Builds <c>git diff --name-status -z</c>.
+/// Builds <c>git diff --name-status -z</c>, or <c>git diff --raw --numstat -z</c> when line counts
+/// were asked for.
 /// </summary>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">The repository to scope the command to.</param>
@@ -65,6 +90,7 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private bool _staged;
 	private bool _detectRenames;
 	private bool _detectCopies;
+	private bool _withLineCounts;
 
 	/// <inheritdoc />
 	public IGitDiffBuilder Staged()
@@ -109,12 +135,33 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	}
 
 	/// <inheritdoc />
+	public IGitDiffBuilder WithLineCounts()
+	{
+		_withLineCounts = true;
+		return this;
+	}
+
+	/// <inheritdoc />
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
 
 		arguments.Add("diff");
-		arguments.Add("--name-status");
+
+		// --name-status and --numstat are both display formats, and git lets the last one win rather
+		// than emitting both. --raw is the form that combines with --numstat, and it is a superset of
+		// --name-status for this library's purposes: the same change letter and similarity score,
+		// plus modes and blob object ids this parser ignores. Verified against git 2.43 and 2.55.
+		if (_withLineCounts)
+		{
+			arguments.Add("--raw");
+			arguments.Add("--numstat");
+		}
+		else
+		{
+			arguments.Add("--name-status");
+		}
+
 		arguments.Add("-z");
 
 		if (_staged)
@@ -150,5 +197,7 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 
 	/// <inheritdoc />
 	protected override IReadOnlyList<GitDiffEntry> ParseResult(GitProcessResult result) =>
-		GitDiffParser.Parse(Ensure.NotNull(result).StandardOutput);
+		_withLineCounts
+			? GitDiffParser.ParseWithLineCounts(Ensure.NotNull(result).StandardOutput)
+			: GitDiffParser.Parse(Ensure.NotNull(result).StandardOutput);
 }

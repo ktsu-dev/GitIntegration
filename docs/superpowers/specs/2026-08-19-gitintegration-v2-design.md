@@ -704,3 +704,36 @@ so a failing command can be copied out of a `GitCommandException` and run verbat
 2. Add a working-directory parameter to `ktsu.RunCommand`, removing the need for `git -C`.
 3. Consider an argv-aware overload on `ktsu.Essentials.ICommandExecutor`, after which a
    `ktsu.Essentials.CommandExecutors.RunCommand` package would be worth shipping.
+
+## Amendment — 2026-09-08: `tag` and `submodule` are no longer non-goals
+
+This document is left as it was written, as a record of what was decided on 2026-08-19. This note
+records what has changed since, rather than editing the text above.
+
+The [Non-goals](#non-goals) section groups seven commands together:
+
+> Interactive or conflict-resolving commands: `merge`, `rebase`, `bisect`, `stash`, `worktree`,
+> `submodule`, `tag`. Deferred to a later version.
+
+Two things about that entry have since proved wrong.
+
+**The grouping misdescribes two of its members.** `submodule` and `tag` are not interactive and do
+not resolve conflicts. `git tag -l` and `git submodule status` are ordinary read-only queries with
+machine-readable output, and `git tag <name>` and `git submodule update` are ordinary mutating verbs
+with no interactive step. The grouping probably made both look more expensive to support than they
+were: the five commands it genuinely describes — `merge`, `rebase`, `bisect`, `stash`, `worktree` —
+remain non-goals for exactly the stated reason, and nothing here reopens them.
+
+**Both are now implemented.** `tag` landed with `Tags()`, `CreateTag(...)`, and `DeleteTag(...)`,
+mirroring the branch builders. `submodule` landed with `Submodules()` and `UpdateSubmodules()`,
+alongside `--recurse-submodules` on `clone`, `checkout`, `fetch`, `pull`, and `push`.
+
+`CLAUDE.md` separately listed submodule support under "deliberately out of scope, even later",
+which contradicted "deferred to a later version" here. That list now names only `commit --amend`,
+`add --force`, and `switch`, which remain out of scope.
+
+One design consequence worth recording, because it changes something this document's successors
+should not have to rediscover: `git fetch` refuses `--porcelain` and `--recurse-submodules`
+together, so a recursing fetch reports `GitFetchResult.DetailAvailable` as `false`. That is now the
+second reason detail can be unavailable, alongside the git 2.41 threshold for `fetch --porcelain`
+itself.

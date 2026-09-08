@@ -36,33 +36,46 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
 - `GitIntegration/IGitClient.cs`, `GitIntegration/GitClient.cs` — entry point to the local layer:
   `GetVersionAsync`, `IsRepositoryAsync`, `OpenAsync`, `DiscoverAsync`, plus the repository-creating
   `Init(AbsoluteDirectoryPath)` and the two `Clone(...)` overloads.
-- `GitIntegration/GitRepository.cs` — carries `LocalPath` plus optional hosting metadata, and
-  exposes one builder factory per read-only verb (`Status()`, `Log()`, `Diff()`, `Branches()`,
-  `Remotes()`, `RevParse(...)`) and per mutating verb (`Add()`, `Commit(...)`, `CreateBranch(...)`,
-  `DeleteBranch(...)`, `Checkout(...)`, `AddRemote(...)`, `RemoveRemote(...)`,
-  `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()`), plus `IsClonedAsync` and `OpenWebClient`.
+- `GitIntegration/GitRepository.cs` — carries an optional `LocalPath` plus optional hosting
+  metadata, and exposes one builder factory per read-only verb (`Status()`, `Log()`, `Diff()`,
+  `Branches()`, `Remotes()`, `Tags()`, `Submodules()`, `RevParse(...)`, `RevList(...)`,
+  `Divergence(...)`) and per mutating verb (`Add()`, `Commit(...)`, `CreateBranch(...)`,
+  `DeleteBranch(...)`, `CreateTag(...)`, `DeleteTag(...)`, `Checkout(...)`, `AddRemote(...)`,
+  `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()`, `UpdateSubmodules()`),
+  plus `IsClonedAsync` and `OpenWebClient`. Both `LocalPath` and `ProcessRunner` are nullable and
+  separately guarded — `RequireLocalPath()` alongside `RequireRunner()` — because a repository a
+  hosting provider enumerated carries neither, and the two properties are public `init` accessors so
+  a caller can supply one without the other.
 - `GitIntegration/Builders/` — public verb-builder interfaces and their internal implementations:
   `GitInitBuilder`, `GitCloneBuilder`, `GitAddBuilder`, `GitCommitBuilder`,
   `GitBranchCreateBuilder`, `GitBranchDeleteBuilder`, `GitCheckoutBuilder`, `GitRemoteAddBuilder`,
-  `GitRemoteRemoveBuilder`, `GitRemoteSetUrlBuilder`, `GitFetchBuilder`, `GitPullBuilder`, and
-  `GitPushBuilder`. `IGitVersionBuilder` and every concrete `Git*Builder` class are `internal` —
-  not part of the public API surface. Only the `IGit*Builder` interfaces are public.
+  `GitRemoteRemoveBuilder`, `GitRemoteSetUrlBuilder`, `GitFetchBuilder`, `GitPullBuilder`,
+  `GitPushBuilder`, the tag builders (`GitTagListBuilder`, `GitTagCreateBuilder`,
+  `GitTagDeleteBuilder`), the submodule builders (`GitSubmoduleListBuilder`,
+  `GitSubmoduleUpdateBuilder`), and the two `rev-list` builders (`GitRevListBuilder`,
+  `GitRevListDivergenceBuilder`). `IGitVersionBuilder` and every concrete `Git*Builder` class are
+  `internal` — not part of the public API surface. Only the `IGit*Builder` interfaces are public.
 - `GitIntegration/Models/` — result records and enums: `GitStatus`, `GitStatusEntry`, `GitCommit`,
-  `GitSignature`, `GitBranch`, `GitRemote`, `GitDiffEntry`, `GitVersion`, `GitFileState`,
-  `GitChangeKind`, `GitUntrackedFilesMode`, `GitInitResult`, `GitCompleted` — the shared "unit"
-  result for mutating verbs whose only outcome is success (C# has no generic `void`) — and the
-  remote-sync models `GitRefUpdate`, `GitRefUpdateKind`, `GitFetchResult` (`Updates`,
-  `DetailAvailable`, `IsUpToDate`), and `GitPushResult` (`Updates`, `HasRejections`).
+  `GitSignature`, `GitBranch`, `GitTag`, `GitSubmodule`, `GitRemote`, `GitDiffEntry`,
+  `GitDivergence`, `GitVersion`, `GitFileState`, `GitChangeKind`, `GitUntrackedFilesMode`,
+  `GitSubmoduleState`, `GitSubmoduleRecursion`, `GitSubmodulePushCheck`, `GitInitResult`,
+  `GitCompleted` — the shared "unit" result for mutating verbs whose only outcome is success (C# has
+  no generic `void`) — and the remote-sync models `GitRefUpdate`, `GitRefUpdateKind`,
+  `GitFetchResult` (`Updates`, `DetailAvailable`, `IsUpToDate`), and `GitPushResult` (`Updates`,
+  `HasRejections`).
 - `GitIntegration/Execution/` — `GitOptions`, `IGitProcessRunner`, `RunCommandGitProcessRunner`,
   `GitResult<T>`, and the exception hierarchy (`GitException` → `GitExecutableNotFoundException`,
   `GitTimeoutException`, `GitParseException`, `GitCommandException` → `GitRepositoryNotFoundException`,
   `GitNothingToCommitException`, `GitPushRejectedException`, `GitPullConflictException`).
 - `GitIntegration/Parsing/` — internal parsers turning raw git output into the `Models/` records,
   including `GitFetchParser` and `GitPushParser` for the two porcelain formats `fetch --porcelain`
-  and `push --porcelain` emit.
+  and `push --porcelain` emit, `GitTagParser`, and `GitSubmoduleParser`.
 - `GitIntegration/SemanticTypes/` — the `ktsu.Semantics` wrapper types for git identifiers, including
-  the pull-request types (`GitPullRequestNumber`, `GitPullRequestTitle`, `GitPullRequestAuthor`,
-  `GitPullRequestWebURI`) added in Phase 5b.
+  `GitTagName`, `GitHostRepositoryId`, and the pull-request types (`GitPullRequestNumber`,
+  `GitPullRequestTitle`, `GitPullRequestAuthor`, `GitPullRequestWebURI`) added in Phase 5b. Two
+  validation attributes live here: `NotAnOptionAttribute`, which stops a value being reinterpreted by
+  git as a flag, and `IsSinglePathSegmentAttribute`, which stops a value being reinterpreted by a URL
+  or a filesystem as more than one segment.
 - `GitIntegration/GitProvider.cs` — the abstract hosting base: credential resolution
   (`TryGetCredential`, `ResolveCredential`), the internal `HttpMessageHandler? Handler` transport
   seam, and `CreatePullRequest(GitRepositoryName)`.
@@ -177,7 +190,7 @@ from `GitCommandBuilder<TResult>`, which owns argument assembly, execution, and 
 A builder is single-use and not thread-safe; the underlying `IGitProcessRunner` is a shared,
 thread-safe singleton.
 
-Two non-obvious, load-bearing design points:
+Non-obvious, load-bearing design points:
 
 1. **Every command is scoped with `git -C <path>`, never a process working directory.**
    `ktsu.RunCommand` has no notion of a working directory, and scoping this way means a failing
@@ -214,7 +227,8 @@ Two non-obvious, load-bearing design points:
    should surface rather than forcing a caller to catch an exception for an outcome git already
    described in full.
 
-7. **`Fetch` degrades below git 2.41 rather than parsing human output.** `fetch --porcelain` exists
+7. **`Fetch` degrades below git 2.41 rather than parsing human output, and degrades again when
+   recursing into submodules.** `fetch --porcelain` exists
    only from that version onward, so the builder probes the installed git's version before building
    the command. Below the threshold the fetch still runs and still succeeds, but
    `GitFetchResult.DetailAvailable` is false and `Updates` is empty — so an empty list is never
@@ -226,6 +240,16 @@ Two non-obvious, load-bearing design points:
    not a guess — `DetailAvailable` already exists to say exactly that. A genuinely broken git still
    fails loudly moments later, at the fetch itself, in whichever entry point's own idiom.
 
+   The version threshold is **not the only** reason detail can be unavailable, and code reading
+   `DetailAvailable` must not assume it is. `RecursingSubmodules(...)` is the second: git refuses
+   `--porcelain` and `--recurse-submodules` together outright — `fatal: options '--porcelain' and
+   '--recurse-submodules' cannot be used together`, verified against git 2.43 — so emitting both
+   would turn every recursing fetch into a failure. `--porcelain` is dropped instead and the caller's
+   request wins, since they asked to fetch submodules rather than to be itemised. This degrades
+   rather than throwing, unlike the `AllRemotes`/`FromRemote` guard, because the caller asked for
+   nothing contradictory: the conflict is between their request and an internal implementation
+   detail. `GitFetchBuilder.IsPorcelainAvailable` is the single place both causes are combined.
+
 8. **`Pull` returns `GitCompleted`, not a parsed result.** Everything `git pull` prints is human
    prose with no porcelain form, and this design forbids parsing that prose for every other verb —
    so `pull` does not get a special exemption either. A caller who needs to know what changed uses
@@ -234,6 +258,75 @@ Two non-obvious, load-bearing design points:
    `CreateException` is overridden to look for `CONFLICT` on standard *output*, the same trap
    `commit` sets with "nothing to commit" on stderr-vs-stdout, and `LC_ALL=C` is what makes matching
    the literal word dependable.
+
+9. **`checkout` is the one verb that does not use `--end-of-options`, and that is a git bug rather
+   than a choice here.** git ≤ 2.43 strips the marker only when `PARSE_OPT_KEEP_DASHDASH` is unset
+   (`parse-options.c`), and `checkout` sets exactly that flag because it accepts both a revision and
+   a pathspec — so the marker survived into checkout's own operand list and was read as a path:
+   `error: pathspec '--end-of-options' did not match any file(s) known to git`. git 2.44 changed the
+   condition to `PARSE_OPT_KEEP_UNKNOWN_OPT`, which checkout does not set, so it works from there on.
+   CI never caught this because the runners ship newer git than Ubuntu 24.04 LTS's stock 2.43.
+   `GitCheckoutBuilder` emits a trailing `--` instead, git's own documented disambiguator for this
+   verb, which works on every version and additionally guarantees the operand is read as a revision
+   rather than a path — so a branch or tag whose name also matches a file resolves to the ref.
+   `GitRefName`'s `NotAnOptionAttribute` remains the layer that keeps a dash-leading target out of
+   the vector. Every other verb still uses `AppendOperands`, and should.
+
+10. **One diagnostic seam, so a verb's two entry points cannot describe the same failure
+    differently.** `GitCommandBuilder<TResult>.GetDiagnostic` is virtual and is read by both
+    `ExecuteAsync` (through `CreateException`) and `TryExecuteAsync`. It exists because standard
+    error is not where git puts a diagnostic for every verb: `commit` announces "nothing to commit"
+    on standard *output*, and `pull` announces a conflict there too, leaving standard error carrying
+    only fetch progress or nothing at all. Both verbs previously overrode `TryExecuteAsync` alone, so
+    the same non-conflict failure reached one entry point in full and the other as
+    `git exited with code N: ` with nothing after the colon. A verb that relocates its diagnostic now
+    states that once, in one override, and both paths follow.
+
+11. **`Submodules()` runs git twice, and matches the second command's output against the first's.**
+    Neither command answers the whole question. `ls-files --stage -z` is plumbing: NUL-terminated, so
+    a path may contain anything, with a mode field (`160000`) that says outright which entries are
+    gitlinks — but it reports only what the superproject *records*. `submodule status` reports what
+    is actually checked out, but it is a shell wrapper with no `-z` form, and its path is **not** the
+    last field, because an optional ` (describe)` may follow it. A path containing ` (` therefore
+    cannot be split out of a status line at all.
+
+    The parser never tries. The exact set of paths is already known from `ls-files` before a status
+    line is read, so each line's remainder is matched against paths already in hand and the describe
+    falls out as whatever is left over. Two consequences worth keeping: the status output must **not**
+    be trimmed, because the marker for a synchronised submodule is a leading space (which is why that
+    invocation has its own builder rather than reusing `GitTextBuilder`, whose contract is trimmed
+    output); and the separator scan starts at index 1 for the same reason.
+
+    `GitSubmodule` carries both object ids, since the two commands genuinely disagree when a
+    submodule has moved: `Sha` is the recorded gitlink, `CheckedOutSha` is what the working directory
+    holds. `CheckedOutSha` is null when uninitialised, because git prints the recorded gitlink again
+    on that line and reporting it verbatim would make an uninitialised submodule indistinguishable
+    from a synchronised one. Listing does not recurse: `ls-files` enumerates only the superproject's
+    index, so nested paths could only come from the wrapper. A caller recurses by composition, opening
+    each submodule as its own `GitRepository`.
+
+12. **`Log()`'s `ExcludingRemoteTrackingRefs()` emits a *closed* `--not --remotes --not`.** Three
+    behaviours of git make the argument order the whole correctness question here, all verified
+    against git 2.43. `--not` negates everything that follows it, so `--all` must precede it or the
+    query means the opposite — and reports an empty log rather than failing, so nothing else would
+    catch it. `--not` stays in effect until the next `--not`, so without the closing one a revision
+    from `ForRevision` or a pathspec from `ForPath` would fall inside the negation and be excluded
+    rather than selected, which quietly answers zero and looks exactly like a correct "nothing
+    unpushed". And `--not` must precede every non-option argument, so the negation cannot instead be
+    deferred past the operands: `git log --end-of-options HEAD --not --remotes` dies with
+    `fatal: option '--not' must come before non-option arguments`.
+
+    `--all` rather than `--branches` is load-bearing too: `--branches` covers only `refs/heads` and
+    misses a detached HEAD, which is the normal state of a submodule working directory.
+
+13. **`Diff().WithLineCounts()` switches format rather than adding a flag.** `--name-status` and
+    `--numstat` are both display formats and git lets the last one win, so asking for both silently
+    produces only one section. `--raw` is the form that combines, and it carries everything
+    `--name-status` does. Under `-z` the two sections run together with **no delimiter**: a raw
+    record begins with `:` and a numstat record with a digit or `-`, and that test is safe only
+    because it is applied at record boundaries, where a path can never appear. Correlation is
+    positional, because a rename is spelled differently in each section. A binary file's counts are
+    `-`, which is why they are nullable — a binary change is not a zero-line change.
 
 **Hosting layer.** `GitProvider` is an abstract base with two implementations: `GitHubProvider` over
 Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
@@ -259,6 +352,13 @@ disposing anything, approached from the other side. `GitProvider.CreateDefaultHa
 instances so their settings cannot drift, and sets `PooledConnectionLifetime` (two minutes, matching
 `IHttpClientFactory`) so a process-lifetime handler does not go on using a host's original address
 after DNS moves it. Neither shared handler is ever disposed, and neither provider is `IDisposable`.
+
+Each provider declares its own handler through `GitProvider`'s `private protected abstract
+DefaultHandler`, rather than inheriting one static field from the base. That field used to exist, and
+was equivalent to per-provider only by accident: `AzureDevOpsProvider` was its sole user because
+`GitHubProvider` already had its own, so adding a third provider would have silently enrolled it in
+Azure DevOps's connection pool with nothing in the code to notice. The abstract member makes the
+compiler ask.
 
 The two providers express "this transport is not mine to dispose" differently, and that asymmetry is
 forced, not accidental. `GitProvider.CreateHttpClient` passes `disposeHandler: false` to
@@ -313,6 +413,33 @@ key: HTTP header names are case-insensitive and Octokit's header dictionary comp
 keyed lookup would work only because `HttpResponseMessage` happens to canonicalise this header's
 casing. A `Retry-After` carrying an HTTP date rather than seconds yields `null`, since an unset
 `ResetsAt` is better than an invented one.
+
+**A repository from a hosting provider carries no `LocalPath`, and is addressed by the host's own
+id.** `GitRepository.LocalPath` is nullable because a repository a provider enumerated has never been
+cloned. Both providers used to invent one under `Environment.CurrentDirectory`, which made the same
+remote repository yield a different record depending on when it was enumerated, and which forced a
+containment guard to exist purely to keep a name from a remote response from escaping that
+directory. That guard is gone with the reason for it, and `IGitClient.Clone(GitRepository)` now
+reports a missing `LocalPath` rather than resurrecting the invented default — where a working copy
+goes is the caller's decision.
+
+`GitRepository.HostRepositoryId` carries what a host documents its own API in terms of. Microsoft's
+reference types Azure DevOps's `{repositoryId}` path parameter as `string (uuid)` and draws an
+explicit id-or-name distinction for the sibling `project` parameter while withholding it here, so
+substituting a name there is unconfirmed against the documented schema rather than sanctioned by it.
+`GetPullRequestsAsync(GitRepository)` and `CreatePullRequest(GitRepository)` therefore prefer the id;
+the `GitRepositoryName`-taking overloads still pass a name, since that is all they are given. Both
+route through one internal core taking the finished path segment, so the choice lives in exactly one
+place and the overloads cannot answer the same question differently.
+
+**A field a host reported goes through `GitProvider.ToHostValue`, never through `As<T>()` directly.**
+The hosting counterpart to `GitParseValues.ToSemantic`, and it exists for the same reason: a value
+arriving from outside is data to be validated, not an argument a caller got wrong. `GitRepositoryName`
+is validated as a single path segment (`IsSinglePathSegmentAttribute`), so a host reporting `/` or
+`..` produces a value the semantic type refuses — and calling `As<T>()` on a response directly would
+throw `ArgumentException` out of a public hosting method, whose documented failure surface is the
+`GitHostingException` hierarchy. An omitted optional field stays null; only a field the host did
+report and this library cannot represent is raised.
 
 **Azure DevOps pull request operations require `Project`; repository enumeration does not.** Azure
 DevOps nests repositories under a project — GitHub has no equivalent — so
@@ -375,8 +502,15 @@ the package, not by working around it.
 **Deliberately out of scope for the hosting layer:** merging or completing a pull request, comments,
 reviews, repository creation, and webhooks — none of these are implemented, and none should be
 documented as present. Deliberately out of scope for the local layer, even later: `commit --amend`,
-`add --force`, `switch` (see `IGitCheckoutBuilder`'s remarks for why `checkout` was chosen instead),
-and submodule support.
+`add --force`, and `switch` (see `IGitCheckoutBuilder`'s remarks for why `checkout` was chosen
+instead).
+
+Submodule support **is** in scope and is implemented — `Submodules()`, `UpdateSubmodules()`, and
+`--recurse-submodules` on the verbs that accept it. It used to be on the list above, which
+contradicted the v2 design doc's own "deferred to a later version"; that discrepancy is resolved,
+and the design doc carries a dated amendment saying so. `git submodule add` is not wrapped: the
+verbs exist to inspect and update submodules, not to create them. Still out of scope from the design
+doc's non-goals, and genuinely so: `merge`, `rebase`, `bisect`, `stash`, `worktree`.
 
 ## Testing
 

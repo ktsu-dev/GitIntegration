@@ -49,4 +49,34 @@ internal static class GitOutputFormats
 	/// </remarks>
 	internal const string ForEachRefFormat =
 		"%(refname)%1f%(refname:short)%1f%(objectname)%1f%(upstream:short)%1f%(HEAD)";
+
+	/// <summary>
+	/// The <c>for-each-ref</c> format for tags: short name, the reference's own object id, the
+	/// object type, the dereferenced object id, and the message subject.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// A separate format from <see cref="ForEachRefFormat"/> rather than a widening of it, because
+	/// the two share only the name. A tag has no upstream and no current-branch marker, and a branch
+	/// has no dereferenced target — a single format carrying both sets would leave half its fields
+	/// empty on every record and invite a parser to guess which half it was reading.
+	/// </para>
+	/// <para>
+	/// <c>%(objecttype)</c> is what distinguishes the two kinds of tag: <c>tag</c> for an annotated
+	/// tag, whose reference points at a tag object, and <c>commit</c> for a lightweight one, whose
+	/// reference points straight at the commit. <c>%(*objectname)</c> dereferences a tag object to
+	/// the commit beneath it and is empty for a lightweight tag, so the commit id is the starred
+	/// field when it is populated and the plain one otherwise.
+	/// </para>
+	/// <para>
+	/// <c>%(contents:subject)</c> is the trap in this format. For an annotated tag it is the tag
+	/// message's subject, which is what it looks like it means. For a lightweight tag there is no tag
+	/// object to read, and git falls through to the <em>commit's</em> subject instead of leaving the
+	/// field empty — so a parser that reported it verbatim would present a commit message as the
+	/// tagger's words. <see cref="GitTagParser"/> gates it on the object type for that reason.
+	/// Verified against git 2.43.
+	/// </para>
+	/// </remarks>
+	internal const string ForEachTagFormat =
+		"%(refname:short)%1f%(objectname)%1f%(objecttype)%1f%(*objectname)%1f%(contents:subject)";
 }

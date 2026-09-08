@@ -17,14 +17,49 @@ using ktsu.Semantics.Paths;
 public class GitRepository
 {
 	/// <summary>
-	/// Gets the local filesystem path where the repository is, or is intended to be, cloned.
+	/// Gets the local filesystem path where the repository is, or is intended to be, cloned, or
+	/// <see langword="null"/> when it is not known.
 	/// </summary>
-	public required AbsoluteDirectoryPath LocalPath { get; init; }
+	/// <remarks>
+	/// Nullable rather than required, because a repository a hosting provider enumerated has never
+	/// been cloned and there is no local path to report for it. Both providers used to invent one
+	/// under <see cref="Environment.CurrentDirectory"/>, which had two consequences: the value
+	/// depended on process-global mutable state, so the same remote repository yielded a different
+	/// record depending on when it was enumerated; and because the name came from a remote API
+	/// response, the providers needed a containment guard purely to make an invented path safe.
+	/// Saying "not known" is what is actually true, and it removes the reason that guard existed.
+	/// <para>
+	/// Every verb on this type needs a path, so each throws <see cref="InvalidOperationException"/>
+	/// when this is unset, exactly as it already does for a missing <see cref="ProcessRunner"/>.
+	/// </para>
+	/// </remarks>
+	public AbsoluteDirectoryPath? LocalPath { get; init; }
 
 	/// <summary>
 	/// Gets the repository name, or <see langword="null"/> when it is not known.
 	/// </summary>
 	public GitRepositoryName? Name { get; init; }
+
+	/// <summary>
+	/// Gets the host's own identifier for this repository, or <see langword="null"/> when it is not
+	/// known.
+	/// </summary>
+	/// <remarks>
+	/// The identifier a host assigns and documents its own API in terms of, as distinct from the
+	/// human-facing <see cref="Name"/>. Azure DevOps's REST reference types its
+	/// <c>{repositoryId}</c> path parameter as <c>string (uuid)</c>, and draws an explicit
+	/// id-or-name distinction for the sibling <c>project</c> parameter while withholding it here — a
+	/// distinction stated where it applies reads as deliberate where it is withheld. Substituting a
+	/// name there works today, but working and being specified are different properties, and only
+	/// the second survives the vendor's next change.
+	/// <para>
+	/// Populated by both providers when they enumerate repositories. A caller that has a
+	/// <see cref="GitRepository"/> from <c>GetRepositoriesAsync</c> should prefer the overloads
+	/// taking one over those taking a bare <see cref="GitRepositoryName"/>, since only the former can
+	/// address the repository the way the host documents.
+	/// </para>
+	/// </remarks>
+	public GitHostRepositoryId? HostRepositoryId { get; init; }
 
 	/// <summary>
 	/// Gets the browser-facing URI, or <see langword="null"/> when it is not known.
@@ -61,27 +96,28 @@ public class GitRepository
 		// a metadata-only repository throws from the call itself rather than only once the returned
 		// task is awaited.
 		IGitProcessRunner runner = RequireRunner();
+		AbsoluteDirectoryPath localPath = RequireLocalPath();
 
-		return IsClonedCoreAsync(runner, cancellationToken);
+		return IsClonedCoreAsync(runner, localPath, cancellationToken);
 	}
 
-	private Task<bool> IsClonedCoreAsync(IGitProcessRunner runner, CancellationToken cancellationToken) =>
-		GitProbes.IsWorkTreeAsync(runner, LocalPath, cancellationToken);
+	private static Task<bool> IsClonedCoreAsync(IGitProcessRunner runner, AbsoluteDirectoryPath localPath, CancellationToken cancellationToken) =>
+		GitProbes.IsWorkTreeAsync(runner, localPath, cancellationToken);
 
 	/// <summary>Reports the working tree and index state.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitStatusBuilder Status() => new GitStatusBuilder(RequireRunner(), LocalPath);
+	public IGitStatusBuilder Status() => new GitStatusBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Lists commits.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitLogBuilder Log() => new GitLogBuilder(RequireRunner(), LocalPath);
+	public IGitLogBuilder Log() => new GitLogBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Lists the paths that differ between two states of the repository.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitDiffBuilder Diff() => new GitDiffBuilder(RequireRunner(), LocalPath);
+	public IGitDiffBuilder Diff() => new GitDiffBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Resolves a revision to the object id it names.</summary>
 	/// <param name="revision">The revision to resolve.</param>
@@ -95,23 +131,78 @@ public class GitRepository
 		// wrong diagnostic for what the caller got wrong.
 		Ensure.NotNull(revision);
 
-		return new GitRevParseBuilder(RequireRunner(), LocalPath, revision);
+		return new GitRevParseBuilder(RequireRunner(), RequireLocalPath(), revision);
+	}
+
+	/// <summary>Counts the commits a revision or range names.</summary>
+	/// <remarks>
+	/// Cheaper than <c>Log()</c> for a count, and unable to fail the way it can — see
+	/// <see cref="IGitRevListBuilder"/>. For how far the current branch has diverged from its own
+	/// upstream, <see cref="GitStatus.Ahead"/> and <see cref="GitStatus.Behind"/> already answer it
+	/// from a single <see cref="Status"/> call.
+	/// </remarks>
+	/// <param name="revision">The revision or range to count, such as <c>HEAD</c> or <c>a..b</c>.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="revision"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRevListBuilder RevList(GitRefName revision)
+	{
+		Ensure.NotNull(revision);
+
+		return new GitRevListBuilder(RequireRunner(), RequireLocalPath(), revision);
+	}
+
+	/// <summary>Counts how far two revisions have diverged from each other.</summary>
+	/// <remarks>
+	/// Answers ahead-and-behind for an arbitrary pair of revisions, where <see cref="Status"/>
+	/// answers it only for HEAD against its configured upstream. The two parameters are named so the
+	/// mapping onto <see cref="GitDivergence.Ahead"/> and <see cref="GitDivergence.Behind"/> cannot
+	/// be read backwards.
+	/// </remarks>
+	/// <param name="upstream">The revision whose exclusive commits are counted as behind.</param>
+	/// <param name="local">The revision whose exclusive commits are counted as ahead.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="upstream"/> or <paramref name="local"/> is <see langword="null"/>.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRevListDivergenceBuilder Divergence(GitRefName upstream, GitRefName local)
+	{
+		Ensure.NotNull(upstream);
+		Ensure.NotNull(local);
+
+		return new GitRevListDivergenceBuilder(RequireRunner(), RequireLocalPath(), upstream, local);
 	}
 
 	/// <summary>Lists branch references.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitBranchListBuilder Branches() => new GitBranchListBuilder(RequireRunner(), LocalPath);
+	public IGitBranchListBuilder Branches() => new GitBranchListBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Lists the configured remotes.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitRemoteListBuilder Remotes() => new GitRemoteListBuilder(RequireRunner(), LocalPath);
+	public IGitRemoteListBuilder Remotes() => new GitRemoteListBuilder(RequireRunner(), RequireLocalPath());
+
+	/// <summary>Lists the repository's submodules.</summary>
+	/// <remarks>
+	/// Reports the superproject's own submodules and does not recurse — see
+	/// <see cref="IGitSubmoduleListBuilder"/> for why, and for how to recurse through composition
+	/// instead.
+	/// </remarks>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitSubmoduleListBuilder Submodules() => new GitSubmoduleListBuilder(RequireRunner(), RequireLocalPath());
+
+	/// <summary>Lists tag references.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitTagListBuilder Tags() => new GitTagListBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Stages changes for the next commit.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitAddBuilder Add() => new GitAddBuilder(RequireRunner(), LocalPath);
+	public IGitAddBuilder Add() => new GitAddBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Records the staged changes as a new commit.</summary>
 	/// <param name="message">The commit subject.</param>
@@ -123,7 +214,7 @@ public class GitRepository
 		// Argument validation precedes the state check so a null argument is reported as such,
 		// rather than as a missing runner.
 		Ensure.NotNull(message);
-		return new GitCommitBuilder(RequireRunner(), LocalPath, message);
+		return new GitCommitBuilder(RequireRunner(), RequireLocalPath(), message);
 	}
 
 	/// <summary>Creates a branch.</summary>
@@ -134,7 +225,7 @@ public class GitRepository
 	public IGitBranchCreateBuilder CreateBranch(GitBranchName name)
 	{
 		Ensure.NotNull(name);
-		return new GitBranchCreateBuilder(RequireRunner(), LocalPath, name);
+		return new GitBranchCreateBuilder(RequireRunner(), RequireLocalPath(), name);
 	}
 
 	/// <summary>Deletes a branch.</summary>
@@ -145,7 +236,36 @@ public class GitRepository
 	public IGitBranchDeleteBuilder DeleteBranch(GitBranchName name)
 	{
 		Ensure.NotNull(name);
-		return new GitBranchDeleteBuilder(RequireRunner(), LocalPath, name);
+		return new GitBranchDeleteBuilder(RequireRunner(), RequireLocalPath(), name);
+	}
+
+	/// <summary>Creates a tag.</summary>
+	/// <remarks>
+	/// Lightweight by default; call <c>Annotating</c> on the returned builder for an annotated tag.
+	/// </remarks>
+	/// <param name="name">The tag to create.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitTagCreateBuilder CreateTag(GitTagName name)
+	{
+		// Argument validation before RequireRunner(), matching every other verb taking an operand.
+		Ensure.NotNull(name);
+
+		return new GitTagCreateBuilder(RequireRunner(), RequireLocalPath(), name);
+	}
+
+	/// <summary>Deletes a tag.</summary>
+	/// <remarks>Deletes the local reference only; a tag already pushed to a remote stays there.</remarks>
+	/// <param name="name">The tag to delete.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitTagDeleteBuilder DeleteTag(GitTagName name)
+	{
+		Ensure.NotNull(name);
+
+		return new GitTagDeleteBuilder(RequireRunner(), RequireLocalPath(), name);
 	}
 
 	/// <summary>Switches the working tree to a different branch, tag, or commit.</summary>
@@ -156,7 +276,7 @@ public class GitRepository
 	public IGitCheckoutBuilder Checkout(GitRefName target)
 	{
 		Ensure.NotNull(target);
-		return new GitCheckoutBuilder(RequireRunner(), LocalPath, target);
+		return new GitCheckoutBuilder(RequireRunner(), RequireLocalPath(), target);
 	}
 
 	/// <summary>Adds a remote.</summary>
@@ -171,7 +291,7 @@ public class GitRepository
 	{
 		Ensure.NotNull(name);
 		Ensure.NotNull(url);
-		return new GitRemoteAddBuilder(RequireRunner(), LocalPath, name, url);
+		return new GitRemoteAddBuilder(RequireRunner(), RequireLocalPath(), name, url);
 	}
 
 	/// <summary>Removes a remote and every remote-tracking branch belonging to it.</summary>
@@ -182,7 +302,7 @@ public class GitRepository
 	public IGitRemoteRemoveBuilder RemoveRemote(GitRemoteName name)
 	{
 		Ensure.NotNull(name);
-		return new GitRemoteRemoveBuilder(RequireRunner(), LocalPath, name);
+		return new GitRemoteRemoveBuilder(RequireRunner(), RequireLocalPath(), name);
 	}
 
 	/// <summary>Changes the URL a remote points at.</summary>
@@ -197,29 +317,59 @@ public class GitRepository
 	{
 		Ensure.NotNull(name);
 		Ensure.NotNull(url);
-		return new GitRemoteSetUrlBuilder(RequireRunner(), LocalPath, name, url);
+		return new GitRemoteSetUrlBuilder(RequireRunner(), RequireLocalPath(), name, url);
 	}
+
+	/// <summary>Checks out the commits the superproject's gitlinks record.</summary>
+	/// <remarks>
+	/// A failure does not mean the repository is unchanged — see
+	/// <see cref="IGitSubmoduleUpdateBuilder"/>.
+	/// </remarks>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitSubmoduleUpdateBuilder UpdateSubmodules() =>
+		new GitSubmoduleUpdateBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Downloads objects and refs from a remote without touching the working tree.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitFetchBuilder Fetch() => new GitFetchBuilder(RequireRunner(), LocalPath);
+	public IGitFetchBuilder Fetch() => new GitFetchBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Fetches from a remote and integrates the result into the current branch.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitPullBuilder Pull() => new GitPullBuilder(RequireRunner(), LocalPath);
+	public IGitPullBuilder Pull() => new GitPullBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Sends local commits to a remote.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
-	public IGitPushBuilder Push() => new GitPushBuilder(RequireRunner(), LocalPath);
+	public IGitPushBuilder Push() => new GitPushBuilder(RequireRunner(), RequireLocalPath());
 
 	private IGitProcessRunner RequireRunner() =>
 		ProcessRunner ?? throw new InvalidOperationException(
 			"This GitRepository carries hosting metadata only and has no process runner. Obtain one " +
 			$"from {nameof(IGitClient)}.{nameof(IGitClient.OpenAsync)} or " +
 			$"{nameof(IGitClient)}.{nameof(IGitClient.DiscoverAsync)} before running git commands against it.");
+
+	/// <summary>
+	/// Returns <see cref="LocalPath"/>, or throws when this repository has none.
+	/// </summary>
+	/// <remarks>
+	/// The companion to <see cref="RequireRunner"/>, and separately reachable from it. Both are set
+	/// together on a repository this library produces — <see cref="IGitClient.OpenAsync"/> and
+	/// <see cref="IGitClient.DiscoverAsync"/> supply both, a hosting provider supplies neither — but
+	/// the properties are public <c>init</c> accessors, so a caller can construct a
+	/// <see cref="GitRepository"/> carrying one and not the other, and each check has to stand on
+	/// its own. <see cref="RequireRunner"/> is evaluated first at every call site, so a repository
+	/// missing both reports the runner, which is the more specific thing to have got wrong.
+	/// </remarks>
+	/// <returns>The local path.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="LocalPath"/>.</exception>
+	private AbsoluteDirectoryPath RequireLocalPath() =>
+		LocalPath ?? throw new InvalidOperationException(
+			"This GitRepository has no local path, so there is no working copy to run git against. A " +
+			"repository enumerated from a hosting provider has never been cloned; clone it, then " +
+			$"obtain a repository from {nameof(IGitClient)}.{nameof(IGitClient.OpenAsync)}.");
 
 	/// <summary>
 	/// Opens <see cref="WebURI"/> in the default browser.

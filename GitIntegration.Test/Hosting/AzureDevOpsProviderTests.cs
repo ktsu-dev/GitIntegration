@@ -13,7 +13,6 @@ using System.Text;
 using System.Threading.Tasks;
 
 using ktsu.CredentialCache;
-using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
 // System.Net (for HttpStatusCode) and ktsu.CredentialCache both declare a type named
@@ -32,6 +31,15 @@ public sealed class AzureDevOpsProviderTests
 	// parallelism. This class must not add a second call site.
 
 	/// <summary>Reads a captured fixture's raw JSON text from the test output's Fixtures directory.</summary>
+	/// <remarks>
+	/// The Azure DevOps fixtures keep two things from Microsoft's own documented samples that look
+	/// like oversights and are not. The synthetic user <c>npaulk</c> is Microsoft's placeholder, kept
+	/// so a reader comparing a fixture against the published sample sees the same value rather than
+	/// wondering which fields this library altered; and <c>homepage</c> retains the real
+	/// <c>docs.microsoft.com</c> domain with only the organisation path segment swapped, for the same
+	/// reason. Neither is a credential or an internal hostname, both are test-only assets that are
+	/// never packed, and no request is ever issued against either.
+	/// </remarks>
 	private static string Fixture(string name) =>
 		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
@@ -114,8 +122,30 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	[TestMethod]
-	public async Task MapsAnOrdinaryRepositoryNameToALocalPathUnderTheCurrentDirectoryAsync()
+	public async Task ReportsNoLocalPathForAnEnumeratedRepositoryAsync()
 	{
+		// An enumerated repository has never been cloned, so there is no local path to report. This
+		// used to be filled with Path.Combine(Environment.CurrentDirectory, name), which made the same
+		// remote repository yield a different record depending on when it was enumerated — and which
+		// needed a containment guard purely to keep a name from a remote response from escaping that
+		// directory. Saying "not known" needs neither.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SingleRepositoryResponse("my-repo"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsNull(repositories[0].LocalPath);
+		Assert.AreEqual("my-repo".As<GitRepositoryName>(), repositories[0].Name);
+	}
+
+	[TestMethod]
+	public async Task CarriesAzureDevOpsOwnRepositoryIdAsync()
+	{
+		// Microsoft's reference types {repositoryId} as string (uuid) and never sanctions a name
+		// there, so the id has to survive enumeration for a caller to address the repository the way
+		// the schema documents.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
 			.Respond(HttpStatusCode.OK, SingleRepositoryResponse("my-repo"), ("Content-Type", "application/json"));
 		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
@@ -124,81 +154,111 @@ public sealed class AzureDevOpsProviderTests
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.AreEqual(
-			Path.Combine(Environment.CurrentDirectory, "my-repo").As<AbsoluteDirectoryPath>(),
-			repositories[0].LocalPath);
+			"5febef5a-833d-4e14-b9c0-14cb638f91e6".As<GitHostRepositoryId>(),
+			repositories[0].HostRepositoryId);
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARootedRepositoryNameHasNoLeafSegmentAsync()
+	public async Task AddressesARepositoryByItsHostIdWhenListingPullRequestsAsync()
 	{
-		// "/" is rooted on every platform .NET runs this suite on (both Windows and POSIX treat "/"
-		// as a separator), and is exactly the shape that let the old
-		// Path.Combine(Environment.CurrentDirectory, name) call silently discard
-		// Environment.CurrentDirectory and report LocalPath as the bare root. Path.GetFileName("/")
-		// strips the root and leaves nothing behind, so this is treated as the host having sent a
-		// name this library cannot represent as a directory, rather than as a value that happens to
-		// look safe once stripped.
+		// The point of carrying the id: it has to reach the {repositoryId} path segment. The
+		// name-taking overload cannot do this, because it is never given an id.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SingleRepositoryResponse("/"), ("Content-Type", "application/json"));
-		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+			.Respond(HttpStatusCode.OK, "{\"count\":0,\"value\":[]}", ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
 
-		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+		GitRepository repository = new()
+		{
+			Name = "my-repo".As<GitRepositoryName>(),
+			HostRepositoryId = "5febef5a-833d-4e14-b9c0-14cb638f91e6".As<GitHostRepositoryId>(),
+		};
 
-		StringAssert.Contains(exception.Message, "cannot be represented as a local directory");
+		_ = await provider.GetPullRequestsAsync(repository, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		StringAssert.Contains(
+			handler.Requests[0].Uri.AbsoluteUri,
+			"/repositories/5febef5a-833d-4e14-b9c0-14cb638f91e6/pullrequests");
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARepositoryNameIsADirectoryTraversalTokenAsync()
+	public async Task FallsBackToTheNameWhenARepositoryCarriesNoHostIdAsync()
 	{
-		// Path.GetFileName("..") returns ".." unchanged — stripping a rooted prefix does not resolve
-		// this case, which is exactly why the mapping checks the derived leaf itself rather than
-		// trusting Path.GetFileName alone.
+		// A caller may legitimately have built a GitRepository from a name alone. That substitution is
+		// the same unconfirmed one the name-taking overload already makes, so it is allowed rather
+		// than rejected — but only as a fallback, never in preference to an id.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SingleRepositoryResponse(".."), ("Content-Type", "application/json"));
-		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+			.Respond(HttpStatusCode.OK, "{\"count\":0,\"value\":[]}", ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
 
-		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+		GitRepository repository = new() { Name = "my-repo".As<GitRepositoryName>() };
 
-		StringAssert.Contains(exception.Message, "..");
+		_ = await provider.GetPullRequestsAsync(repository, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		StringAssert.Contains(handler.Requests[0].Uri.AbsoluteUri, "/repositories/my-repo/pullrequests");
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARepositoryNameIsWhitespaceOnlyAsync()
+	public void RejectsARepositoryCarryingNeitherIdentifier()
 	{
-		// Path.GetFileName("   ") returns "   " unchanged — there is no separator to strip, so the
-		// leaf is exactly the whitespace-only input. GitRepositoryName itself rejects a
-		// whitespace-only value ([HasNonWhitespaceContent]), so LocalPath is held to the same rule:
-		// a name the semantic type would refuse is not a name this mapping can turn into a directory
-		// either.
-		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SingleRepositoryResponse("   "), ("Content-Type", "application/json"));
-		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+		};
 
-		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+		GitRepository repository = new();
 
-		StringAssert.Contains(exception.Message, "cannot be represented as a local directory");
+		_ = Assert.ThrowsExactly<ArgumentException>(() => _ = provider.GetPullRequestsAsync(repository));
+		_ = Assert.ThrowsExactly<ArgumentException>(() => _ = provider.CreatePullRequest(repository));
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARepositoryNameIsMissingAsync()
+	public async Task ThrowsAHostingFailureWhenAReportedNameIsNotOneThisLibraryCanRepresentAsync()
 	{
-		// Azure DevOps's schema allows an absent name (AzureDevOpsRepository.Name is nullable), unlike
-		// GitHub's. Before this fix an absent name degraded silently to Environment.CurrentDirectory
-		// itself; failing loudly is the correct outcome for a value this library cannot represent as a
-		// directory, matching the same rule a rooted or traversal name is held to.
+		// GitRepositoryName is validated as a single path segment, so a host reporting "/" or ".."
+		// produces a value the semantic type refuses. That has to surface as a GitHostingException,
+		// not as the ArgumentException the semantic type itself raises: a public hosting method's
+		// documented failure surface is this hierarchy, the same rule that makes an unparsable success
+		// body a GitHostingRequestException rather than a JsonException.
+		foreach (string reported in new[] { "/", "..", "   ", "owner/repo" })
+		{
+			using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+				.Respond(HttpStatusCode.OK, SingleRepositoryResponse(reported), ("Content-Type", "application/json"));
+			AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+			GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+			StringAssert.Contains(exception.Message, "cannot represent");
+		}
+	}
+
+	[TestMethod]
+	public async Task ReportsNoNameWhenAzureDevOpsOmitsOneAsync()
+	{
+		// Azure DevOps's schema allows an absent name, unlike GitHub's, and GitRepository.Name is
+		// nullable to match. An omitted optional field is ordinary rather than a failure — only a
+		// field the host did report and this library cannot represent is worth raising.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
 			.Respond(HttpStatusCode.OK, SingleRepositoryResponse(null), ("Content-Type", "application/json"));
 		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
 
-		await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsNull(repositories[0].Name);
+		Assert.IsNotNull(repositories[0].HostRepositoryId);
 	}
 
 	[TestMethod]

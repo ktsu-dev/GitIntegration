@@ -4,8 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
+using System.ComponentModel;
 
 using ktsu.Semantics.Paths;
 
@@ -84,6 +83,25 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPullBuilder Prune();
 
+	/// <summary>
+	/// Also updates the repository's submodules as part of the pull.
+	/// </summary>
+	/// <remarks>
+	/// Emits <c>--recurse-submodules=&lt;value&gt;</c>, so one invocation moves the superproject and
+	/// its submodules together rather than leaving the submodules stale until something else notices.
+	/// <para>
+	/// Overlaps with <c>UpdateSubmodules()</c> without replacing it: this flag updates submodules
+	/// that are already registered, while that verb's <c>Initialise()</c> also checks out a submodule
+	/// added upstream since this working copy was cloned. Not to be confused with
+	/// <c>IGitPushBuilder.CheckingSubmodules</c>, which git spells with the same flag name but which
+	/// governs an unrelated question.
+	/// </para>
+	/// </remarks>
+	/// <param name="recursion">Whether, and when, to recurse.</param>
+	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognised value.</exception>
+	public IGitPullBuilder RecursingSubmodules(GitSubmoduleRecursion recursion);
+
 	/// <summary>Reports git's progress output as it arrives.</summary>
 	/// <param name="progress">The sink to report to. Must be thread-safe.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -105,6 +123,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private bool _rebase;
 	private bool _merge;
 	private bool _prune;
+	private GitSubmoduleRecursion? _submoduleRecursion;
 
 	/// <inheritdoc />
 	public IGitPullBuilder FromRemote(GitRemoteName name)
@@ -145,6 +164,21 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	public IGitPullBuilder Prune()
 	{
 		_prune = true;
+		return this;
+	}
+
+	/// <inheritdoc />
+	public IGitPullBuilder RecursingSubmodules(GitSubmoduleRecursion recursion)
+	{
+		// Validated at the fluent call rather than deferred into AppendVerbArguments, matching
+		// IGitStatusBuilder.WithUntrackedFiles: BuildArguments is documented as a pure computation
+		// with no exceptions of its own beyond the contradiction guards.
+		if (!Enum.IsDefined(recursion))
+		{
+			throw new InvalidEnumArgumentException(nameof(recursion), (int)recursion, typeof(GitSubmoduleRecursion));
+		}
+
+		_submoduleRecursion = recursion;
 		return this;
 	}
 
@@ -207,6 +241,11 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			arguments.Add("--prune");
 		}
 
+		if (_submoduleRecursion is GitSubmoduleRecursion recursion)
+		{
+			arguments.Add("--recurse-submodules=" + ToOptionValue(recursion));
+		}
+
 		if (_remote is null)
 		{
 			// git pull <refspec> with no remote reads the first operand as the remote, so a branch
@@ -259,36 +298,52 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			: base.CreateException(result);
 	}
 
-	/// <inheritdoc />
-	public override async Task<GitResult<GitCompleted>> TryExecuteAsync(CancellationToken cancellationToken = default)
+	/// <summary>
+	/// Joins standard error and standard output into one diagnostic.
+	/// </summary>
+	/// <remarks>
+	/// Pull is the second verb whose diagnostic lands on standard output, so an error built only
+	/// from standard error would carry the fetch progress and say nothing about the conflict. The
+	/// two are joined on a single newline, with the trailing newline trimmed from standard error
+	/// first, so the result reads as two legible lines rather than a run-on string. Only the parts
+	/// that are actually present are joined: a stderr-only failure (the common plain "fatal: ..."
+	/// case) must not gain a trailing blank line from an empty standard output.
+	/// <para>
+	/// Overriding the base class's seam rather than either entry point is what makes the two report
+	/// the same text. <see cref="CreateException"/> recognises only a conflict and hands everything
+	/// else to the base implementation, whose message is built from this method — so a non-conflict
+	/// failure explained on standard output now reaches a caller of
+	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/> as well as one of
+	/// <see cref="IGitCommandBuilder{TResult}.TryExecuteAsync"/>, instead of arriving as
+	/// "git exited with code N: " with nothing after the colon.
+	/// </para>
+	/// </remarks>
+	/// <param name="result">The failed invocation outcome.</param>
+	/// <returns>The joined diagnostic text.</returns>
+	protected override string GetDiagnostic(GitProcessResult result)
 	{
-		GitProcessResult result = await Runner.RunAsync(
-			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
-			cancellationToken).ConfigureAwait(false);
+		Ensure.NotNull(result);
 
-		if (result.Success)
-		{
-			return GitResult<GitCompleted>.FromValue(ParseResult(result));
-		}
-
-		// Pull is the second verb whose diagnostic lands on standard output, so an error built only
-		// from standard error would carry the fetch progress and say nothing about the conflict. The
-		// two are joined on a single newline, with the trailing newline trimmed from standard error
-		// first, so the result reads as two legible lines rather than a run-on string. Only the parts
-		// that are actually present are joined: a stderr-only failure (the common plain "fatal: ..."
-		// case) must not gain a trailing blank line from an empty standard output.
 		string standardError = result.StandardError.TrimEnd('\n', '\r');
-		string diagnostic = standardError.Length == 0
+
+		return standardError.Length == 0
 			? result.StandardOutput
 			: result.StandardOutput.Length == 0
 				? standardError
 				: standardError + "\n" + result.StandardOutput;
-
-		return GitResult<GitCompleted>.FromError(new GitCommandError
-		{
-			ExitCode = result.ExitCode,
-			Arguments = result.Arguments,
-			StandardError = diagnostic,
-		});
 	}
+
+	/// <summary>Maps the recursion mode onto the value git's flag takes.</summary>
+	/// <param name="recursion">The mode to map.</param>
+	/// <returns>The flag value.</returns>
+	private static string ToOptionValue(GitSubmoduleRecursion recursion) => recursion switch
+	{
+		GitSubmoduleRecursion.No => "no",
+		GitSubmoduleRecursion.Yes => "yes",
+		GitSubmoduleRecursion.OnDemand => "on-demand",
+
+		// Unreachable once RecursingSubmodules validates: this arm only exists to satisfy the
+		// compiler's exhaustiveness check over the switch.
+		_ => throw new InvalidEnumArgumentException(nameof(recursion), (int)recursion, typeof(GitSubmoduleRecursion)),
+	};
 }

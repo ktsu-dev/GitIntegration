@@ -292,6 +292,65 @@ public class GitPullBuilderTests
 	}
 
 	[TestMethod]
+	public async Task ExecuteReportsANonConflictFailureExplainedOnStandardOutputAsync()
+	{
+		// The two entry points must describe the identical failure identically. This one is not a
+		// conflict, so CreateException hands it to the base implementation — which used to build its
+		// message from standard error alone and produced "git exited with code 1: " with nothing
+		// after the colon, while TryExecuteAsync returned the real explanation.
+		const string Explanation = "You have divergent branches and need to specify how to reconcile them.\n";
+		RecordingGitProcessRunner runner = new()
+		{
+			ExitCode = 128,
+			StandardOutput = Explanation,
+			StandardError = string.Empty,
+		};
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "divergent branches");
+		StringAssert.Contains(exception.StandardError, "divergent branches");
+	}
+
+	[TestMethod]
+	public async Task ExecuteAndTryExecuteReportTheSameDiagnosticForTheSameFailureAsync()
+	{
+		// The point of routing both entry points through one seam: they cannot drift. Asserting the
+		// two texts against each other pins that directly, rather than pinning each against a
+		// literal that a future change could update in one place only.
+		const string FetchProgress = "From /srv/origin\n * branch main -> FETCH_HEAD\n";
+		const string Explanation = "error: Your local changes would be overwritten by merge.\n";
+
+		RecordingGitProcessRunner throwingRunner = new()
+		{
+			ExitCode = 1,
+			StandardOutput = Explanation,
+			StandardError = FetchProgress,
+		};
+		GitPullBuilder throwing = new(throwingRunner, TestPaths.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await throwing.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		RecordingGitProcessRunner resultRunner = new()
+		{
+			ExitCode = 1,
+			StandardOutput = Explanation,
+			StandardError = FetchProgress,
+		};
+		GitPullBuilder returning = new(resultRunner, TestPaths.Root);
+
+		GitResult<GitCompleted> result =
+			await returning.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(result.Error?.StandardError, exception.StandardError);
+	}
+
+	[TestMethod]
 	public async Task ForwardsProgressToTheRequestAsync()
 	{
 		// A pull writes its fetch phase's transfer progress to standard error as it runs, so the

@@ -2,6 +2,7 @@
 
 namespace ktsu.GitIntegration;
 
+using System;
 using System.Collections.Generic;
 
 using ktsu.Semantics.Paths;
@@ -17,6 +18,12 @@ using ktsu.Semantics.Paths;
 public interface IGitCheckoutBuilder : IGitCommandBuilder<GitCompleted>
 {
 	/// <summary>Creates the target as a new branch at the current HEAD and switches to it.</summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="Detach"/>: git refuses <c>-b</c> alongside
+	/// <c>--detach</c> outright. A caller may set both in either order, so only the finished
+	/// configuration can detect the contradiction; <c>BuildArguments</c> throws
+	/// <see cref="InvalidOperationException"/> when both are set, before a process is even spawned.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitCheckoutBuilder CreatingBranch();
 
@@ -27,7 +34,30 @@ public interface IGitCheckoutBuilder : IGitCommandBuilder<GitCompleted>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitCheckoutBuilder Force();
 
+	/// <summary>
+	/// Also updates the submodules' working trees to match the target.
+	/// </summary>
+	/// <remarks>
+	/// <b>This can destroy work.</b> Unlike the same flag on <c>clone</c>, <c>fetch</c>, and
+	/// <c>pull</c>, <c>checkout --recurse-submodules</c> overwrites a submodule's checked-out state:
+	/// a submodule sitting on a commit the target does not record is moved off it, and uncommitted
+	/// changes in a submodule's working tree can be lost. That is a wider blast radius than
+	/// <see cref="Force"/>, which only concerns the superproject's own working tree.
+	/// <para>
+	/// Without this flag, checkout leaves the submodules alone entirely, so their working trees will
+	/// disagree with the newly checked-out superproject until something updates them —
+	/// <c>UpdateSubmodules()</c> being the explicit way to do that.
+	/// </para>
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitCheckoutBuilder RecursingSubmodules();
+
 	/// <summary>Checks the target out as a detached HEAD rather than switching to a branch.</summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="CreatingBranch"/>, for the same reason:
+	/// <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when both are set, since
+	/// only the finished configuration can detect the contradiction.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitCheckoutBuilder Detach();
 }
@@ -48,6 +78,7 @@ internal sealed class GitCheckoutBuilder(
 	private bool _creatingBranch;
 	private bool _force;
 	private bool _detach;
+	private bool _recursingSubmodules;
 
 	/// <inheritdoc />
 	public IGitCheckoutBuilder CreatingBranch()
@@ -64,6 +95,13 @@ internal sealed class GitCheckoutBuilder(
 	}
 
 	/// <inheritdoc />
+	public IGitCheckoutBuilder RecursingSubmodules()
+	{
+		_recursingSubmodules = true;
+		return this;
+	}
+
+	/// <inheritdoc />
 	public IGitCheckoutBuilder Detach()
 	{
 		_detach = true;
@@ -74,6 +112,18 @@ internal sealed class GitCheckoutBuilder(
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
+
+		// Real git rejects "-b <name> --detach <target>" at the command line with
+		// "fatal: '--detach' cannot be used with '-b/-B/--orphan'" (verified against git 2.43), so
+		// the contradiction would otherwise go undetected until a process was already spawned. Fetch
+		// and pull reject their equivalent contradictions before spawning a process, and checkout
+		// should be no less consistent.
+		if (_creatingBranch && _detach)
+		{
+			throw new InvalidOperationException(
+				"CreatingBranch and Detach cannot both be requested: git refuses -b alongside " +
+				"--detach.");
+		}
 
 		arguments.Add("checkout");
 
@@ -93,9 +143,33 @@ internal sealed class GitCheckoutBuilder(
 			arguments.Add("--detach");
 		}
 
-		// Every flag must precede the marker: anything after it is an operand, so a flag emitted
-		// there would reach git as a ref name.
-		AppendOperands(arguments, _target.WeakString);
+		if (_recursingSubmodules)
+		{
+			arguments.Add("--recurse-submodules");
+		}
+
+		// Checkout is the one verb that cannot use AppendOperands, and the reason is a git bug rather
+		// than a design choice here.
+		//
+		// git <= 2.43 only strips "--end-of-options" from the argument vector when
+		// PARSE_OPT_KEEP_DASHDASH is unset (parse-options.c). checkout sets exactly that flag,
+		// because it is one of the few verbs accepting both a revision and a pathspec, so the marker
+		// survives into checkout's own operand list and is read as a path — "git checkout
+		// --end-of-options main" dies with "error: pathspec '--end-of-options' did not match any
+		// file(s) known to git". git 2.44 changed the condition to PARSE_OPT_KEEP_UNKNOWN_OPT, which
+		// checkout does not set, so the marker works from that version onward. Emitting it here would
+		// therefore make Checkout unusable on, among others, the stock git of Ubuntu 24.04 LTS.
+		//
+		// The trailing "--" is git's own documented disambiguator for this verb and works on every
+		// version. It buys a guarantee the marker did not: the operand is read as a revision and
+		// never as a path, so checking out a branch whose name also matches a file on disk resolves
+		// to the branch rather than silently restoring the file.
+		//
+		// Option injection is still prevented, by the layer that was always the primary one:
+		// GitRefName carries NotAnOptionAttribute, which refuses to construct a value beginning with
+		// a dash at all, so no dash-leading target can reach this vector in the first place.
+		arguments.Add(_target.WeakString);
+		arguments.Add("--");
 	}
 
 	/// <inheritdoc />

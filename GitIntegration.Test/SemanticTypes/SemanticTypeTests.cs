@@ -138,4 +138,42 @@ public class SemanticTypeTests
 		// worth checking, so check that instead.
 		Assert.IsNotInstanceOfType<GitRemoteName>(branch);
 	}
+
+	[TestMethod]
+	public void GitRepositoryNameAcceptsAnOrdinarySingleSegmentName()
+	{
+		// The denylist must not become an allowlist. GitHub restricts names to A-Z a-z 0-9 . _ -,
+		// Azure DevOps permits spaces and more, and both shapes have to keep working.
+		Assert.AreEqual("GitIntegration", GitRepositoryName.Create("GitIntegration").WeakString);
+		Assert.AreEqual("my.repo_v2-final", GitRepositoryName.Create("my.repo_v2-final").WeakString);
+		Assert.AreEqual("Team Project Repo", GitRepositoryName.Create("Team Project Repo").WeakString);
+
+		// A relative segment only means anything when a separator delimits it, and separators are
+		// rejected outright, so dots inside a name are ordinary characters.
+		Assert.AreEqual("my..repo", GitRepositoryName.Create("my..repo").WeakString);
+	}
+
+	[TestMethod]
+	public void GitRepositoryNameRejectsAnythingThatWouldReshapeARequestPath()
+	{
+		// Both providers substitute this value straight into a request path and escape it
+		// differently — Azure DevOps runs Uri.EscapeDataString over it, GitHub hands it to Octokit
+		// unescaped — so a separator reshapes the request on one host and not the other. Rejecting at
+		// construction closes both at the source.
+		foreach (string candidate in new[]
+		{
+			"owner/repo",
+			"..",
+			".",
+			"../../etc",
+			"repo?query=1",
+			"repo#fragment",
+			@"owner\repo",
+		})
+		{
+			_ = Assert.ThrowsExactly<ArgumentException>(
+				() => _ = GitRepositoryName.Create(candidate),
+				$"'{candidate}' should not be a valid repository name.");
+		}
+	}
 }

@@ -19,6 +19,17 @@ public sealed record GitBranchName : SemanticString<GitBranchName> { }
 public sealed record GitRemoteName : SemanticString<GitRemoteName> { }
 
 /// <summary>
+/// A strongly-typed git tag name, such as <c>v1.2.3</c>.
+/// </summary>
+/// <remarks>
+/// The short name, without the <c>refs/tags/</c> prefix, matching how <see cref="GitBranchName"/>
+/// carries a branch's short name.
+/// </remarks>
+[HasNonWhitespaceContent]
+[NotAnOption]
+public sealed record GitTagName : SemanticString<GitTagName> { }
+
+/// <summary>
 /// A strongly-typed git reference, which may be a branch, tag, SHA, or revision expression.
 /// </summary>
 [HasNonWhitespaceContent]

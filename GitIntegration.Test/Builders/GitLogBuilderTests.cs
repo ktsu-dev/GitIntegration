@@ -133,4 +133,93 @@ public class GitLogBuilderTests
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = builder.ForRevision(null!));
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = builder.ForPath(null!));
 	}
+
+	[TestMethod]
+	public void EmitsAllRefsBeforeTheNegation()
+	{
+		// Order is the whole correctness question here. git negates everything after a --not, so
+		// "--not --remotes --all" excludes every reference instead of including them — and reports an
+		// empty log rather than failing, so nothing else would catch the mistake. Verified against
+		// git 2.43.
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.IncludingAllRefs().ExcludingRemoteTrackingRefs();
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int all = Array.IndexOf(arguments, "--all");
+		int not = Array.IndexOf(arguments, "--not");
+
+		Assert.AreNotEqual(-1, all);
+		Assert.AreNotEqual(-1, not);
+		Assert.IsTrue(all < not, "--all must precede --not or the query means the opposite.");
+	}
+
+	[TestMethod]
+	public void EmitsTheNegationAsAClosedTriple()
+	{
+		// --not reverses every revision specifier that follows it until the next --not, so the pair is
+		// emitted with a closing --not that scopes the negation to --remotes alone. Without it a
+		// revision or pathspec emitted below would be excluded rather than selected.
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ExcludingRemoteTrackingRefs();
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int not = Array.IndexOf(arguments, "--not");
+
+		Assert.AreEqual("--remotes", arguments[not + 1]);
+		Assert.AreEqual("--not", arguments[not + 2]);
+	}
+
+	[TestMethod]
+	public void KeepsARevisionOutsideTheNegation()
+	{
+		// The failure the closing --not prevents: "git log --not --remotes <revision>" asks for
+		// commits in neither, which is a different question that quietly returns nothing. The revision
+		// has to land after the negation has been closed.
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ExcludingRemoteTrackingRefs().ForRevision("HEAD".As<GitRefName>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int revision = Array.IndexOf(arguments, "HEAD");
+		int closingNot = Array.LastIndexOf(arguments, "--not");
+
+		Assert.IsTrue(closingNot < revision, "The negation must be closed before the revision.");
+	}
+
+	[TestMethod]
+	public void KeepsTheNegationBeforeEveryNonOptionArgument()
+	{
+		// git refuses --not once a non-option argument has appeared: "git log --end-of-options HEAD
+		// --not --remotes" dies with "fatal: option '--not' must come before non-option arguments".
+		// That is why the negation cannot simply be deferred to the end of the vector instead.
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.IncludingAllRefs().ExcludingRemoteTrackingRefs().ForRevision("HEAD".As<GitRefName>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int marker = Array.IndexOf(arguments, "--end-of-options");
+
+		Assert.IsTrue(Array.LastIndexOf(arguments, "--not") < marker);
+		Assert.IsTrue(Array.IndexOf(arguments, "--remotes") < marker);
+		Assert.IsTrue(Array.IndexOf(arguments, "--all") < marker);
+	}
+
+	[TestMethod]
+	public void OmitsBothFlagsWhenNeitherWasRequested()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		CollectionAssert.DoesNotContain(arguments, "--all");
+		CollectionAssert.DoesNotContain(arguments, "--not");
+		CollectionAssert.DoesNotContain(arguments, "--remotes");
+	}
 }

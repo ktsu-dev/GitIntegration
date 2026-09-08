@@ -65,6 +65,10 @@ internal sealed class GitPullRequestCreateBuilder(Func<GitPullRequestSpecificati
 	/// <inheritdoc/>
 	public async Task<GitPullRequest> ExecuteAsync(CancellationToken cancellationToken = default)
 	{
+		// Three near-identical blocks rather than one loop or a shared helper, deliberately. Each
+		// message names the member that is missing and the method that sets it, and the tests pin
+		// them individually — collapsing them would either lose that specificity or reintroduce it as
+		// a table, which is the same three facts with a layer of indirection over them.
 		if (_source is null)
 		{
 			throw new InvalidOperationException(

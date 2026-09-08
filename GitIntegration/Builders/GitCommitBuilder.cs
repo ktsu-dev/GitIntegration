@@ -191,16 +191,27 @@ internal sealed class GitCommitBuilder(
 			{
 				ExitCode = result.ExitCode,
 				Arguments = result.Arguments,
-				// Commit is the one verb whose diagnostic lands on standard output rather than
-				// standard error — "nothing to commit" is git's headline finding here, and
-				// CreateException already special-cases it. Falling back to StandardOutput keeps that
-				// same text reachable on the non-throwing path, instead of handing the caller an empty
-				// string.
-				StandardError = string.IsNullOrWhiteSpace(result.StandardError)
-					? result.StandardOutput
-					: result.StandardError,
+				StandardError = GetDiagnostic(result),
 			});
 	}
+
+	/// <summary>
+	/// Falls back to standard output when git left standard error empty.
+	/// </summary>
+	/// <remarks>
+	/// Commit is the verb whose diagnostic lands on standard output rather than standard error —
+	/// "nothing to commit" is git's headline finding here, and <see cref="CreateException"/> already
+	/// special-cases it. Overriding the base class's seam keeps that same text reachable from both
+	/// entry points: the fallback in <see cref="CreateException"/> builds its message from this
+	/// method, so a failure git explained only on standard output no longer reaches a caller of
+	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/> as an empty string.
+	/// </remarks>
+	/// <param name="result">The failed invocation outcome.</param>
+	/// <returns>The diagnostic text.</returns>
+	protected override string GetDiagnostic(GitProcessResult result) =>
+		string.IsNullOrWhiteSpace(Ensure.NotNull(result).StandardError)
+			? result.StandardOutput
+			: result.StandardError;
 
 	/// <summary>
 	/// Classifies a failed commit, recognising the one failure that is an ordinary program state.

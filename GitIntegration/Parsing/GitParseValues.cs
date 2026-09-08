@@ -64,4 +64,30 @@ internal static class GitParseValues
 		throw new GitParseException(
 			$"git reported a path that cannot be represented as a relative file path: '{value}'.");
 	}
+
+	/// <summary>
+	/// Converts a raw path field into a repository-relative directory path.
+	/// </summary>
+	/// <remarks>
+	/// The directory counterpart to <see cref="ToRelativeFilePath"/>, used for a submodule's path:
+	/// a submodule occupies a directory, and typing it as a file path would misdescribe it to every
+	/// caller that goes on to combine it with something.
+	/// </remarks>
+	/// <param name="value">The raw path as git printed it.</param>
+	/// <returns>The converted path.</returns>
+	/// <exception cref="GitParseException">
+	/// <paramref name="value"/> is empty or cannot be represented as a relative directory path.
+	/// </exception>
+	internal static RelativeDirectoryPath ToRelativeDirectoryPath(string value)
+	{
+		if (!string.IsNullOrEmpty(value) &&
+			RelativeDirectoryPath.TryCreate(value, out RelativeDirectoryPath? path) &&
+			path is not null)
+		{
+			return path;
+		}
+
+		throw new GitParseException(
+			$"git reported a path that cannot be represented as a relative directory path: '{value}'.");
+	}
 }

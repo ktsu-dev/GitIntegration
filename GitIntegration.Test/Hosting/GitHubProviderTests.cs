@@ -9,8 +9,9 @@ using System.Net;
 using System.Threading.Tasks;
 
 using ktsu.CredentialCache;
-using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
+
+using Octokit;
 
 // System.Net (for HttpStatusCode) and ktsu.CredentialCache both declare a type named
 // CredentialCache; this alias resolves the ambiguity in favour of the credential store.
@@ -66,7 +67,7 @@ public sealed class GitHubProviderTests
 	/// <param name="name">The value to send as the repository's <c>name</c> field.</param>
 	private static string SingleRepositoryArray(string name) =>
 		$$"""
-		[{"name":"{{name}}","html_url":"https://github.com/example-user/example-repo","clone_url":"https://github.com/example-user/example-repo.git"}]
+		[{"id":90000001,"name":"{{name}}","html_url":"https://github.com/example-user/example-repo","clone_url":"https://github.com/example-user/example-repo.git"}]
 		""";
 
 	[TestMethod]
@@ -116,8 +117,13 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
-	public async Task MapsAnOrdinaryRepositoryNameToALocalPathUnderTheCurrentDirectoryAsync()
+	public async Task ReportsNoLocalPathForAnEnumeratedRepositoryAsync()
 	{
+		// An enumerated repository has never been cloned, so there is no local path to report. This
+		// used to be filled with Path.Combine(Environment.CurrentDirectory, name), which made the same
+		// remote repository yield a different record depending on when it was enumerated — and which
+		// needed a containment guard purely to keep a name from a remote response from escaping that
+		// directory. Saying "not known" needs neither.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
 			.Respond(HttpStatusCode.OK, SingleRepositoryArray("my-repo"), ("Content-Type", "application/json"));
 		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
@@ -125,66 +131,67 @@ public sealed class GitHubProviderTests
 		IReadOnlyList<GitRepository> repositories =
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(
-			Path.Combine(Environment.CurrentDirectory, "my-repo").As<AbsoluteDirectoryPath>(),
-			repositories[0].LocalPath);
+		Assert.IsNull(repositories[0].LocalPath);
+		Assert.AreEqual("my-repo".As<GitRepositoryName>(), repositories[0].Name);
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARootedRepositoryNameHasNoLeafSegmentAsync()
+	public async Task CarriesGitHubsOwnRepositoryIdAsync()
 	{
-		// "/" is rooted on every platform .NET runs this suite on (both Windows and POSIX treat "/"
-		// as a separator), and is exactly the shape that let the old
-		// Path.Combine(Environment.CurrentDirectory, repository.Name) call silently discard
-		// Environment.CurrentDirectory and report LocalPath as the bare root. Path.GetFileName("/")
-		// strips the root and leaves nothing behind, so this is treated as the host having sent a
-		// name this library cannot represent as a directory, rather than as a value that happens to
-		// look safe once stripped.
+		// GitHub's id is a decimal number where Azure DevOps's is a uuid, which is why
+		// GitHostRepositoryId is a string: the value is handed back to the host it came from and
+		// never parsed, so a type insisting on either host's shape would exclude the other.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SingleRepositoryArray("/"), ("Content-Type", "application/json"));
+			.Respond(HttpStatusCode.OK, SingleRepositoryArray("my-repo"), ("Content-Type", "application/json"));
 		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
 
-		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		StringAssert.Contains(exception.Message, "cannot be represented as a local directory");
+		Assert.AreEqual("90000001".As<GitHostRepositoryId>(), repositories[0].HostRepositoryId);
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARepositoryNameIsADirectoryTraversalTokenAsync()
+	public async Task ThrowsAHostingFailureWhenAReportedNameIsNotOneThisLibraryCanRepresentAsync()
 	{
-		// Path.GetFileName("..") returns ".." unchanged — stripping a rooted prefix does not resolve
-		// this case, which is exactly why the mapping checks the derived leaf itself rather than
-		// trusting Path.GetFileName alone.
-		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SingleRepositoryArray(".."), ("Content-Type", "application/json"));
-		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+		// GitRepositoryName is validated as a single path segment, so a host reporting "/" or ".."
+		// produces a value the semantic type refuses. That has to surface as a GitHostingException,
+		// not as the ArgumentException the semantic type itself raises: a public hosting method's
+		// documented failure surface is this hierarchy, the same rule that makes an unparsable success
+		// body a GitHostingRequestException rather than a JsonException.
+		foreach (string reported in new[] { "/", "..", "   ", "owner/repo" })
+		{
+			using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+				.Respond(HttpStatusCode.OK, SingleRepositoryArray(reported), ("Content-Type", "application/json"));
+			GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
 
-		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+			GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
 
-		StringAssert.Contains(exception.Message, "..");
+			StringAssert.Contains(exception.Message, "cannot represent");
+		}
 	}
 
 	[TestMethod]
-	public async Task ThrowsWhenARepositoryNameIsWhitespaceOnlyAsync()
+	public async Task AddressesARepositoryByItsHostIdWhenListingPullRequestsAsync()
 	{
-		// Path.GetFileName("   ") returns "   " unchanged — there is no separator to strip, so the
-		// leaf is exactly the whitespace-only input. GitRepositoryName itself rejects a
-		// whitespace-only value ([HasNonWhitespaceContent]), so LocalPath is held to the same rule:
-		// a name the semantic type would refuse is not a name this mapping can turn into a directory
-		// either.
+		// The point of carrying the id: it has to reach the request path. GitHub happens to accept a
+		// name in this position, but both providers answer the same question the same way under one
+		// interface, so both prefer the host's own identifier when one is known.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, SingleRepositoryArray("   "), ("Content-Type", "application/json"));
+			.Respond(HttpStatusCode.OK, "[]", ("Content-Type", "application/json"));
 		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
 
-		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
-			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
-			.ConfigureAwait(false);
+		GitRepository repository = new()
+		{
+			Name = "my-repo".As<GitRepositoryName>(),
+			HostRepositoryId = "90000001".As<GitHostRepositoryId>(),
+		};
 
-		StringAssert.Contains(exception.Message, "cannot be represented as a local directory");
+		_ = await provider.GetPullRequestsAsync(repository, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		StringAssert.Contains(handler.Requests[0].Uri.AbsoluteUri, "/repos/contoso/90000001/pulls");
 	}
 
 	[TestMethod]
@@ -467,6 +474,69 @@ public sealed class GitHubProviderTests
 
 		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
 		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task LeavesResetsAtNullWhenRetryAfterCarriesAnHttpDateAsync()
+	{
+		// Retry-After may carry an HTTP date rather than a delay in seconds. GitHub sends seconds, so
+		// TryGetRetryAfterSeconds parses only that form and a date yields null — correct by
+		// inspection, and now pinned. An invented instant derived from a form this library does not
+		// actually parse would be worse than no instant at all.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task KeepsTheOctokitFailureAsTheInnerExceptionAsync()
+	{
+		// The hierarchy carries the provider, status, and body, which is enough to reproduce a
+		// failure by hand — but not everything the host supplied. ApiError.Errors is often the only
+		// place GitHub says what was actually wrong with a request, and it has no field here, so
+		// discarding the Octokit exception discards it too.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.Forbidden,
+				"{\"message\":\"Resource not accessible by personal access token\"}",
+				("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingAuthenticationException exception = await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.IsInstanceOfType<ApiException>(exception.InnerException);
+	}
+
+	[TestMethod]
+	public async Task KeepsTheInnerExceptionEvenWhenOctokitAttachedNoResponseAsync()
+	{
+		// The worst case the inner exception exists for. Octokit reports a 404 on a GET through a
+		// synthetic exception with no HttpResponse, so ResponseBody is empty and there is no other
+		// context to fall back on — without the inner exception this failure reaches a caller
+		// carrying only a message.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.NotFound, "{\"message\":\"Not Found\"}", ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingNotFoundException exception = await Assert.ThrowsExactlyAsync<GitHostingNotFoundException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(string.Empty, exception.ResponseBody);
+		Assert.IsInstanceOfType<ApiException>(exception.InnerException);
 	}
 
 	[TestMethod]

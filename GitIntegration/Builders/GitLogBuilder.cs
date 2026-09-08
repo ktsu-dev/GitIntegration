@@ -43,6 +43,44 @@ public interface IGitLogBuilder : IGitCommandBuilder<IReadOnlyList<GitCommit>>
 	/// <summary>Follows only the first parent of a merge, hiding the merged-in history.</summary>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitLogBuilder FirstParentOnly();
+
+	/// <summary>
+	/// Lists commits reachable from every reference, not only from HEAD or from
+	/// <see cref="ForRevision"/>.
+	/// </summary>
+	/// <remarks>
+	/// Emits <c>--all</c>, which covers everything under <c>refs/</c>, and that breadth is
+	/// load-bearing rather than incidental. The narrower <c>--branches</c> covers only
+	/// <c>refs/heads</c>, which misses a commit on a detached HEAD — and a detached HEAD is the
+	/// <em>normal</em> state of a submodule working directory, since a submodule is checked out at
+	/// the commit its gitlink records rather than on a branch. Paired with
+	/// <see cref="ExcludingRemoteTrackingRefs"/>, a check built on <c>--branches</c> would therefore
+	/// report "nothing unpushed" for a submodule holding commits that exist nowhere else, which is
+	/// precisely the case where a wrong answer causes data loss.
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitLogBuilder IncludingAllRefs();
+
+	/// <summary>
+	/// Excludes every commit any remote-tracking reference already contains.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Emits <c>--not --remotes</c>. Combined with <see cref="IncludingAllRefs"/> this answers
+	/// "which commits in this repository does no remote have?" — the check to run before discarding a
+	/// working copy, to know whether doing so would destroy work that exists nowhere else. Combined
+	/// with <see cref="ForRevision"/> instead, it narrows the same question to one revision's
+	/// history.
+	/// </para>
+	/// <para>
+	/// Reported as a commit list rather than a bare yes or no, because a caller that only wants the
+	/// yes or no reads <c>Count &gt; 0</c>, while one that wants to show a user what is at stake
+	/// already has the commits. It composes with <see cref="Take"/>, <see cref="ForPath"/>, and
+	/// <see cref="FirstParentOnly"/> for the same reason a dedicated verb was not added.
+	/// </para>
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitLogBuilder ExcludingRemoteTrackingRefs();
 }
 
 /// <summary>
@@ -58,6 +96,8 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 	private int? _skip;
 	private GitRefName? _revision;
 	private bool _firstParentOnly;
+	private bool _includingAllRefs;
+	private bool _excludingRemoteTrackingRefs;
 
 	/// <inheritdoc />
 	public IGitLogBuilder Take(int maxCount)
@@ -97,6 +137,20 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 	}
 
 	/// <inheritdoc />
+	public IGitLogBuilder IncludingAllRefs()
+	{
+		_includingAllRefs = true;
+		return this;
+	}
+
+	/// <inheritdoc />
+	public IGitLogBuilder ExcludingRemoteTrackingRefs()
+	{
+		_excludingRemoteTrackingRefs = true;
+		return this;
+	}
+
+	/// <inheritdoc />
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
@@ -118,6 +172,36 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 		if (_firstParentOnly)
 		{
 			arguments.Add("--first-parent");
+		}
+
+		// --all must precede --not: git negates everything following a --not, so "--not --remotes
+		// --all" excludes every reference instead of including them, and reports an empty log rather
+		// than failing. Verified against git 2.43.
+		if (_includingAllRefs)
+		{
+			arguments.Add("--all");
+		}
+
+		if (_excludingRemoteTrackingRefs)
+		{
+			// The three tokens are emitted together and in this order, and the closing --not is what
+			// makes the pair safe rather than merely conventional.
+			//
+			// --not reverses the sense of every revision specifier that follows it, up to the next
+			// --not. Without the closing one, a revision from ForRevision or a pathspec from ForPath
+			// would fall inside the negation and be excluded instead of selected — "--not --remotes
+			// <revision>" asks for commits in neither, which is a different question that quietly
+			// returns nothing rather than failing. Closing the negation immediately scopes it to
+			// --remotes alone, so nothing emitted below can be captured by it, now or after a future
+			// option is added here.
+			//
+			// git also requires --not to precede every non-option argument, so this cannot instead be
+			// deferred until after the operands: "git log --end-of-options HEAD --not --remotes" dies
+			// with "fatal: option '--not' must come before non-option arguments". Both behaviours
+			// verified against git 2.43.
+			arguments.Add("--not");
+			arguments.Add("--remotes");
+			arguments.Add("--not");
 		}
 
 		if (_revision is not null)
