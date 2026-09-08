@@ -26,4 +26,24 @@ public sealed record GitDiffEntry
 	/// when git reported none.
 	/// </summary>
 	public int? SimilarityPercent { get; init; }
+
+	/// <summary>
+	/// Gets how many lines were added to this path, or <see langword="null"/> when git reported no
+	/// count.
+	/// </summary>
+	/// <remarks>
+	/// <see langword="null"/> in two cases, and they are worth telling apart from zero. Line counts
+	/// are opt-in, so this is unset unless <c>IGitDiffBuilder.WithLineCounts()</c> was called; and
+	/// git declines to count a binary file at all, printing <c>-</c> where a number would go. A
+	/// binary change is not a zero-line change, so reporting 0 for one would state that nothing
+	/// changed in a file git simply did not measure.
+	/// </remarks>
+	public int? Insertions { get; init; }
+
+	/// <summary>
+	/// Gets how many lines were removed from this path, or <see langword="null"/> when git reported
+	/// no count.
+	/// </summary>
+	/// <remarks>See <see cref="Insertions"/> for when this is unset.</remarks>
+	public int? Deletions { get; init; }
 }

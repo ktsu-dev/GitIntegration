@@ -42,6 +42,15 @@ internal sealed class TemporaryRepository : IDisposable
 		File.WriteAllText(full, contents);
 	}
 
+	/// <summary>Deletes a file inside the repository.</summary>
+	/// <remarks>
+	/// Deleting through the filesystem rather than through <c>git rm</c>, so the change reaches the
+	/// index only via the <c>Add().All()</c> the tests already run — which is what exercises the
+	/// deletion path of the verb under test rather than a second git command's.
+	/// </remarks>
+	/// <param name="relativePath">The path relative to the repository root.</param>
+	public void DeleteFile(string relativePath) => File.Delete(Path.Combine(RootPath, relativePath));
+
 	public void Dispose()
 	{
 		try

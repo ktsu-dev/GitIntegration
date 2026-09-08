@@ -282,6 +282,98 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task DiffReportsLineCountsFromARealRepositoryAsync()
+	{
+		// The parser tests pin the shape of git's output; this pins that git really does emit that
+		// shape when asked, including the two sections running together with no delimiter and the
+		// dash a binary file gets instead of a count.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		// A NUL byte is what makes git classify a file as binary, and a binary file is the case the
+		// nullable counts exist for.
+		temporary.WriteFile("text.txt", "one\ntwo\nthree\n");
+		temporary.WriteFile("binary.bin", "\0binary\n");
+		temporary.WriteFile("gone.txt", "removed\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("text.txt", "one\ntwo\nthree\nfour\n");
+		temporary.WriteFile("binary.bin", "\0changed\n");
+		temporary.DeleteFile("gone.txt");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> entries = await repository.Diff()
+			.Between("HEAD~1".As<GitRefName>(), "HEAD".As<GitRefName>())
+			.WithLineCounts()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(3, entries.Count);
+
+		GitDiffEntry text = entries.Single(entry => entry.Path.WeakString == "text.txt");
+		Assert.AreEqual(1, text.Insertions);
+		Assert.AreEqual(0, text.Deletions);
+
+		GitDiffEntry removed = entries.Single(entry => entry.Path.WeakString == "gone.txt");
+		Assert.AreEqual(GitChangeKind.Deleted, removed.Kind);
+		Assert.AreEqual(0, removed.Insertions);
+		Assert.AreEqual(1, removed.Deletions);
+
+		// git prints "-" for both counts on a binary file rather than measuring it, which is why the
+		// counts are nullable: a binary change is not a zero-line change.
+		GitDiffEntry binary = entries.Single(entry => entry.Path.WeakString == "binary.bin");
+		Assert.IsNull(binary.Insertions);
+		Assert.IsNull(binary.Deletions);
+
+		// Without the option the same diff reports the same paths and no counts at all.
+		IReadOnlyList<GitDiffEntry> withoutCounts = await repository.Diff()
+			.Between("HEAD~1".As<GitRefName>(), "HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(entries.Count, withoutCounts.Count);
+		Assert.IsTrue(withoutCounts.All(entry => entry.Insertions is null && entry.Deletions is null));
+	}
+
+	[TestMethod]
+	public async Task DiffReportsLineCountsForARenameAsync()
+	{
+		// A rename is spelled differently in each section — two path tokens after the status in the
+		// raw section, an empty path field then two tokens in the numstat one — so it is the case
+		// that would break a parser correlating the sections by path rather than by position.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("before.txt", "one\ntwo\nthree\nfour\nfive\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.DeleteFile("before.txt");
+		temporary.WriteFile("after.txt", "one\ntwo\nthree\nfour\nfive\nsix\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> entries = await repository.Diff()
+			.Between("HEAD~1".As<GitRefName>(), "HEAD".As<GitRefName>())
+			.DetectRenames()
+			.WithLineCounts()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitDiffEntry rename = entries.Single(entry => entry.Kind == GitChangeKind.Renamed);
+
+		Assert.AreEqual("after.txt", rename.Path.WeakString);
+		Assert.AreEqual("before.txt", rename.OriginalPath?.WeakString);
+		Assert.AreEqual(1, rename.Insertions);
+		Assert.AreEqual(0, rename.Deletions);
+	}
+
+	[TestMethod]
 	public async Task RemoteAddSetUrlAndRemoveRoundTripAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
