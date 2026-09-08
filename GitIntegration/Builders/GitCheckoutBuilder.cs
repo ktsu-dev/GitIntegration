@@ -34,6 +34,24 @@ public interface IGitCheckoutBuilder : IGitCommandBuilder<GitCompleted>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitCheckoutBuilder Force();
 
+	/// <summary>
+	/// Also updates the submodules' working trees to match the target.
+	/// </summary>
+	/// <remarks>
+	/// <b>This can destroy work.</b> Unlike the same flag on <c>clone</c>, <c>fetch</c>, and
+	/// <c>pull</c>, <c>checkout --recurse-submodules</c> overwrites a submodule's checked-out state:
+	/// a submodule sitting on a commit the target does not record is moved off it, and uncommitted
+	/// changes in a submodule's working tree can be lost. That is a wider blast radius than
+	/// <see cref="Force"/>, which only concerns the superproject's own working tree.
+	/// <para>
+	/// Without this flag, checkout leaves the submodules alone entirely, so their working trees will
+	/// disagree with the newly checked-out superproject until something updates them —
+	/// <c>UpdateSubmodules()</c> being the explicit way to do that.
+	/// </para>
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitCheckoutBuilder RecursingSubmodules();
+
 	/// <summary>Checks the target out as a detached HEAD rather than switching to a branch.</summary>
 	/// <remarks>
 	/// Cannot be combined with <see cref="CreatingBranch"/>, for the same reason:
@@ -60,6 +78,7 @@ internal sealed class GitCheckoutBuilder(
 	private bool _creatingBranch;
 	private bool _force;
 	private bool _detach;
+	private bool _recursingSubmodules;
 
 	/// <inheritdoc />
 	public IGitCheckoutBuilder CreatingBranch()
@@ -72,6 +91,13 @@ internal sealed class GitCheckoutBuilder(
 	public IGitCheckoutBuilder Force()
 	{
 		_force = true;
+		return this;
+	}
+
+	/// <inheritdoc />
+	public IGitCheckoutBuilder RecursingSubmodules()
+	{
+		_recursingSubmodules = true;
 		return this;
 	}
 
@@ -115,6 +141,11 @@ internal sealed class GitCheckoutBuilder(
 		if (_detach)
 		{
 			arguments.Add("--detach");
+		}
+
+		if (_recursingSubmodules)
+		{
+			arguments.Add("--recurse-submodules");
 		}
 
 		// Checkout is the one verb that cannot use AppendOperands, and the reason is a git bug rather

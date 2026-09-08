@@ -28,6 +28,8 @@ public class GitRepositoryVerbTests
 			[.. repository.Remotes().BuildArguments()],
 			[.. repository.RevParse("HEAD".As<GitRefName>()).BuildArguments()],
 			[.. repository.Tags().BuildArguments()],
+			[.. repository.Submodules().BuildArguments()],
+			[.. repository.UpdateSubmodules().BuildArguments()],
 			[.. repository.RevList("HEAD".As<GitRefName>()).BuildArguments()],
 			[.. repository.Divergence("origin/main".As<GitRefName>(), "HEAD".As<GitRefName>()).BuildArguments()],
 		];
@@ -74,6 +76,8 @@ public class GitRepositoryVerbTests
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Branches());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Remotes());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Tags());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Submodules());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.UpdateSubmodules());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.RevList("HEAD".As<GitRefName>()));
 		_ = Assert.ThrowsExactly<InvalidOperationException>(
 			() => _ = repository.Divergence("origin/main".As<GitRefName>(), "HEAD".As<GitRefName>()));

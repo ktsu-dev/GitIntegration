@@ -184,6 +184,16 @@ public class GitRepository
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitRemoteListBuilder Remotes() => new GitRemoteListBuilder(RequireRunner(), RequireLocalPath());
 
+	/// <summary>Lists the repository's submodules.</summary>
+	/// <remarks>
+	/// Reports the superproject's own submodules and does not recurse — see
+	/// <see cref="IGitSubmoduleListBuilder"/> for why, and for how to recurse through composition
+	/// instead.
+	/// </remarks>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitSubmoduleListBuilder Submodules() => new GitSubmoduleListBuilder(RequireRunner(), RequireLocalPath());
+
 	/// <summary>Lists tag references.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
@@ -309,6 +319,16 @@ public class GitRepository
 		Ensure.NotNull(url);
 		return new GitRemoteSetUrlBuilder(RequireRunner(), RequireLocalPath(), name, url);
 	}
+
+	/// <summary>Checks out the commits the superproject's gitlinks record.</summary>
+	/// <remarks>
+	/// A failure does not mean the repository is unchanged — see
+	/// <see cref="IGitSubmoduleUpdateBuilder"/>.
+	/// </remarks>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitSubmoduleUpdateBuilder UpdateSubmodules() =>
+		new GitSubmoduleUpdateBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>Downloads objects and refs from a remote without touching the working tree.</summary>
 	/// <returns>A fresh builder.</returns>

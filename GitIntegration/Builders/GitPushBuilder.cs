@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -66,6 +67,31 @@ public interface IGitPushBuilder : IGitCommandBuilder<GitPushResult>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPushBuilder DryRun();
 
+	/// <summary>
+	/// Sets what git should do about the submodules' own commits before pushing the superproject.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Deliberately <em>not</em> called <c>RecursingSubmodules</c>, even though git spells the flag
+	/// <c>--recurse-submodules</c> here exactly as it does on <c>clone</c>, <c>fetch</c>,
+	/// <c>checkout</c>, and <c>pull</c>. On those verbs the flag means "also operate on the
+	/// submodules' working trees or refs". Here it means something else entirely: a superproject
+	/// commit referencing a submodule commit that no remote has is a commit nobody else can use, and
+	/// this governs whether git checks for, or pushes, those submodule commits to their own remotes
+	/// first. Putting one word on two unrelated behaviours would be the easiest possible thing for a
+	/// caller to get wrong, so the two carry different method names and different enums.
+	/// </para>
+	/// <para>
+	/// Note that <see cref="GitSubmodulePushCheck.Only"/> pushes the submodules and stops, leaving
+	/// the superproject unpushed — which means a push that "succeeded" under that value did not push
+	/// what a caller may have thought it did.
+	/// </para>
+	/// </remarks>
+	/// <param name="check">What to do about the submodules' commits.</param>
+	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="check"/> is not a recognised value.</exception>
+	public IGitPushBuilder CheckingSubmodules(GitSubmodulePushCheck check);
+
 	/// <summary>Reports git's progress output as it arrives.</summary>
 	/// <param name="progress">The sink to report to. Must be thread-safe.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -88,6 +114,7 @@ internal sealed class GitPushBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private bool _forceWithLease;
 	private bool _delete;
 	private bool _dryRun;
+	private GitSubmodulePushCheck? _submoduleCheck;
 
 	/// <inheritdoc />
 	public IGitPushBuilder ToRemote(GitRemoteName name)
@@ -139,6 +166,21 @@ internal sealed class GitPushBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	}
 
 	/// <inheritdoc />
+	public IGitPushBuilder CheckingSubmodules(GitSubmodulePushCheck check)
+	{
+		// Validated at the fluent call rather than deferred into AppendVerbArguments, matching
+		// IGitStatusBuilder.WithUntrackedFiles: BuildArguments is documented as a pure computation
+		// with no exceptions of its own.
+		if (!Enum.IsDefined(check))
+		{
+			throw new InvalidEnumArgumentException(nameof(check), (int)check, typeof(GitSubmodulePushCheck));
+		}
+
+		_submoduleCheck = check;
+		return this;
+	}
+
+	/// <inheritdoc />
 	public IGitPushBuilder ReportingProgress(IProgress<string> progress)
 	{
 		Progress = Ensure.NotNull(progress);
@@ -180,6 +222,11 @@ internal sealed class GitPushBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		if (_dryRun)
 		{
 			arguments.Add("--dry-run");
+		}
+
+		if (_submoduleCheck is GitSubmodulePushCheck check)
+		{
+			arguments.Add("--recurse-submodules=" + ToOptionValue(check));
 		}
 
 		AppendRefspec(arguments);
@@ -268,4 +315,19 @@ internal sealed class GitPushBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		Runner.RunAsync(
 			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
 			cancellationToken);
+
+	/// <summary>Maps the submodule check onto the value git's flag takes.</summary>
+	/// <param name="check">The check to map.</param>
+	/// <returns>The flag value.</returns>
+	private static string ToOptionValue(GitSubmodulePushCheck check) => check switch
+	{
+		GitSubmodulePushCheck.No => "no",
+		GitSubmodulePushCheck.Check => "check",
+		GitSubmodulePushCheck.OnDemand => "on-demand",
+		GitSubmodulePushCheck.Only => "only",
+
+		// Unreachable once CheckingSubmodules validates: this arm only exists to satisfy the
+		// compiler's exhaustiveness check over the switch.
+		_ => throw new InvalidEnumArgumentException(nameof(check), (int)check, typeof(GitSubmodulePushCheck)),
+	};
 }

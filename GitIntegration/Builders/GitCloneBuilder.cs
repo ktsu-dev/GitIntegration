@@ -34,6 +34,16 @@ public interface IGitCloneBuilder : IGitCommandBuilder<GitRepository>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitCloneBuilder Bare();
 
+	/// <summary>Also clones and checks out the repository's submodules.</summary>
+	/// <remarks>
+	/// A plain flag here, unlike on <c>Fetch</c> and <c>Pull</c>: a fresh clone has no prior state
+	/// for an on-demand decision to compare against, and git's own <c>clone --recurse-submodules</c>
+	/// takes no value either. Git additionally accepts an optional pathspec to clone only some
+	/// submodules, which can be added later without changing the vector this produces.
+	/// </remarks>
+	/// <returns>The same builder, to allow chaining.</returns>
+	public IGitCloneBuilder RecursingSubmodules();
+
 	/// <summary>
 	/// Reports git's progress output as it arrives, rather than only when the clone finishes.
 	/// </summary>
@@ -67,6 +77,7 @@ internal sealed class GitCloneBuilder(
 	private GitBranchName? _branch;
 	private int? _depth;
 	private bool _bare;
+	private bool _recursingSubmodules;
 
 	/// <inheritdoc />
 	public IGitCloneBuilder WithBranch(GitBranchName name)
@@ -80,6 +91,13 @@ internal sealed class GitCloneBuilder(
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
 		_depth = depth;
+		return this;
+	}
+
+	/// <inheritdoc />
+	public IGitCloneBuilder RecursingSubmodules()
+	{
+		_recursingSubmodules = true;
 		return this;
 	}
 
@@ -119,6 +137,11 @@ internal sealed class GitCloneBuilder(
 		if (_bare)
 		{
 			arguments.Add("--bare");
+		}
+
+		if (_recursingSubmodules)
+		{
+			arguments.Add("--recurse-submodules");
 		}
 
 		// Both operands are caller-supplied. The source especially: an unvalidated remote path of

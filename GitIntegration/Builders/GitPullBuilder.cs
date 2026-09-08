@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 
 using ktsu.Semantics.Paths;
 
@@ -82,6 +83,25 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPullBuilder Prune();
 
+	/// <summary>
+	/// Also updates the repository's submodules as part of the pull.
+	/// </summary>
+	/// <remarks>
+	/// Emits <c>--recurse-submodules=&lt;value&gt;</c>, so one invocation moves the superproject and
+	/// its submodules together rather than leaving the submodules stale until something else notices.
+	/// <para>
+	/// Overlaps with <c>UpdateSubmodules()</c> without replacing it: this flag updates submodules
+	/// that are already registered, while that verb's <c>Initialise()</c> also checks out a submodule
+	/// added upstream since this working copy was cloned. Not to be confused with
+	/// <c>IGitPushBuilder.CheckingSubmodules</c>, which git spells with the same flag name but which
+	/// governs an unrelated question.
+	/// </para>
+	/// </remarks>
+	/// <param name="recursion">Whether, and when, to recurse.</param>
+	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognised value.</exception>
+	public IGitPullBuilder RecursingSubmodules(GitSubmoduleRecursion recursion);
+
 	/// <summary>Reports git's progress output as it arrives.</summary>
 	/// <param name="progress">The sink to report to. Must be thread-safe.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -103,6 +123,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private bool _rebase;
 	private bool _merge;
 	private bool _prune;
+	private GitSubmoduleRecursion? _submoduleRecursion;
 
 	/// <inheritdoc />
 	public IGitPullBuilder FromRemote(GitRemoteName name)
@@ -143,6 +164,21 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	public IGitPullBuilder Prune()
 	{
 		_prune = true;
+		return this;
+	}
+
+	/// <inheritdoc />
+	public IGitPullBuilder RecursingSubmodules(GitSubmoduleRecursion recursion)
+	{
+		// Validated at the fluent call rather than deferred into AppendVerbArguments, matching
+		// IGitStatusBuilder.WithUntrackedFiles: BuildArguments is documented as a pure computation
+		// with no exceptions of its own beyond the contradiction guards.
+		if (!Enum.IsDefined(recursion))
+		{
+			throw new InvalidEnumArgumentException(nameof(recursion), (int)recursion, typeof(GitSubmoduleRecursion));
+		}
+
+		_submoduleRecursion = recursion;
 		return this;
 	}
 
@@ -203,6 +239,11 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		if (_prune)
 		{
 			arguments.Add("--prune");
+		}
+
+		if (_submoduleRecursion is GitSubmoduleRecursion recursion)
+		{
+			arguments.Add("--recurse-submodules=" + ToOptionValue(recursion));
 		}
 
 		if (_remote is null)
@@ -291,4 +332,18 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 				? standardError
 				: standardError + "\n" + result.StandardOutput;
 	}
+
+	/// <summary>Maps the recursion mode onto the value git's flag takes.</summary>
+	/// <param name="recursion">The mode to map.</param>
+	/// <returns>The flag value.</returns>
+	private static string ToOptionValue(GitSubmoduleRecursion recursion) => recursion switch
+	{
+		GitSubmoduleRecursion.No => "no",
+		GitSubmoduleRecursion.Yes => "yes",
+		GitSubmoduleRecursion.OnDemand => "on-demand",
+
+		// Unreachable once RecursingSubmodules validates: this arm only exists to satisfy the
+		// compiler's exhaustiveness check over the switch.
+		_ => throw new InvalidEnumArgumentException(nameof(recursion), (int)recursion, typeof(GitSubmoduleRecursion)),
+	};
 }

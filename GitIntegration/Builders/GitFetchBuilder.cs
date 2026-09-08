@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,6 +51,20 @@ public interface IGitFetchBuilder : IGitCommandBuilder<GitFetchResult>
 	/// <exception cref="ArgumentOutOfRangeException"><paramref name="depth"/> is not positive.</exception>
 	public IGitFetchBuilder WithDepth(int depth);
 
+	/// <summary>
+	/// Also fetches the objects the repository's submodules need.
+	/// </summary>
+	/// <remarks>
+	/// Emits <c>--recurse-submodules=&lt;value&gt;</c>. Not to be confused with
+	/// <c>IGitPushBuilder.CheckingSubmodules</c>: git spells that flag with the same name but it
+	/// governs an unrelated question, which is why this library gives the two different method names
+	/// and different enums.
+	/// </remarks>
+	/// <param name="recursion">Whether, and when, to recurse.</param>
+	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognised value.</exception>
+	public IGitFetchBuilder RecursingSubmodules(GitSubmoduleRecursion recursion);
+
 	/// <summary>Reports git's progress output as it arrives.</summary>
 	/// <param name="progress">The sink to report to. Must be thread-safe.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -80,10 +95,43 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	private bool _allRemotes;
 	private bool _prune;
 	private bool _tags;
+	private GitSubmoduleRecursion? _submoduleRecursion;
 
-	// Defaults true so BuildArguments — which is pure and cannot probe — emits the modern form.
-	// The execution paths set it from an actual version probe before the vector is built.
-	private bool _porcelainSupported = true;
+	/// <summary>
+	/// Gets or sets a value indicating whether the installed git is new enough for
+	/// <c>fetch --porcelain</c>.
+	/// </summary>
+	/// <remarks>
+	/// Defaults true so <c>BuildArguments</c> — which is pure and cannot probe — emits the modern
+	/// form. The execution paths set it from an actual version probe before the vector is built.
+	/// </remarks>
+	private bool PorcelainSupportedByVersion { get; set; } = true;
+
+	/// <summary>
+	/// Gets a value indicating whether this invocation can ask for, and therefore parse, the
+	/// porcelain account of what was fetched.
+	/// </summary>
+	/// <remarks>
+	/// Two independent reasons it may not be, and both end in the same honest report:
+	/// <see cref="GitFetchResult.DetailAvailable"/> false with an empty
+	/// <see cref="GitFetchResult.Updates"/>, so an empty list is never mistaken for "nothing
+	/// changed".
+	/// <para>
+	/// The first is the installed git's version: <c>fetch --porcelain</c> exists only from 2.41, and
+	/// <see cref="ProbeVersionAsync"/> establishes that before the vector is built.
+	/// </para>
+	/// <para>
+	/// The second is <see cref="RecursingSubmodules"/>. Git refuses the two flags together outright —
+	/// "fatal: options '--porcelain' and '--recurse-submodules' cannot be used together", verified
+	/// against git 2.43 — so emitting both would turn every recursing fetch into a failure. Dropping
+	/// <c>--porcelain</c> is the only way to honour the caller's request, and it is the caller's
+	/// request that wins: they asked to fetch submodules, not to be itemised. This is a second reason
+	/// detail can be unavailable, alongside the version threshold, and it is not something the caller
+	/// did wrong — so it degrades rather than throwing, unlike the AllRemotes/FromRemote pair above,
+	/// which is a genuine contradiction between two things the caller asked for.
+	/// </para>
+	/// </remarks>
+	private bool IsPorcelainAvailable => PorcelainSupportedByVersion && _submoduleRecursion is null;
 
 	/// <inheritdoc />
 	public IGitFetchBuilder FromRemote(GitRemoteName name)
@@ -122,6 +170,21 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	}
 
 	/// <inheritdoc />
+	public IGitFetchBuilder RecursingSubmodules(GitSubmoduleRecursion recursion)
+	{
+		// Validated at the fluent call rather than deferred to ToOptionValue inside
+		// AppendVerbArguments, matching IGitStatusBuilder.WithUntrackedFiles: BuildArguments is
+		// documented as a pure computation with no exceptions of its own.
+		if (!Enum.IsDefined(recursion))
+		{
+			throw new InvalidEnumArgumentException(nameof(recursion), (int)recursion, typeof(GitSubmoduleRecursion));
+		}
+
+		_submoduleRecursion = recursion;
+		return this;
+	}
+
+	/// <inheritdoc />
 	public IGitFetchBuilder ReportingProgress(IProgress<string> progress)
 	{
 		Progress = Ensure.NotNull(progress);
@@ -146,7 +209,7 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 
 		arguments.Add("fetch");
 
-		if (_porcelainSupported)
+		if (IsPorcelainAvailable)
 		{
 			arguments.Add("--porcelain");
 		}
@@ -159,6 +222,11 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		if (_prune)
 		{
 			arguments.Add("--prune");
+		}
+
+		if (_submoduleRecursion is GitSubmoduleRecursion recursion)
+		{
+			arguments.Add("--recurse-submodules=" + ToOptionValue(recursion));
 		}
 
 		if (_tags)
@@ -185,7 +253,7 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		// Without --porcelain there is no machine-readable account to parse, and this library does
 		// not read the human alternative. The fetch still happened; only the itemisation is absent,
 		// which DetailAvailable records so an empty list is not mistaken for "nothing changed".
-		return _porcelainSupported
+		return IsPorcelainAvailable
 			? GitFetchParser.Parse(result.StandardOutput)
 			: new GitFetchResult { Updates = [], DetailAvailable = false };
 	}
@@ -228,6 +296,20 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		GitResult<GitVersion> probe = await new GitVersionBuilder(Runner)
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		_porcelainSupported = probe.Success && probe.Value!.AtLeast(PorcelainMajor, PorcelainMinor);
+		PorcelainSupportedByVersion = probe.Success && probe.Value!.AtLeast(PorcelainMajor, PorcelainMinor);
 	}
+
+	/// <summary>Maps the recursion mode onto the value git's flag takes.</summary>
+	/// <param name="recursion">The mode to map.</param>
+	/// <returns>The flag value.</returns>
+	private static string ToOptionValue(GitSubmoduleRecursion recursion) => recursion switch
+	{
+		GitSubmoduleRecursion.No => "no",
+		GitSubmoduleRecursion.Yes => "yes",
+		GitSubmoduleRecursion.OnDemand => "on-demand",
+
+		// Unreachable once RecursingSubmodules validates: this arm only exists to satisfy the
+		// compiler's exhaustiveness check over the switch.
+		_ => throw new InvalidEnumArgumentException(nameof(recursion), (int)recursion, typeof(GitSubmoduleRecursion)),
+	};
 }
