@@ -4,8 +4,6 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
 
@@ -259,36 +257,38 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			: base.CreateException(result);
 	}
 
-	/// <inheritdoc />
-	public override async Task<GitResult<GitCompleted>> TryExecuteAsync(CancellationToken cancellationToken = default)
+	/// <summary>
+	/// Joins standard error and standard output into one diagnostic.
+	/// </summary>
+	/// <remarks>
+	/// Pull is the second verb whose diagnostic lands on standard output, so an error built only
+	/// from standard error would carry the fetch progress and say nothing about the conflict. The
+	/// two are joined on a single newline, with the trailing newline trimmed from standard error
+	/// first, so the result reads as two legible lines rather than a run-on string. Only the parts
+	/// that are actually present are joined: a stderr-only failure (the common plain "fatal: ..."
+	/// case) must not gain a trailing blank line from an empty standard output.
+	/// <para>
+	/// Overriding the base class's seam rather than either entry point is what makes the two report
+	/// the same text. <see cref="CreateException"/> recognises only a conflict and hands everything
+	/// else to the base implementation, whose message is built from this method — so a non-conflict
+	/// failure explained on standard output now reaches a caller of
+	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/> as well as one of
+	/// <see cref="IGitCommandBuilder{TResult}.TryExecuteAsync"/>, instead of arriving as
+	/// "git exited with code N: " with nothing after the colon.
+	/// </para>
+	/// </remarks>
+	/// <param name="result">The failed invocation outcome.</param>
+	/// <returns>The joined diagnostic text.</returns>
+	protected override string GetDiagnostic(GitProcessResult result)
 	{
-		GitProcessResult result = await Runner.RunAsync(
-			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
-			cancellationToken).ConfigureAwait(false);
+		Ensure.NotNull(result);
 
-		if (result.Success)
-		{
-			return GitResult<GitCompleted>.FromValue(ParseResult(result));
-		}
-
-		// Pull is the second verb whose diagnostic lands on standard output, so an error built only
-		// from standard error would carry the fetch progress and say nothing about the conflict. The
-		// two are joined on a single newline, with the trailing newline trimmed from standard error
-		// first, so the result reads as two legible lines rather than a run-on string. Only the parts
-		// that are actually present are joined: a stderr-only failure (the common plain "fatal: ..."
-		// case) must not gain a trailing blank line from an empty standard output.
 		string standardError = result.StandardError.TrimEnd('\n', '\r');
-		string diagnostic = standardError.Length == 0
+
+		return standardError.Length == 0
 			? result.StandardOutput
 			: result.StandardOutput.Length == 0
 				? standardError
 				: standardError + "\n" + result.StandardOutput;
-
-		return GitResult<GitCompleted>.FromError(new GitCommandError
-		{
-			ExitCode = result.ExitCode,
-			Arguments = result.Arguments,
-			StandardError = diagnostic,
-		});
 	}
 }

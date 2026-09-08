@@ -25,8 +25,8 @@ public class GitCheckoutBuilderTests
 			"-c", "core.quotepath=false",
 			"-c", "color.ui=false",
 			"checkout",
-			"--end-of-options",
 			"main",
+			"--",
 		];
 		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
 	}
@@ -50,30 +50,80 @@ public class GitCheckoutBuilderTests
 	}
 
 	[TestMethod]
-	public void KeepsFlagsBeforeTheEndOfOptionsMarker()
+	public void KeepsFlagsBeforeTheTargetAndTerminatesWithADoubleDash()
 	{
-		// Anything after --end-of-options is an operand, so a flag emitted there would be handed to
-		// git as a ref name.
+		// The target must be the last thing before the "--" terminator, with every flag ahead of it:
+		// a flag emitted after the target would be handed to git as a pathspec.
 		RecordingGitProcessRunner runner = new();
 		GitCheckoutBuilder builder = new(runner, TestPaths.Root, Main);
 
 		_ = builder.CreatingBranch().Force();
 
 		string[] arguments = [.. builder.BuildArguments()];
-		int marker = Array.IndexOf(arguments, "--end-of-options");
+		int target = Array.IndexOf(arguments, "main");
 
-		Assert.IsTrue(Array.IndexOf(arguments, "-b") < marker);
-		Assert.IsTrue(Array.IndexOf(arguments, "--force") < marker);
-		Assert.AreEqual("main", arguments[marker + 1]);
+		Assert.IsTrue(Array.IndexOf(arguments, "-b") < target);
+		Assert.IsTrue(Array.IndexOf(arguments, "--force") < target);
+		Assert.AreEqual("--", arguments[target + 1]);
+		Assert.AreEqual(arguments.Length - 1, target + 1);
+	}
+
+	[TestMethod]
+	public void DoesNotEmitTheEndOfOptionsMarker()
+	{
+		// git <= 2.43 leaves --end-of-options in checkout's own operand list, because checkout sets
+		// PARSE_OPT_KEEP_DASHDASH and that release only stripped the marker when the flag was unset.
+		// The marker then reaches git as a pathspec: "error: pathspec '--end-of-options' did not
+		// match any file(s) known to git". git 2.44 changed the condition, but emitting the marker
+		// would make Checkout unusable on every git before it — including Ubuntu 24.04 LTS's stock
+		// 2.43. GitRefName's NotAnOptionAttribute is what keeps a dash-leading target out of the
+		// vector instead.
+		RecordingGitProcessRunner runner = new();
+		GitCheckoutBuilder builder = new(runner, TestPaths.Root, Main);
+
+		CollectionAssert.DoesNotContain(builder.BuildArguments().ToArray(), "--end-of-options");
 	}
 
 	[TestMethod]
 	public void ConfigurationMethodsReturnTheSameBuilderForChaining()
 	{
+		// Deliberately not chaining CreatingBranch and Detach together: that combination is one git
+		// refuses, and BuildArguments rejects it. Chaining it here to check a fluent return value
+		// would read as an endorsement of a vector that can never run.
 		RecordingGitProcessRunner runner = new();
 		GitCheckoutBuilder builder = new(runner, TestPaths.Root, Main);
 
-		Assert.AreSame(builder, builder.CreatingBranch().Force().Detach());
+		Assert.AreSame(builder, builder.CreatingBranch().Force());
+		Assert.AreSame(builder, builder.Detach());
+	}
+
+	[TestMethod]
+	public void RejectsAskingForBothCreatingBranchAndDetach()
+	{
+		// Real git refuses "-b <name> --detach <target>" with
+		// "fatal: '--detach' cannot be used with '-b/-B/--orphan'" (verified against git 2.43), so
+		// without this guard the contradiction surfaces only as an opaque GitCommandException from a
+		// process that was already spawned. Fetch and pull reject their own equivalent
+		// contradictions before spawning, and checkout should be no less consistent.
+		RecordingGitProcessRunner runner = new();
+		GitCheckoutBuilder builder = new(runner, TestPaths.Root, Main);
+
+		_ = builder.CreatingBranch().Detach();
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+	}
+
+	[TestMethod]
+	public void RejectsTheContradictionRegardlessOfTheOrderItWasConfiguredIn()
+	{
+		// A caller may set either first, so only the finished configuration can detect the
+		// contradiction — the reason the guard lives in BuildArguments rather than in each setter.
+		RecordingGitProcessRunner runner = new();
+		GitCheckoutBuilder builder = new(runner, TestPaths.Root, Main);
+
+		_ = builder.Detach().CreatingBranch();
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
 	}
 
 	[TestMethod]

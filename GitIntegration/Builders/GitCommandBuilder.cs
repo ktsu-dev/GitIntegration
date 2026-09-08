@@ -143,9 +143,31 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 			{
 				ExitCode = result.ExitCode,
 				Arguments = result.Arguments,
-				StandardError = result.StandardError,
+				StandardError = GetDiagnostic(result),
 			});
 	}
+
+	/// <summary>
+	/// Extracts the text that explains why an invocation failed.
+	/// </summary>
+	/// <remarks>
+	/// Standard error by default, which is where git puts a diagnostic for most verbs. Virtual
+	/// because it is not where git puts one for every verb: <c>commit</c> announces "nothing to
+	/// commit" on standard <em>output</em>, and <c>pull</c> announces a conflict there too, leaving
+	/// standard error carrying only fetch progress or nothing at all.
+	/// <para>
+	/// The seam exists on the base class, used by both <see cref="ExecuteAsync"/> (through
+	/// <see cref="CreateException"/>) and <see cref="TryExecuteAsync"/>, so that a verb which
+	/// relocates its diagnostic states that once and both entry points follow. Overriding one entry
+	/// point alone is what let the two report different text for the identical failure — the
+	/// throwing path reporting an empty standard error while the result-based path reported the
+	/// real explanation.
+	/// </para>
+	/// </remarks>
+	/// <param name="result">The failed invocation outcome.</param>
+	/// <returns>The diagnostic text.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="result"/> is <see langword="null"/>.</exception>
+	protected virtual string GetDiagnostic(GitProcessResult result) => Ensure.NotNull(result).StandardError;
 
 	/// <summary>
 	/// Classifies a failed invocation into an exception type.
@@ -162,7 +184,10 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	{
 		Ensure.NotNull(result);
 
-		string message = $"git exited with code {result.ExitCode}: {result.StandardError.Trim()}";
+		// GetDiagnostic rather than StandardError directly, so a verb that puts its diagnostic on
+		// standard output reports the same text here as it does through TryExecuteAsync.
+		string diagnostic = GetDiagnostic(result);
+		string message = $"git exited with code {result.ExitCode}: {diagnostic.Trim()}";
 
 		// Git reports a missing working tree with a stable phrase and exit code 128. Surfacing it
 		// as a distinct type lets callers distinguish "wrong directory" from "command failed".
@@ -173,8 +198,8 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		// without a forced locale this would silently miss on a non-English machine and degrade to
 		// a generic GitCommandException. Any alternative IGitProcessRunner implementation must
 		// force the locale too, or accept that degradation.
-		return result.StandardError.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
-			? new GitRepositoryNotFoundException(message, result.ExitCode, result.Arguments, result.StandardError)
-			: new GitCommandException(message, result.ExitCode, result.Arguments, result.StandardError);
+		return diagnostic.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
+			? new GitRepositoryNotFoundException(message, result.ExitCode, result.Arguments, diagnostic)
+			: new GitCommandException(message, result.ExitCode, result.Arguments, diagnostic);
 	}
 }
