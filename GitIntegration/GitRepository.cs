@@ -144,6 +144,11 @@ public class GitRepository
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitRemoteListBuilder Remotes() => new GitRemoteListBuilder(RequireRunner(), RequireLocalPath());
 
+	/// <summary>Lists tag references.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitTagListBuilder Tags() => new GitTagListBuilder(RequireRunner(), RequireLocalPath());
+
 	/// <summary>Stages changes for the next commit.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
@@ -182,6 +187,35 @@ public class GitRepository
 	{
 		Ensure.NotNull(name);
 		return new GitBranchDeleteBuilder(RequireRunner(), RequireLocalPath(), name);
+	}
+
+	/// <summary>Creates a tag.</summary>
+	/// <remarks>
+	/// Lightweight by default; call <c>Annotating</c> on the returned builder for an annotated tag.
+	/// </remarks>
+	/// <param name="name">The tag to create.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitTagCreateBuilder CreateTag(GitTagName name)
+	{
+		// Argument validation before RequireRunner(), matching every other verb taking an operand.
+		Ensure.NotNull(name);
+
+		return new GitTagCreateBuilder(RequireRunner(), RequireLocalPath(), name);
+	}
+
+	/// <summary>Deletes a tag.</summary>
+	/// <remarks>Deletes the local reference only; a tag already pushed to a remote stays there.</remarks>
+	/// <param name="name">The tag to delete.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitTagDeleteBuilder DeleteTag(GitTagName name)
+	{
+		Ensure.NotNull(name);
+
+		return new GitTagDeleteBuilder(RequireRunner(), RequireLocalPath(), name);
 	}
 
 	/// <summary>Switches the working tree to a different branch, tag, or commit.</summary>

@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -183,6 +184,101 @@ public class GitRoundTripTests
 		IReadOnlyList<GitBranch> afterDelete =
 			await repository.Branches().LocalOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		Assert.AreEqual(1, afterDelete.Count);
+	}
+
+	[TestMethod]
+	public async Task TagCreateListAndDeleteRoundTripAsync()
+	{
+		// Runs both kinds of tag against a real git, which is the only way to confirm the format
+		// string in GitOutputFormats and the parser reading it agree with what git actually emits —
+		// including that %(contents:subject) falls through to the commit's own subject for a
+		// lightweight tag, which the parser has to suppress.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit commit = await repository.Commit("c1".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitTagName lightweight = "v0.1.0".As<GitTagName>();
+		GitTagName annotated = "v0.2.0".As<GitTagName>();
+
+		_ = await repository.CreateTag(lightweight).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateTag(annotated)
+			.Annotating("release 0.2.0".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitTag> tags = await repository.Tags().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(2, tags.Count);
+
+		GitTag light = tags.Single(tag => tag.Name == lightweight);
+		Assert.IsFalse(light.IsAnnotated);
+		Assert.AreEqual(commit.Sha, light.Sha);
+
+		// The reference points straight at the commit, so there is no separate tag object.
+		Assert.AreEqual(light.Sha, light.ObjectSha);
+
+		// The commit's subject is "c1"; a lightweight tag must report no message rather than that.
+		Assert.IsNull(light.Message);
+
+		GitTag annotatedTag = tags.Single(tag => tag.Name == annotated);
+		Assert.IsTrue(annotatedTag.IsAnnotated);
+		Assert.AreEqual("release 0.2.0", annotatedTag.Message);
+
+		// Sha dereferences to the commit while ObjectSha is the tag object git wrote, so the two
+		// differ — the distinction the model exists to carry.
+		Assert.AreEqual(commit.Sha, annotatedTag.Sha);
+		Assert.AreNotEqual(annotatedTag.Sha, annotatedTag.ObjectSha);
+
+		_ = await repository.DeleteTag(lightweight).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitTag> afterDelete =
+			await repository.Tags().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(1, afterDelete.Count);
+		Assert.AreEqual(annotated, afterDelete[0].Name);
+	}
+
+	[TestMethod]
+	public async Task CheckoutResolvesATagRatherThanAFileOfTheSameNameAsync()
+	{
+		// Checkout emits a trailing "--" rather than a leading --end-of-options, and this is the
+		// behaviour that choice buys beyond compatibility with git <= 2.43: the operand is read as a
+		// revision, so a tag whose name also matches a path on disk resolves to the tag instead of
+		// silently restoring the file.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// A committed file and a tag sharing one name is exactly the ambiguity git warns about.
+		GitTagName ambiguous = "ambiguous".As<GitTagName>();
+		temporary.WriteFile("ambiguous", "file contents\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit second = await repository.Commit("c2".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.CreateTag(ambiguous).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Checkout("ambiguous".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Resolving the tag detaches HEAD at its commit. Resolving the path instead would have left
+		// HEAD on the branch and merely restored the file.
+		GitCommitSha head = await repository.RevParse("HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(second.Sha, head);
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(status.IsDetached);
 	}
 
 	[TestMethod]

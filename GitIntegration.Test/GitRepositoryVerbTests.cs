@@ -27,6 +27,7 @@ public class GitRepositoryVerbTests
 			[.. repository.Branches().BuildArguments()],
 			[.. repository.Remotes().BuildArguments()],
 			[.. repository.RevParse("HEAD".As<GitRefName>()).BuildArguments()],
+			[.. repository.Tags().BuildArguments()],
 		];
 
 		foreach (string[] vector in vectors)
@@ -70,6 +71,7 @@ public class GitRepositoryVerbTests
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Diff());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Branches());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Remotes());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Tags());
 
 		// A valid revision, so the guard is what fires rather than the null check.
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.RevParse("HEAD".As<GitRefName>()));
@@ -77,6 +79,29 @@ public class GitRepositoryVerbTests
 		// IsClonedAsync now validates eagerly (F5), so it throws synchronously rather than only once
 		// the returned task is awaited.
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.IsClonedAsync());
+	}
+
+	[TestMethod]
+	public void TagVerbsRouteThroughTheSameGuardsAsEveryOtherVerb()
+	{
+		// Argument validation runs before RequireRunner at every verb taking an operand, so a null
+		// name on a metadata-only repository reports the null rather than the missing runner — the
+		// caller's own mistake, not the repository's shape.
+		GitRepository metadataOnly = new() { Name = "GitIntegration".As<GitRepositoryName>() };
+
+		_ = Assert.ThrowsExactly<ArgumentNullException>(() => _ = metadataOnly.CreateTag(null!));
+		_ = Assert.ThrowsExactly<ArgumentNullException>(() => _ = metadataOnly.DeleteTag(null!));
+
+		GitTagName version = "v1.0.0".As<GitTagName>();
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = metadataOnly.CreateTag(version));
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = metadataOnly.DeleteTag(version));
+
+		RecordingGitProcessRunner runner = new();
+		GitRepository repository = RepositoryOn(runner);
+
+		Assert.AreNotSame(repository.CreateTag(version), repository.CreateTag(version));
+		Assert.AreNotSame(repository.DeleteTag(version), repository.DeleteTag(version));
+		Assert.AreNotSame(repository.Tags(), repository.Tags());
 	}
 
 	[TestMethod]
