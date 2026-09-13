@@ -180,9 +180,14 @@ internal static class GitDiffParser
 			// "<insertions>\t<deletions>\t<path>", or "<insertions>\t<deletions>\t" followed by two
 			// path tokens for a rename or a copy. The path is not read here at all: correlation is
 			// positional, so only the counts and the number of tokens each record consumes matter.
-			string[] fields = record.Split('\t');
+			//
+			// Bounded so a tab embedded in the trailing path — a legal byte in a git path — is absorbed
+			// by that field rather than shifting the count, matching how GitLogParser and GitTagParser
+			// bound their own splits. Unlike the raw section, where the path is its own NUL-delimited
+			// token, here it shares a token with the counts, so only the bound keeps the two apart.
+			string[] fields = record.Split('\t', 3);
 
-			if (fields.Length != 3)
+			if (fields.Length < 3)
 			{
 				throw new GitParseException($"Malformed numstat diff record: '{record}'.");
 			}
