@@ -202,6 +202,74 @@ public class GitDiffParserTests
 	}
 
 	[TestMethod]
+	public void ReadsANumstatPathContainingATabWithoutMistakingItForAnExtraField()
+	{
+		// A tab is a legal byte in a git path, and the numstat record carries its path inside the same
+		// NUL-delimited token as the counts — so an unbounded split on '\t' sees four fields and throws,
+		// taking out the whole listing over one oddly-named file. The raw section is unaffected, because
+		// there the path is its own token; only this section needs the split bounded.
+		//
+		// Shape captured from git 2.43 for a file named "tab<TAB>name.txt".
+		string output =
+			":000000 100644 0000000 bca70f3 A\0tab\tname.txt\0" +
+			"1\t0\ttab\tname.txt\0";
+
+		if (OperatingSystem.IsWindows())
+		{
+			// RelativeFilePath refuses a control character on Windows, which GitParseValues documents
+			// as deliberate: reporting the path beats dropping the entry. That refusal happens in the
+			// raw section, where the path is converted, before the numstat section is read at all — so
+			// a tab-named file is unreadable end to end on this platform whatever the split does, and
+			// what is worth pinning here is that it is turned away for that stated reason rather than
+			// as a malformed numstat record.
+			GitParseException refused = Assert.ThrowsExactly<GitParseException>(
+				() => _ = GitDiffParser.ParseWithLineCounts(output));
+
+			StringAssert.Contains(refused.Message, "cannot be represented as a relative file path");
+			return;
+		}
+
+		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.ParseWithLineCounts(output);
+
+		Assert.AreEqual(1, entries.Count);
+		Assert.AreEqual(GitChangeKind.Added, entries[0].Kind);
+		Assert.AreEqual("tab\tname.txt", entries[0].Path.WeakString);
+		Assert.AreEqual(1, entries[0].Insertions);
+		Assert.AreEqual(0, entries[0].Deletions);
+	}
+
+	[TestMethod]
+	public void ReadsARenameWhoseNumstatPathsContainTabs()
+	{
+		// The rename form leaves the path field empty and follows the record with two path tokens, so
+		// the bound must not disturb it: "1\t0\t" still has to read as an empty third field and consume
+		// the two tokens after it, however many tabs those paths themselves carry.
+		string output =
+			":100644 100644 de98044 d68dd40 R075\0old\tname.txt\0new\tname.txt\0" +
+			"1\t0\t\0old\tname.txt\0new\tname.txt\0";
+
+		if (OperatingSystem.IsWindows())
+		{
+			// Same platform limit as the case above, and reached the same way: the raw section converts
+			// both of a rename's paths before any numstat record is read.
+			GitParseException refused = Assert.ThrowsExactly<GitParseException>(
+				() => _ = GitDiffParser.ParseWithLineCounts(output));
+
+			StringAssert.Contains(refused.Message, "cannot be represented as a relative file path");
+			return;
+		}
+
+		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.ParseWithLineCounts(output);
+
+		Assert.AreEqual(1, entries.Count);
+		Assert.AreEqual(GitChangeKind.Renamed, entries[0].Kind);
+		Assert.AreEqual("new\tname.txt", entries[0].Path.WeakString);
+		Assert.AreEqual("old\tname.txt", entries[0].OriginalPath?.WeakString);
+		Assert.AreEqual(1, entries[0].Insertions);
+		Assert.AreEqual(0, entries[0].Deletions);
+	}
+
+	[TestMethod]
 	public void ReportsAnEmptyListForAnEmptyDiff()
 	{
 		Assert.AreEqual(0, GitDiffParser.ParseWithLineCounts(string.Empty).Count);
