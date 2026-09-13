@@ -201,7 +201,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 				body, AzureDevOpsJsonContext.Default.AzureDevOpsPullRequestListResponse, response.StatusCode);
 
 			IReadOnlyList<AzureDevOpsPullRequest> page = parsed?.Value ?? [];
-			pullRequests.AddRange(page.Select(ToGitPullRequest));
+			pullRequests.AddRange(page.Select(pullRequest => ToGitPullRequest(pullRequest, response.StatusCode, body)));
 
 			// Advanced by what actually arrived rather than by the page size asked for, so a
 			// service returning more than $top would skip past the entries it already sent
@@ -222,7 +222,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="GitPullRequestSpecification.Target"/> are bare branch names — this library's own
 	/// normalisation, matching what a caller gets back from every read path — so they are qualified
 	/// with <c>refs/heads/</c> here before being sent, the reverse of the stripping
-	/// <see cref="ToGitPullRequest(AzureDevOpsPullRequest)"/> does on the way back in. The response is
+	/// <see cref="ToGitPullRequest(AzureDevOpsPullRequest, HttpStatusCode, string)"/> does on the way back in. The response is
 	/// the created pull request; Microsoft's own worked example reports <c>201</c> despite the
 	/// endpoint's response table saying <c>200</c>, so this method checks
 	/// <see cref="HttpResponseMessage.IsSuccessStatusCode"/> rather than a specific status code.
@@ -271,7 +271,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 		return parsed is null
 			? throw new GitHostingRequestException(
 				"Azure DevOps reported success but returned no pull request body.", Name, response.StatusCode, body)
-			: ToGitPullRequest(parsed);
+			: ToGitPullRequest(parsed, response.StatusCode, body);
 	}
 
 	/// <summary>
@@ -475,8 +475,10 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// composed from a constructed URL — see <see cref="AzureDevOpsReferenceLinks"/>'s remarks.
 	/// </remarks>
 	/// <param name="pullRequest">The pull request Azure DevOps returned.</param>
+	/// <param name="statusCode">The status code Azure DevOps reported for the response carrying <paramref name="pullRequest"/>.</param>
+	/// <param name="responseBody">The full response body carrying <paramref name="pullRequest"/>.</param>
 	/// <returns>The equivalent <see cref="GitPullRequest"/>.</returns>
-	private static GitPullRequest ToGitPullRequest(AzureDevOpsPullRequest pullRequest) => new()
+	private GitPullRequest ToGitPullRequest(AzureDevOpsPullRequest pullRequest, HttpStatusCode statusCode, string responseBody) => new()
 	{
 		Number = pullRequest.PullRequestId.ToString(CultureInfo.InvariantCulture).As<GitPullRequestNumber>(),
 		Title = (pullRequest.Title ?? string.Empty).As<GitPullRequestTitle>(),
@@ -484,7 +486,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 		SourceBranch = StripRefsHeadsPrefix(pullRequest.SourceRefName ?? string.Empty).As<GitBranchName>(),
 		TargetBranch = StripRefsHeadsPrefix(pullRequest.TargetRefName ?? string.Empty).As<GitBranchName>(),
 		Author = pullRequest.CreatedBy?.UniqueName is string uniqueName ? uniqueName.As<GitPullRequestAuthor>() : null,
-		State = ToGitPullRequestState(pullRequest.Status),
+		State = ToGitPullRequestState(pullRequest.Status, statusCode, responseBody),
 		IsDraft = pullRequest.IsDraft,
 		WebURI = pullRequest.Links?.Web?.Href is string href ? href.As<GitPullRequestWebURI>() : null,
 		CreatedAt = pullRequest.CreationDate,
@@ -511,17 +513,23 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// "Contradictions and gaps" entry 4): <c>active</c> → <see cref="GitPullRequestState.Open"/>,
 	/// <c>completed</c> → <see cref="GitPullRequestState.Merged"/>, <c>abandoned</c> →
 	/// <see cref="GitPullRequestState.Closed"/>. <c>notSet</c> and <c>all</c> are query-side-only
-	/// values a host never reports as a pull request's own status, so they fall through to the
-	/// unsupported case along with anything else unrecognised.
+	/// values a host never reports as a pull request's own status, so they fall through to a
+	/// <see cref="GitHostingRequestException"/> along with anything else unrecognised.
 	/// </remarks>
 	/// <param name="status">The status Azure DevOps reported.</param>
+	/// <param name="statusCode">The status code Azure DevOps reported for the response carrying <paramref name="status"/>.</param>
+	/// <param name="responseBody">The full response body carrying <paramref name="status"/>.</param>
 	/// <returns>The equivalent <see cref="GitPullRequestState"/>.</returns>
-	private static GitPullRequestState ToGitPullRequestState(string? status) => status switch
+	private GitPullRequestState ToGitPullRequestState(string? status, HttpStatusCode statusCode, string responseBody) => status switch
 	{
 		"active" => GitPullRequestState.Open,
 		"completed" => GitPullRequestState.Merged,
 		"abandoned" => GitPullRequestState.Closed,
-		_ => throw new NotSupportedException($"Azure DevOps reported an unrecognised pull request status '{status}'."),
+		_ => throw new GitHostingRequestException(
+			$"Azure DevOps reported an unrecognised pull request status '{status}'.",
+			Name,
+			statusCode,
+			responseBody),
 	};
 
 	/// <summary>
