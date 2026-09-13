@@ -214,6 +214,21 @@ public class GitDiffParserTests
 			":000000 100644 0000000 bca70f3 A\0tab\tname.txt\0" +
 			"1\t0\ttab\tname.txt\0";
 
+		if (OperatingSystem.IsWindows())
+		{
+			// RelativeFilePath refuses a control character on Windows, which GitParseValues documents
+			// as deliberate: reporting the path beats dropping the entry. That refusal happens in the
+			// raw section, where the path is converted, before the numstat section is read at all — so
+			// a tab-named file is unreadable end to end on this platform whatever the split does, and
+			// what is worth pinning here is that it is turned away for that stated reason rather than
+			// as a malformed numstat record.
+			GitParseException refused = Assert.ThrowsExactly<GitParseException>(
+				() => _ = GitDiffParser.ParseWithLineCounts(output));
+
+			StringAssert.Contains(refused.Message, "cannot be represented as a relative file path");
+			return;
+		}
+
 		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.ParseWithLineCounts(output);
 
 		Assert.AreEqual(1, entries.Count);
@@ -232,6 +247,17 @@ public class GitDiffParserTests
 		string output =
 			":100644 100644 de98044 d68dd40 R075\0old\tname.txt\0new\tname.txt\0" +
 			"1\t0\t\0old\tname.txt\0new\tname.txt\0";
+
+		if (OperatingSystem.IsWindows())
+		{
+			// Same platform limit as the case above, and reached the same way: the raw section converts
+			// both of a rename's paths before any numstat record is read.
+			GitParseException refused = Assert.ThrowsExactly<GitParseException>(
+				() => _ = GitDiffParser.ParseWithLineCounts(output));
+
+			StringAssert.Contains(refused.Message, "cannot be represented as a relative file path");
+			return;
+		}
 
 		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.ParseWithLineCounts(output);
 
