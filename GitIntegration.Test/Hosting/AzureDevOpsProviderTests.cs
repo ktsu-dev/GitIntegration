@@ -734,6 +734,27 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	[TestMethod]
+	public async Task TranslatesAnUnrecognisedPullRequestStatusToGitHostingRequestExceptionAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, SinglePullRequestListResponse("notSet"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.OK, exception.StatusCode);
+		StringAssert.Contains(exception.Message, "unrecognised pull request status");
+		StringAssert.Contains(exception.ResponseBody, "\"status\": \"notSet\"");
+	}
+
+	[TestMethod]
 	public async Task FetchesEveryPageOfPullRequestsAsync()
 	{
 		// A first page returned full is the only thing that makes the provider ask for a second, and
