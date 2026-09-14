@@ -57,6 +57,26 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	/// <summary>
+	/// Wraps the captured create-response fixture in the pull-request-list envelope after substituting
+	/// one captured field, for the cases that need a field Azure DevOps declares optional to arrive
+	/// omitted, null, or empty.
+	/// </summary>
+	/// <remarks>
+	/// Kept separate from <see cref="SinglePullRequestListResponse"/>, whose <c>status</c> substitution
+	/// is about state mapping rather than about a field being absent. Substituting rather than editing
+	/// a second fixture keeps every other key exactly as captured, so a test that removes <c>title</c>
+	/// is varying one thing and not comparing two hand-written payloads.
+	/// </remarks>
+	/// <param name="original">The captured text to replace, including its trailing comma when removing a whole key.</param>
+	/// <param name="replacement">The text to put in its place, or an empty string to omit the key entirely.</param>
+	private static string SinglePullRequestListResponseReplacing(string original, string replacement)
+	{
+		string json = Fixture("azure-devops-pullrequest-created.json")
+			.Replace(original, replacement, StringComparison.Ordinal);
+		return $"{{\"value\":[{json}],\"count\":1}}";
+	}
+
+	/// <summary>
 	/// Adds a <c>web</c> entry to the captured create-response fixture's <c>_links</c> object.
 	/// </summary>
 	/// <remarks>
@@ -752,6 +772,97 @@ public sealed class AzureDevOpsProviderTests
 		Assert.AreEqual(HttpStatusCode.OK, exception.StatusCode);
 		StringAssert.Contains(exception.Message, "unrecognised pull request status");
 		StringAssert.Contains(exception.ResponseBody, "\"status\": \"notSet\"");
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnOmittedRequiredPullRequestFieldToGitHostingRequestExceptionAsync()
+	{
+		// AzureDevOpsPullRequest declares title, sourceRefName and targetRefName as string? because
+		// Azure DevOps's own schema does, so a response omitting one is ordinary data rather than a
+		// malformed payload. The mapping used to substitute string.Empty, which GitPullRequestTitle
+		// and GitBranchName both reject for whitespace — turning "the host omitted this" into a
+		// guaranteed ArgumentException out of a public hosting method, escaping past every
+		// catch (GitHostingException) a caller wrote. The exception type is the whole point of the
+		// assertion: ThrowsExactly fails on the ArgumentException the old mapping raised.
+		(string original, string replacement, string field)[] cases =
+		[
+			("\"title\": \"A new feature\",", string.Empty, "pull request title"),
+			("\"title\": \"A new feature\",", "\"title\": null,", "pull request title"),
+			("\"sourceRefName\": \"refs/heads/npaulk/my_work\",", string.Empty, "pull request source branch"),
+			("\"targetRefName\": \"refs/heads/new_feature\",", string.Empty, "pull request target branch"),
+		];
+
+		foreach ((string original, string replacement, string field) in cases)
+		{
+			using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+				.Respond(HttpStatusCode.OK, SinglePullRequestListResponseReplacing(original, replacement), ("Content-Type", "application/json"));
+			AzureDevOpsProvider provider = new()
+			{
+				Owner = "contoso".As<GitProviderOwner>(),
+				Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+				Handler = handler,
+			};
+
+			GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+			StringAssert.Contains(exception.Message, $"reported no {field}");
+		}
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnUnrepresentablePullRequestAuthorToGitHostingRequestExceptionAsync()
+	{
+		// A service-principal identity commonly carries an empty uniqueName. Unlike an absent
+		// createdBy, that is a value the host did report and this library cannot represent, so it is
+		// raised rather than dropped — as a hosting failure, not the ArgumentException .As<T>() raised
+		// before. The substitution also hits the reviewers entry's uniqueName, which the mapping does
+		// not read; only createdBy's reaches GitPullRequest.Author.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.OK,
+				SinglePullRequestListResponseReplacing("\"uniqueName\": \"example-user@contoso.example\",", "\"uniqueName\": \"\","),
+				("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "pull request author this library cannot represent");
+	}
+
+	[TestMethod]
+	public async Task ReportsNoAuthorWhenAzureDevOpsOmitsCreatedByAsync()
+	{
+		// The other side of the same rule: GitPullRequest.Author is optional, so a host that reports
+		// no identity at all yields null rather than an exception. Without this, routing Author
+		// through ToHostValue could be "fixed" by making every field required and nothing would say
+		// otherwise.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.OK,
+				SinglePullRequestListResponseReplacing("\"uniqueName\": \"example-user@contoso.example\",", string.Empty),
+				("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		Assert.IsNull(pullRequests[0].Author);
+		Assert.AreEqual("A new feature".As<GitPullRequestTitle>(), pullRequests[0].Title);
 	}
 
 	[TestMethod]

@@ -486,6 +486,17 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// unique name, usually an email address, the same distinction GitHub's login draws on the other
 	/// side. <see cref="GitPullRequest.WebURI"/> is read only from <c>_links.web.href</c>, never
 	/// composed from a constructed URL — see <see cref="AzureDevOpsReferenceLinks"/>'s remarks.
+	/// <para>
+	/// Every field goes through <c>GitProvider.ToHostValue</c> or
+	/// <c>GitProvider.ToRequiredHostValue</c>, never through <c>As&lt;T&gt;()</c>: this is a response
+	/// Azure DevOps sent, so a value this library cannot represent is a hosting failure and not a
+	/// caller's argument failure. This mapping used to substitute <c>string.Empty</c> for an omitted
+	/// title or ref name, which did not soften anything —
+	/// <see cref="GitPullRequestTitle"/> and <see cref="GitBranchName"/> both reject whitespace, so
+	/// the fallback converted "the host omitted this" into a guaranteed <see cref="ArgumentException"/>
+	/// escaping past every <c>catch (GitHostingException)</c> a caller wrote, on data
+	/// <see cref="AzureDevOpsPullRequest.Title"/> itself declares optional.
+	/// </para>
 	/// </remarks>
 	/// <param name="pullRequest">The pull request Azure DevOps returned.</param>
 	/// <param name="statusCode">The status code Azure DevOps reported for the response carrying <paramref name="pullRequest"/>.</param>
@@ -493,15 +504,15 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <returns>The equivalent <see cref="GitPullRequest"/>.</returns>
 	private GitPullRequest ToGitPullRequest(AzureDevOpsPullRequest pullRequest, HttpStatusCode statusCode, string responseBody) => new()
 	{
-		Number = pullRequest.PullRequestId.ToString(CultureInfo.InvariantCulture).As<GitPullRequestNumber>(),
-		Title = (pullRequest.Title ?? string.Empty).As<GitPullRequestTitle>(),
+		Number = ToRequiredHostValue<GitPullRequestNumber>(pullRequest.PullRequestId.ToString(CultureInfo.InvariantCulture), Name, "pull request number"),
+		Title = ToRequiredHostValue<GitPullRequestTitle>(pullRequest.Title, Name, "pull request title"),
 		Description = pullRequest.Description,
-		SourceBranch = StripRefsHeadsPrefix(pullRequest.SourceRefName ?? string.Empty).As<GitBranchName>(),
-		TargetBranch = StripRefsHeadsPrefix(pullRequest.TargetRefName ?? string.Empty).As<GitBranchName>(),
-		Author = pullRequest.CreatedBy?.UniqueName is string uniqueName ? uniqueName.As<GitPullRequestAuthor>() : null,
+		SourceBranch = ToRequiredHostValue<GitBranchName>(StripRefsHeadsPrefix(pullRequest.SourceRefName), Name, "pull request source branch"),
+		TargetBranch = ToRequiredHostValue<GitBranchName>(StripRefsHeadsPrefix(pullRequest.TargetRefName), Name, "pull request target branch"),
+		Author = ToHostValue<GitPullRequestAuthor>(pullRequest.CreatedBy?.UniqueName, Name, "pull request author"),
 		State = ToGitPullRequestState(pullRequest.Status, statusCode, responseBody),
 		IsDraft = pullRequest.IsDraft,
-		WebURI = pullRequest.Links?.Web?.Href is string href ? href.As<GitPullRequestWebURI>() : null,
+		WebURI = ToHostValue<GitPullRequestWebURI>(pullRequest.Links?.Web?.Href, Name, "pull request web URI"),
 		CreatedAt = pullRequest.CreationDate,
 	};
 
@@ -509,12 +520,17 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// Strips a leading <c>refs/heads/</c> from a fully-qualified ref, leaving the value untouched
 	/// when the prefix is absent.
 	/// </summary>
-	/// <param name="refName">The ref name, fully qualified or already bare.</param>
-	/// <returns>The bare branch name.</returns>
-	private static string StripRefsHeadsPrefix(string refName)
+	/// <remarks>
+	/// Passes <see langword="null"/> through rather than substituting an empty string, so that an
+	/// omitted ref stays distinguishable from a reported one and reaches
+	/// <c>GitProvider.ToRequiredHostValue</c> as the absence it is.
+	/// </remarks>
+	/// <param name="refName">The ref name, fully qualified or already bare, or <see langword="null"/> when the host omitted it.</param>
+	/// <returns>The bare branch name, or <see langword="null"/> when <paramref name="refName"/> is <see langword="null"/>.</returns>
+	private static string? StripRefsHeadsPrefix(string? refName)
 	{
 		const string prefix = "refs/heads/";
-		return refName.StartsWith(prefix, StringComparison.Ordinal) ? refName[prefix.Length..] : refName;
+		return refName?.StartsWith(prefix, StringComparison.Ordinal) == true ? refName[prefix.Length..] : refName;
 	}
 
 	/// <summary>

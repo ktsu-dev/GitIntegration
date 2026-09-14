@@ -59,6 +59,21 @@ public sealed class GitHubProviderTests
 	}
 
 	/// <summary>
+	/// Wraps the captured pull request fixture in a one-element array after substituting one captured
+	/// field, for the cases that need a field to arrive omitted or null.
+	/// </summary>
+	/// <remarks>
+	/// Kept separate from <see cref="SinglePullRequestArray"/>, whose substitutions are about state
+	/// and draft mapping rather than about a field being absent. Substituting rather than writing a
+	/// second fixture keeps every other key exactly as captured, so a test that removes <c>title</c>
+	/// is varying one thing.
+	/// </remarks>
+	/// <param name="original">The captured text to replace, including its trailing comma when removing a whole key.</param>
+	/// <param name="replacement">The text to put in its place, or an empty string to omit the key entirely.</param>
+	private static string SinglePullRequestArrayReplacing(string original, string replacement) =>
+		$"[{Fixture("github-pullrequest-created.json").Replace(original, replacement, StringComparison.Ordinal)}]";
+
+	/// <summary>
 	/// Builds a single-repository response carrying only the fields <see cref="GitHubProvider"/>'s
 	/// mapping reads, with a caller-supplied <c>name</c> — used to drive
 	/// <see cref="GitRepository.LocalPath"/>'s containment behaviour without depending on the full
@@ -331,6 +346,60 @@ public sealed class GitHubProviderTests
 		Assert.IsTrue(pullRequest.IsDraft);
 		Assert.AreEqual("https://github.com/contoso/example-repo/pull/132594".As<GitPullRequestWebURI>(), pullRequest.WebURI);
 		Assert.AreEqual(new DateTimeOffset(2026, 8, 21, 0, 43, 5, TimeSpan.Zero), pullRequest.CreatedAt);
+	}
+
+	[TestMethod]
+	public async Task TranslatesAnOmittedRequiredPullRequestFieldToGitHostingRequestExceptionAsync()
+	{
+		// Octokit's model types are mutable classes with unannotated string members deserialized
+		// straight from the response, so a field GitHub omits arrives as null however non-nullable the
+		// property looks. The mapping used to call .As<T>() on those directly, which raises the
+		// ArgumentException a semantic type owes a caller who passed a bad argument — out of a public
+		// hosting method whose documented failure surface is the GitHostingException hierarchy, past
+		// every catch (GitHostingException) a caller wrote. ThrowsExactly is what pins that down: it
+		// fails on the ArgumentException the old mapping raised.
+		(string original, string replacement, string field)[] cases =
+		[
+			("\"title\": \"Don't build all JIT flavors for clr.aot\",", string.Empty, "pull request title"),
+			("\"title\": \"Don't build all JIT flavors for clr.aot\",", "\"title\": null,", "pull request title"),
+			("\"ref\": \"example-branch-1\",", string.Empty, "pull request source branch"),
+			("\"ref\": \"main\",", string.Empty, "pull request target branch"),
+		];
+
+		foreach ((string original, string replacement, string field) in cases)
+		{
+			using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+				.Respond(HttpStatusCode.OK, SinglePullRequestArrayReplacing(original, replacement), ("Content-Type", "application/json"));
+			GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+			GitHostingRequestException exception = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await provider.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+			StringAssert.Contains(exception.Message, $"reported no {field}");
+		}
+	}
+
+	[TestMethod]
+	public async Task ReportsNoAuthorWhenGitHubOmitsTheUserAsync()
+	{
+		// The other side of the same rule: GitPullRequest.Author is optional, so a pull request whose
+		// user carries no login yields null rather than an exception. Without this, routing Author
+		// through ToHostValue could be "fixed" by making every field required and nothing would say
+		// otherwise.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.OK,
+				SinglePullRequestArrayReplacing("\"login\": \"example-user-1\",", string.Empty),
+				("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		IReadOnlyList<GitPullRequest> pullRequests = await provider
+			.GetPullRequestsAsync("example-repo".As<GitRepositoryName>(), TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		Assert.IsNull(pullRequests[0].Author);
+		Assert.AreEqual("Don't build all JIT flavors for clr.aot".As<GitPullRequestTitle>(), pullRequests[0].Title);
 	}
 
 	[TestMethod]

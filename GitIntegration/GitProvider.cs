@@ -378,6 +378,45 @@ public abstract class GitProvider : IGitHostingProvider
 	}
 
 	/// <summary>
+	/// Converts a field a host reported into a semantic value this library's model requires, reporting
+	/// an omitted field as a hosting failure rather than letting it reach a <see langword="required"/>
+	/// property as <see langword="null"/>.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// <see cref="ToHostValue{TSemantic}"/> treats an absent field as ordinary, which is right for
+	/// every optional property on <see cref="GitRepository"/> and for
+	/// <see cref="GitPullRequest.Author"/> and <see cref="GitPullRequest.WebURI"/>. It is not right
+	/// for <see cref="GitPullRequest.Number"/>, <see cref="GitPullRequest.Title"/>,
+	/// <see cref="GitPullRequest.SourceBranch"/> and <see cref="GitPullRequest.TargetBranch"/>:
+	/// those are <see langword="required"/>, so "not reported" is not a state the model can hold.
+	/// </para>
+	/// <para>
+	/// The alternative — making those four nullable — was considered and rejected. Both hosts
+	/// document all four as part of what a pull request *is*, and neither has ever been observed to
+	/// omit one; Azure DevOps's DTO declares them <see langword="string?"/> only because it mirrors
+	/// the wire shape defensively. Relaxing the model would push a null check onto every caller for a
+	/// case no host produces, and would silently turn a host contract violation into a
+	/// half-populated record. Raising it keeps the violation visible, and keeps it inside the
+	/// <see cref="GitHostingException"/> hierarchy a public hosting method documents.
+	/// </para>
+	/// </remarks>
+	/// <typeparam name="TSemantic">The semantic string type to produce.</typeparam>
+	/// <param name="value">The raw field as the host reported it, which may be <see langword="null"/>.</param>
+	/// <param name="providerName">The provider that reported it, named in the exception.</param>
+	/// <param name="description">What the field is, used in the failure message.</param>
+	/// <returns>The converted value.</returns>
+	/// <exception cref="GitHostingRequestException">
+	/// <paramref name="value"/> is <see langword="null"/>, or is non-null and fails
+	/// <typeparamref name="TSemantic"/>'s validation.
+	/// </exception>
+	private protected static TSemantic ToRequiredHostValue<TSemantic>(string? value, GitProviderName providerName, string description)
+		where TSemantic : SemanticString<TSemantic>, new() =>
+		ToHostValue<TSemantic>(value, providerName, description)
+			?? throw new GitHostingRequestException(
+				$"{providerName} reported no {description}, which this library requires.");
+
+	/// <summary>
 	/// Creates a transport carrying the settings every provider in this library wants of a shared,
 	/// long-lived handler.
 	/// </summary>

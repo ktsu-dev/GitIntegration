@@ -321,19 +321,31 @@ public sealed class GitHubProvider : GitProvider
 	/// <summary>
 	/// Maps an Octokit pull request onto this library's model.
 	/// </summary>
+	/// <remarks>
+	/// Every field goes through <c>GitProvider.ToHostValue</c> or
+	/// <c>GitProvider.ToRequiredHostValue</c>, never through <c>As&lt;T&gt;()</c>: this is a response
+	/// GitHub sent, so a value this library cannot represent is a hosting failure and not a caller's
+	/// argument failure. Octokit's model types are all mutable classes with unannotated
+	/// <see langword="string"/> members deserialized straight from the response, so nothing about
+	/// them guarantees a field GitHub omitted arrives as anything but <see langword="null"/> —
+	/// <c>As&lt;T&gt;()</c> on one would throw <see cref="ArgumentException"/> out of a public hosting
+	/// method, escaping past every <c>catch (GitHostingException)</c> a caller wrote.
+	/// <see cref="PullRequest.Head"/> and <see cref="PullRequest.Base"/> are dereferenced
+	/// conditionally for the same reason.
+	/// </remarks>
 	/// <param name="pullRequest">The pull request Octokit returned.</param>
 	/// <returns>The equivalent <see cref="GitPullRequest"/>.</returns>
-	private static GitPullRequest ToGitPullRequest(PullRequest pullRequest) => new()
+	private GitPullRequest ToGitPullRequest(PullRequest pullRequest) => new()
 	{
-		Number = pullRequest.Number.ToString(CultureInfo.InvariantCulture).As<GitPullRequestNumber>(),
-		Title = pullRequest.Title.As<GitPullRequestTitle>(),
+		Number = ToRequiredHostValue<GitPullRequestNumber>(pullRequest.Number.ToString(CultureInfo.InvariantCulture), Name, "pull request number"),
+		Title = ToRequiredHostValue<GitPullRequestTitle>(pullRequest.Title, Name, "pull request title"),
 		Description = pullRequest.Body,
-		SourceBranch = pullRequest.Head.Ref.As<GitBranchName>(),
-		TargetBranch = pullRequest.Base.Ref.As<GitBranchName>(),
-		Author = pullRequest.User?.Login?.As<GitPullRequestAuthor>(),
+		SourceBranch = ToRequiredHostValue<GitBranchName>(pullRequest.Head?.Ref, Name, "pull request source branch"),
+		TargetBranch = ToRequiredHostValue<GitBranchName>(pullRequest.Base?.Ref, Name, "pull request target branch"),
+		Author = ToHostValue<GitPullRequestAuthor>(pullRequest.User?.Login, Name, "pull request author"),
 		State = ToGitPullRequestState(pullRequest),
 		IsDraft = pullRequest.Draft,
-		WebURI = pullRequest.HtmlUrl?.As<GitPullRequestWebURI>(),
+		WebURI = ToHostValue<GitPullRequestWebURI>(pullRequest.HtmlUrl, Name, "pull request web URI"),
 		CreatedAt = pullRequest.CreatedAt,
 	};
 
