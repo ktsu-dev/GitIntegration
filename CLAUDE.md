@@ -463,6 +463,27 @@ throw `ArgumentException` out of a public hosting method, whose documented failu
 `GitHostingException` hierarchy. An omitted optional field stays null; only a field the host did
 report and this library cannot represent is raised.
 
+Both providers' pull-request mappers violated this for every field when the pull-request path was
+first added, and the
+`?? string.Empty` fallbacks they used made it worse rather than softer: `GitPullRequestTitle` and
+`GitBranchName` both carry `HasNonWhitespaceContent`, so the fallback turned "the host omitted this"
+into a *guaranteed* `ArgumentException` on data `AzureDevOpsPullRequest.Title` itself declares
+optional — a null title, or a service-principal `IdentityRef` whose `uniqueName` is empty. Octokit's
+side is the same shape for a different reason: its model types are mutable classes with unannotated
+`string` members deserialized straight from the response, so a field GitHub omits arrives null
+however non-nullable the property looks, and `PullRequest.Head`/`.Base` are dereferenced
+conditionally for that reason.
+
+**`GitPullRequest.Number`, `Title`, `SourceBranch` and `TargetBranch` stay `required`; a host that
+omits one raises `GitHostingRequestException`.** The alternative — relaxing them to nullable for the
+omitted-field case — was considered and rejected. Both hosts document all four as part of what a
+pull request *is*, and neither has been observed to omit one; Azure DevOps's DTO declares them
+`string?` only because it mirrors the wire shape defensively. Making them nullable would push a null
+check onto every caller for a case no host produces, and would turn a host contract violation into a
+half-populated record that reads as valid. `GitProvider.ToRequiredHostValue` is the wrapper that
+keeps the distinction: `ToHostValue` for the genuinely optional fields (`Author`, `WebURI`, and
+every `GitRepository` field), `ToRequiredHostValue` for these four.
+
 **Azure DevOps pull request operations require `Project`; repository enumeration does not.** Azure
 DevOps nests repositories under a project — GitHub has no equivalent — so
 `AzureDevOpsProvider.Project` is optional: unset, `GetRepositoriesAsync` enumerates the whole
