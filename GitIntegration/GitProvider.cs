@@ -77,81 +77,114 @@ public abstract class GitProvider : IGitHostingProvider
 
 	/// <inheritdoc/>
 	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repositoryName, CancellationToken cancellationToken = default) =>
-		GetPullRequestsCoreAsync(Ensure.NotNull(repositoryName).WeakString, cancellationToken);
+		GetPullRequestsCoreAsync(GitRepositoryAddress.ByName(Ensure.NotNull(repositoryName).WeakString), cancellationToken);
 
 	/// <inheritdoc/>
 	public Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepository repository, CancellationToken cancellationToken = default) =>
-		GetPullRequestsCoreAsync(ToRepositoryIdentifier(repository), cancellationToken);
+		GetPullRequestsCoreAsync(ToRepositoryAddress(repository), cancellationToken);
 
 	/// <inheritdoc/>
 	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepositoryName repositoryName)
 	{
-		string identifier = Ensure.NotNull(repositoryName).WeakString;
+		GitRepositoryAddress address = GitRepositoryAddress.ByName(Ensure.NotNull(repositoryName).WeakString);
 
 		return new GitPullRequestCreateBuilder((specification, cancellationToken) =>
-			CreatePullRequestCoreAsync(identifier, specification, cancellationToken));
+			CreatePullRequestCoreAsync(address, specification, cancellationToken));
 	}
 
 	/// <inheritdoc/>
 	public IGitPullRequestCreateBuilder CreatePullRequest(GitRepository repository)
 	{
-		string identifier = ToRepositoryIdentifier(repository);
+		GitRepositoryAddress address = ToRepositoryAddress(repository);
 
 		return new GitPullRequestCreateBuilder((specification, cancellationToken) =>
-			CreatePullRequestCoreAsync(identifier, specification, cancellationToken));
+			CreatePullRequestCoreAsync(address, specification, cancellationToken));
 	}
 
 	/// <summary>
-	/// Chooses how a repository is addressed in a request path: by the host's own identifier when
-	/// one is known, and by name otherwise.
+	/// Gets a value indicating whether this host's repository-addressed routes want
+	/// <see cref="GitRepository.HostRepositoryId"/> in preference to <see cref="GitRepository.Name"/>.
 	/// </summary>
 	/// <remarks>
-	/// <see cref="GitRepository.HostRepositoryId"/> is what a host documents its own API in terms of.
-	/// Azure DevOps types its <c>{repositoryId}</c> path parameter as <c>string (uuid)</c>, and draws
-	/// an explicit id-or-name distinction for the sibling <c>project</c> parameter while withholding
-	/// it here — so substituting a name there is unconfirmed against the documented schema rather
-	/// than sanctioned by it. Preferring the id closes that gap for every repository a caller got
-	/// from <c>GetRepositoriesAsync</c>, which is the normal way to obtain one.
 	/// <para>
-	/// Falling back to <see cref="GitRepository.Name"/> rather than requiring the id, because a
-	/// caller may legitimately have constructed a <see cref="GitRepository"/> by hand from a name
-	/// alone. That fallback is the same unconfirmed substitution the name-taking overloads make, and
-	/// it is no worse than what those overloads already do.
+	/// Per-provider rather than shared, because the two hosts genuinely disagree and a single answer
+	/// was wrong for one of them. Azure DevOps types its <c>{repositoryId}</c> path parameter as
+	/// <c>string (uuid)</c> and draws an explicit id-or-name distinction for the sibling
+	/// <c>project</c> parameter while withholding it here, so an id is what its documented schema
+	/// asks for. GitHub's <c>{repo}</c> slot in <c>/repos/{owner}/{repo}</c> takes a repository
+	/// <b>name</b> only — its id-addressed route is the separate <c>/repositories/{id}</c>, so
+	/// putting GitHub's numeric id in the name slot addresses nothing and answers <c>404</c> for a
+	/// repository that plainly exists.
+	/// </para>
+	/// <para>
+	/// A preference rather than a requirement: this only decides which candidate wins when a
+	/// <see cref="GitRepository"/> carries both. Which of the two a provider was handed reaches it on
+	/// <see cref="GitRepositoryAddress.IsHostRepositoryId"/>, so a provider whose two routes differ
+	/// can still address either form correctly rather than guessing from the value's shape.
+	/// </para>
+	/// <para>
+	/// <see langword="private protected"/> for the reason <see cref="DefaultHandler"/> gives: every
+	/// provider this library ships lives in this assembly, and no externally-defined subclass can be
+	/// instantiated anyway.
 	/// </para>
 	/// </remarks>
+	/// <value><see langword="true"/> to prefer the host's own id; <see langword="false"/> to prefer the name.</value>
+	private protected abstract bool PrefersHostRepositoryId { get; }
+
+	/// <summary>
+	/// Chooses how a repository is addressed in a request path, in this host's preferred order.
+	/// </summary>
+	/// <remarks>
+	/// Falls back to whichever form was not preferred rather than requiring the preferred one,
+	/// because a caller may legitimately have constructed a <see cref="GitRepository"/> by hand
+	/// carrying only one of the two. The result says which form it carries, so a provider whose id
+	/// and name routes differ answers the fallback with the right route instead of sending one form
+	/// down the other's route — which is exactly the failure that made this per-provider.
+	/// </remarks>
 	/// <param name="repository">The repository to address.</param>
-	/// <returns>The path segment identifying the repository.</returns>
+	/// <returns>The value identifying the repository, and which of the two forms it is.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="repository"/> is <see langword="null"/>.</exception>
 	/// <exception cref="ArgumentException">
 	/// <paramref name="repository"/> carries neither a <see cref="GitRepository.HostRepositoryId"/>
 	/// nor a <see cref="GitRepository.Name"/>, so there is nothing to address it by.
 	/// </exception>
-	private static string ToRepositoryIdentifier(GitRepository repository)
+	private GitRepositoryAddress ToRepositoryAddress(GitRepository repository)
 	{
 		Ensure.NotNull(repository);
 
-		return repository.HostRepositoryId?.WeakString
-			?? repository.Name?.WeakString
-			?? throw new ArgumentException(
-				"The repository carries neither a HostRepositoryId nor a Name, so there is no way to " +
-				"address it on the host.",
-				nameof(repository));
+		GitRepositoryAddress? byHostId = repository.HostRepositoryId?.WeakString is string hostId
+			? GitRepositoryAddress.ByHostRepositoryId(hostId)
+			: null;
+
+		GitRepositoryAddress? byName = repository.Name?.WeakString is string name
+			? GitRepositoryAddress.ByName(name)
+			: null;
+
+		GitRepositoryAddress? chosen = PrefersHostRepositoryId
+			? byHostId ?? byName
+			: byName ?? byHostId;
+
+		return chosen ?? throw new ArgumentException(
+			"The repository carries neither a HostRepositoryId nor a Name, so there is no way to " +
+			"address it on the host.",
+			nameof(repository));
 	}
 
 	/// <summary>
-	/// Retrieves the open pull requests for the repository a path segment identifies.
+	/// Retrieves the open pull requests for the repository an address identifies.
 	/// </summary>
 	/// <remarks>
 	/// The single implementation behind both public overloads, so the two cannot answer the same
-	/// question differently. Takes the finished path segment rather than a
+	/// question differently. Takes the resolved <see cref="GitRepositoryAddress"/> rather than a
 	/// <see cref="GitRepositoryName"/> or a <see cref="GitRepository"/>, because choosing between an
-	/// id and a name is a decision that belongs in one place — <see cref="ToRepositoryIdentifier"/> —
-	/// rather than repeated in each provider.
+	/// id and a name is a decision that belongs in one place — <see cref="ToRepositoryAddress"/> —
+	/// rather than repeated in each provider. The address carries which form was chosen, so a
+	/// provider that addresses ids and names through different routes picks the right one.
 	/// </remarks>
-	/// <param name="repositoryIdentifier">The path segment identifying the repository.</param>
+	/// <param name="repositoryAddress">The address identifying the repository.</param>
 	/// <param name="cancellationToken">A token to cancel the request.</param>
 	/// <returns>The repository's open pull requests, as reported by the host.</returns>
-	internal abstract Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken);
+	internal abstract Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken);
 
 	/// <summary>
 	/// Creates the pull request a finished <see cref="IGitPullRequestCreateBuilder"/> describes.
@@ -163,14 +196,14 @@ public abstract class GitProvider : IGitHostingProvider
 	/// this library ships lives in this assembly, so nothing outside it needs to implement this
 	/// member.
 	/// </remarks>
-	/// <param name="repositoryIdentifier">
-	/// The path segment identifying the repository the pull request is opened against, already chosen
-	/// by <see cref="ToRepositoryIdentifier"/> or taken from a caller-supplied name.
+	/// <param name="repositoryAddress">
+	/// The address identifying the repository the pull request is opened against, already chosen by
+	/// <see cref="ToRepositoryAddress"/> or taken from a caller-supplied name.
 	/// </param>
 	/// <param name="specification">The pull request's finished configuration.</param>
 	/// <param name="cancellationToken">A token to cancel the request.</param>
 	/// <returns>The pull request as the host reports it after creation.</returns>
-	internal abstract Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken);
+	internal abstract Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryAddress repositoryAddress, GitPullRequestSpecification specification, CancellationToken cancellationToken);
 
 	/// <summary>
 	/// Attempts to retrieve the credential for this provider from the credential cache.
@@ -381,6 +414,41 @@ public abstract class GitProvider : IGitHostingProvider
 		AllowAutoRedirect = false,
 		AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
 	};
+}
+
+/// <summary>
+/// How one repository is addressed on a host: the value to send, and which of the two forms —
+/// the host's own id, or the repository's name — that value is.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The discriminator is the whole point of this type. A bare string cannot say which form it
+/// carries, and a provider cannot recover that from the value's shape: GitHub's repository ids are
+/// decimal digits, and a repository may legitimately be <i>named</i> one. Passing the two forms
+/// interchangeably is exactly how a numeric id came to be sent where GitHub's <c>/repos/{owner}/{repo}</c>
+/// route wants a name, which answers <c>404</c> rather than failing in any way a caller could read.
+/// </para>
+/// <para>
+/// A provider whose id and name routes are the same path — Azure DevOps's <c>{repositoryId}</c> slot
+/// — can ignore <see cref="IsHostRepositoryId"/> entirely and send <see cref="Value"/>.
+/// </para>
+/// </remarks>
+/// <param name="Value">The value identifying the repository, unescaped.</param>
+/// <param name="IsHostRepositoryId">
+/// <see langword="true"/> when <paramref name="Value"/> is the host's own repository id;
+/// <see langword="false"/> when it is the repository's name.
+/// </param>
+internal readonly record struct GitRepositoryAddress(string Value, bool IsHostRepositoryId)
+{
+	/// <summary>Addresses a repository by the host's own repository id.</summary>
+	/// <param name="hostRepositoryId">The host's repository id.</param>
+	/// <returns>The address.</returns>
+	public static GitRepositoryAddress ByHostRepositoryId(string hostRepositoryId) => new(hostRepositoryId, IsHostRepositoryId: true);
+
+	/// <summary>Addresses a repository by its name.</summary>
+	/// <param name="repositoryName">The repository's name.</param>
+	/// <returns>The address.</returns>
+	public static GitRepositoryAddress ByName(string repositoryName) => new(repositoryName, IsHostRepositoryId: false);
 }
 
 /// <summary>
