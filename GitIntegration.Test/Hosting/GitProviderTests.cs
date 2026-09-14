@@ -215,10 +215,15 @@ public sealed class GitProviderTests
 		public override Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException("Not exercised by these tests.");
 
-		internal override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken) =>
+		// Arbitrary, because this provider issues no request for the choice to matter. The member is
+		// abstract so that each real provider has to state its own host's answer rather than inherit
+		// one that is wrong for it — GitHub and Azure DevOps genuinely differ.
+		private protected override bool PrefersHostRepositoryId => false;
+
+		internal override Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken) =>
 			throw new NotSupportedException("Not exercised by these tests.");
 
-		internal override Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken) =>
+		internal override Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryAddress repositoryAddress, GitPullRequestSpecification specification, CancellationToken cancellationToken) =>
 			throw new NotSupportedException("Not exercised by these tests.");
 
 		public HostingCredential CallResolveCredential() => ResolveCredential();

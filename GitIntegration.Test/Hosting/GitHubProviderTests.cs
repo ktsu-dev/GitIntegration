@@ -174,13 +174,15 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
-	public async Task AddressesARepositoryByItsHostIdWhenListingPullRequestsAsync()
+	public async Task AddressesARepositoryByNameWhenListingPullRequestsAsync()
 	{
-		// The point of carrying the id: it has to reach the request path. GitHub happens to accept a
-		// name in this position, but both providers answer the same question the same way under one
-		// interface, so both prefer the host's own identifier when one is known.
+		// GET /repos/{owner}/{repo}/pulls takes a repository NAME in its {repo} slot — the id-addressed
+		// form is the separate /repositories/{id}/pulls. This provider used to send GitHub's numeric
+		// HostRepositoryId here, which addresses no repository at all and answers 404 for one that was
+		// just enumerated from the same provider. The repository below carries both forms, so this is
+		// the case where the preference itself decides, and the name has to win.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
-			.Respond(HttpStatusCode.OK, "[]", ("Content-Type", "application/json"));
+			.RespondToPath("/repos/contoso/my-repo/pulls", HttpStatusCode.OK, "[]", ("Content-Type", "application/json"));
 		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
 
 		GitRepository repository = new()
@@ -191,7 +193,71 @@ public sealed class GitHubProviderTests
 
 		_ = await provider.GetPullRequestsAsync(repository, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		StringAssert.Contains(handler.Requests[0].Uri.AbsoluteUri, "/repos/contoso/90000001/pulls");
+		Assert.AreEqual("/repos/contoso/my-repo/pulls", handler.Requests[0].Uri.AbsolutePath);
+	}
+
+	[TestMethod]
+	public async Task AddressesARepositoryByItsHostIdOnTheIdRouteWhenNoNameIsKnownAsync()
+	{
+		// Preferring the name does not discard the id. A repository carrying only a HostRepositoryId —
+		// one a caller built by hand, since GetRepositoriesAsync always reports a name — is addressed
+		// on GitHub's id-addressed route rather than by dropping its id into the name slot.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repositories/90000001/pulls", HttpStatusCode.OK, "[]", ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitRepository repository = new() { HostRepositoryId = "90000001".As<GitHostRepositoryId>() };
+
+		_ = await provider.GetPullRequestsAsync(repository, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("/repositories/90000001/pulls", handler.Requests[0].Uri.AbsolutePath);
+	}
+
+	[TestMethod]
+	public async Task ReportsAHostRepositoryIdGitHubCannotBeAddressedByAsync()
+	{
+		// GitHostRepositoryId is unvalidated, because Azure DevOps's is a uuid and GitHub's a whole
+		// number, so the semantic type can enforce neither. A hand-built repository carrying a
+		// GitHub-impossible id is a caller's argument rather than anything a host reported — nothing is
+		// sent, so there is no response for a GitHostingException to describe.
+		using FakeHttpMessageHandler handler = new();
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitRepository repository = new() { HostRepositoryId = "not-a-number".As<GitHostRepositoryId>() };
+
+		ArgumentException exception = await Assert.ThrowsExactlyAsync<ArgumentException>(
+			async () => await provider.GetPullRequestsAsync(repository, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "whole numbers");
+		Assert.AreEqual(0, handler.Requests.Count);
+	}
+
+	[TestMethod]
+	public async Task AddressesARepositoryByNameWhenCreatingAPullRequestAsync()
+	{
+		// CreatePullRequest(GitRepository) reaches GitHub's routes the same way GetPullRequestsAsync
+		// does, and carried the identical bug: Octokit's Create(owner, name, ...) builds
+		// POST /repos/{owner}/{repo}/pulls, so a numeric id in that slot 404s just as it does on the
+		// listing route.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repos/contoso/my-repo/pulls", HttpStatusCode.Created, Fixture("github-pullrequest-created.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitRepository repository = new()
+		{
+			Name = "my-repo".As<GitRepositoryName>(),
+			HostRepositoryId = "90000001".As<GitHostRepositoryId>(),
+		};
+
+		_ = await provider.CreatePullRequest(repository)
+			.From("example-branch-1".As<GitBranchName>())
+			.Into("main".As<GitBranchName>())
+			.Titled("A title".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		Assert.AreEqual("/repos/contoso/my-repo/pulls", handler.Requests[0].Uri.AbsolutePath);
 	}
 
 	[TestMethod]

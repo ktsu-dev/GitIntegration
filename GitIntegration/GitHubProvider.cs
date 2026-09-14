@@ -47,6 +47,24 @@ public sealed class GitHubProvider : GitProvider
 
 	/// <inheritdoc/>
 	/// <remarks>
+	/// <see langword="false"/>, because GitHub's repository-addressed routes are two routes rather
+	/// than one. <c>GET /repos/{owner}/{repo}/pulls</c> takes a repository <b>name</b> in its
+	/// <c>{repo}</c> slot; the id-addressed form is the separate <c>GET /repositories/{id}/pulls</c>.
+	/// A numeric id in the name slot addresses no repository at all and answers <c>404</c> — which
+	/// this provider surfaces as <see cref="GitHostingNotFoundException"/>, indistinguishable from a
+	/// repository that really is gone. Azure DevOps, whose one <c>{repositoryId}</c> slot is
+	/// documented as taking the id, answers <see langword="true"/> instead.
+	/// <para>
+	/// Preferring the name does not discard the id: a repository carrying only a
+	/// <see cref="GitRepository.HostRepositoryId"/> still arrives here as one, and
+	/// <see cref="GetPullRequestsCoreAsync"/> and <see cref="CreatePullRequestCoreAsync"/> answer it
+	/// on the id-addressed route through Octokit's <c>long repositoryId</c> overloads.
+	/// </para>
+	/// </remarks>
+	private protected override bool PrefersHostRepositoryId => false;
+
+	/// <inheritdoc/>
+	/// <remarks>
 	/// Adds to the interface's remarks rather than restating them.
 	/// <see cref="IGitHostingProvider.GetRepositoriesAsync"/> says only that implementations differ
 	/// in coverage and points here for this host's specifics, so the two texts have one job each and
@@ -84,9 +102,9 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <inheritdoc/>
-	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken)
+	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryIdentifier);
+		Ensure.NotNull(repositoryAddress.Value);
 		cancellationToken.ThrowIfCancellationRequested();
 
 		(GitHubClient client, IDisposable createdTransport) = CreateClient();
@@ -100,8 +118,13 @@ public sealed class GitHubProvider : GitProvider
 			// exists, so a future validating change to PullRequestRequest can never leak it.
 			PullRequestRequest request = new() { State = ItemStateFilter.Open };
 
-			IReadOnlyList<PullRequest> pullRequests = await client.PullRequest
-				.GetAllForRepository(Owner.WeakString, repositoryIdentifier, request)
+			// Two routes, chosen by which form the address carries rather than by what the value looks
+			// like: the name overload builds /repos/{owner}/{repo}/pulls, the long overload builds
+			// /repositories/{id}/pulls. Sending either form down the other's route is what this
+			// provider used to do, and GitHub answers it with a 404 rather than a diagnosable failure.
+			IReadOnlyList<PullRequest> pullRequests = await (repositoryAddress.IsHostRepositoryId
+				? client.PullRequest.GetAllForRepository(ToOctokitRepositoryId(repositoryAddress), request)
+				: client.PullRequest.GetAllForRepository(Owner.WeakString, repositoryAddress.Value, request))
 				.ConfigureAwait(false);
 
 			return [.. pullRequests.Select(ToGitPullRequest)];
@@ -113,9 +136,9 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <inheritdoc/>
-	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken)
+	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryAddress repositoryAddress, GitPullRequestSpecification specification, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryIdentifier);
+		Ensure.NotNull(repositoryAddress.Value);
 		Ensure.NotNull(specification);
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -134,8 +157,10 @@ public sealed class GitHubProvider : GitProvider
 				Draft = specification.IsDraft,
 			};
 
-			PullRequest created = await client.PullRequest
-				.Create(Owner.WeakString, repositoryIdentifier, newPullRequest)
+			// The same two routes GetPullRequestsCoreAsync chooses between, for the same reason.
+			PullRequest created = await (repositoryAddress.IsHostRepositoryId
+				? client.PullRequest.Create(ToOctokitRepositoryId(repositoryAddress), newPullRequest)
+				: client.PullRequest.Create(Owner.WeakString, repositoryAddress.Value, newPullRequest))
 				.ConfigureAwait(false);
 
 			return ToGitPullRequest(created);
@@ -145,6 +170,31 @@ public sealed class GitHubProvider : GitProvider
 			throw Translate(exception);
 		}
 	}
+
+	/// <summary>
+	/// Reads a <see cref="GitRepositoryAddress"/> holding GitHub's own repository id as the
+	/// <see langword="long"/> Octokit's id-addressed overloads take.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="GitHostRepositoryId"/> is an unvalidated semantic string, because the two hosts
+	/// disagree about what one looks like — Azure DevOps's is a uuid, GitHub's a whole number — so
+	/// the type cannot enforce either and this is where GitHub's constraint is checked. A value that
+	/// is not a whole number reaches here only from a hand-built <see cref="GitRepository"/>, since
+	/// <see cref="ToGitRepository"/> fills the property from <c>Repository.Id</c>, which is a
+	/// <see langword="long"/> already. That is a caller's argument rather than something a host
+	/// reported, so it raises <see cref="ArgumentException"/> and not a
+	/// <see cref="GitHostingException"/> — nothing was sent, and there is no response to describe.
+	/// </remarks>
+	/// <param name="repositoryAddress">The address, whose <see cref="GitRepositoryAddress.IsHostRepositoryId"/> is <see langword="true"/>.</param>
+	/// <returns>The repository id.</returns>
+	/// <exception cref="ArgumentException">The id is not a whole number, so GitHub cannot be addressed by it.</exception>
+	private static long ToOctokitRepositoryId(GitRepositoryAddress repositoryAddress) =>
+		long.TryParse(repositoryAddress.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long repositoryId)
+			? repositoryId
+			: throw new ArgumentException(
+				$"GitHub repository ids are whole numbers, and '{repositoryAddress.Value}' is not one. " +
+				"Address the repository by its Name instead.",
+				nameof(repositoryAddress));
 
 	/// <summary>
 	/// Creates an Octokit client wired to this provider's transport and credential.

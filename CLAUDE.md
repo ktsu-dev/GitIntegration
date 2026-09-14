@@ -414,8 +414,8 @@ keyed lookup would work only because `HttpResponseMessage` happens to canonicali
 casing. A `Retry-After` carrying an HTTP date rather than seconds yields `null`, since an unset
 `ResetsAt` is better than an invented one.
 
-**A repository from a hosting provider carries no `LocalPath`, and is addressed by the host's own
-id.** `GitRepository.LocalPath` is nullable because a repository a provider enumerated has never been
+**A repository from a hosting provider carries no `LocalPath`, and how it is addressed is the
+provider's own decision.** `GitRepository.LocalPath` is nullable because a repository a provider enumerated has never been
 cloned. Both providers used to invent one under `Environment.CurrentDirectory`, which made the same
 remote repository yield a different record depending on when it was enumerated, and which forced a
 containment guard to exist purely to keep a name from a remote response from escaping that
@@ -423,14 +423,36 @@ directory. That guard is gone with the reason for it, and `IGitClient.Clone(GitR
 reports a missing `LocalPath` rather than resurrecting the invented default — where a working copy
 goes is the caller's decision.
 
-`GitRepository.HostRepositoryId` carries what a host documents its own API in terms of. Microsoft's
+`GitRepository.HostRepositoryId` carries what a host documents its own API in terms of — and the two
+hosts disagree about what that is, which is why the preference is `GitProvider`'s
+`private protected abstract bool PrefersHostRepositoryId` rather than one shared answer. Microsoft's
 reference types Azure DevOps's `{repositoryId}` path parameter as `string (uuid)` and draws an
 explicit id-or-name distinction for the sibling `project` parameter while withholding it here, so
-substituting a name there is unconfirmed against the documented schema rather than sanctioned by it.
-`GetPullRequestsAsync(GitRepository)` and `CreatePullRequest(GitRepository)` therefore prefer the id;
-the `GitRepositoryName`-taking overloads still pass a name, since that is all they are given. Both
-route through one internal core taking the finished path segment, so the choice lives in exactly one
-place and the overloads cannot answer the same question differently.
+substituting a name there is unconfirmed against the documented schema rather than sanctioned by it:
+`AzureDevOpsProvider` prefers the id. GitHub's `{repo}` slot in `/repos/{owner}/{repo}` takes a
+repository **name** only — its id-addressed form is the separate `/repositories/{id}` route — so
+`GitHubProvider` prefers the name. A single shared preference for the id used to be applied to both,
+which put GitHub's numeric id in a slot that only accepts a name and made
+`GetPullRequestsAsync(GitRepository)` and `CreatePullRequest(GitRepository)` answer `404` on GitHub
+for a repository just enumerated from the same provider — the overload `IGitHostingProvider`
+documents as the one to prefer.
+
+The preference only decides which form wins when a `GitRepository` carries both. Which form was
+chosen travels with it, on the internal `GitRepositoryAddress` record struct both internal cores now
+take, so a repository carrying only an id is still addressed correctly on GitHub — through Octokit's
+`long repositoryId` overloads, which build the id-addressed route — rather than by dropping an id
+into the name slot. A bare string could not carry that distinction and a provider cannot recover it
+from the value's shape, since a repository may legitimately be *named* a number.
+`AzureDevOpsProvider` has one slot for both forms and ignores the discriminator entirely. The
+`GitRepositoryName`-taking overloads still pass a name, since that is all they are given, and both
+overloads still route through one internal core, so the choice lives in exactly one place and the
+two cannot answer the same question differently.
+
+`FakeHttpMessageHandler.RespondToPath` exists because of this bug: the test that should have caught
+it asserted the wrong URL against a handler that returned `[]` for every path, so the whole method
+ran its success path around a request GitHub would have refused. A path-scoped response answers an
+unexpected path with `404`, the way the host does, which makes a wrong route fail rather than pass
+quietly. Prefer it over plain `Respond` for anything whose route is part of what the test claims.
 
 **A field a host reported goes through `GitProvider.ToHostValue`, never through `As<T>()` directly.**
 The hosting counterpart to `GitParseValues.ToSemantic`, and it exists for the same reason: a value

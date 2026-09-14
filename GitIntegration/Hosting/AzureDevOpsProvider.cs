@@ -73,6 +73,19 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <inheritdoc/>
 	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
 
+	/// <inheritdoc/>
+	/// <remarks>
+	/// <see langword="true"/>, and unchanged by the split that made this per-provider. Azure DevOps
+	/// has one repository-addressed path — <c>.../repositories/{repositoryId}/...</c> — and
+	/// Microsoft's reference types that parameter as <c>string (uuid)</c> while drawing an explicit
+	/// id-or-name distinction for the sibling <c>project</c> parameter without drawing one here, so
+	/// an id is what the documented schema asks for and a name there is unconfirmed rather than
+	/// sanctioned. Both forms go into that same slot, so this provider never needs to read
+	/// <see cref="GitRepositoryAddress.IsHostRepositoryId"/> — unlike GitHub, whose id-addressed and
+	/// name-addressed routes are different routes.
+	/// </remarks>
+	private protected override bool PrefersHostRepositoryId => true;
+
 	/// <summary>
 	/// Gets the name of this Git provider.
 	/// </summary>
@@ -156,7 +169,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// needs none of this, because its endpoint documents no pagination at all.
 	/// </para>
 	/// <para>
-	/// <c>{repositoryId}</c> is filled with <paramref name="repositoryIdentifier"/>, which the caller's
+	/// <c>{repositoryId}</c> is filled with <paramref name="repositoryAddress"/>, which the caller's
 	/// choice of overload decides. Microsoft's reference types that parameter as a repository
 	/// <b>id</b> (<c>GitRepository.id</c> is a <c>string (uuid)</c>), and draws an explicit
 	/// id-or-name distinction for the sibling <c>project</c> parameter without drawing one here — a
@@ -170,9 +183,9 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// </para>
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
-	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(string repositoryIdentifier, CancellationToken cancellationToken)
+	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryIdentifier);
+		string repositoryIdentifier = Ensure.NotNull(repositoryAddress.Value);
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();
 
@@ -228,9 +241,9 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="HttpResponseMessage.IsSuccessStatusCode"/> rather than a specific status code.
 	/// </remarks>
 	/// <exception cref="InvalidOperationException"><see cref="Project"/> is <see langword="null"/>. See <see cref="Project"/>'s remarks.</exception>
-	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(string repositoryIdentifier, GitPullRequestSpecification specification, CancellationToken cancellationToken)
+	internal override async Task<GitPullRequest> CreatePullRequestCoreAsync(GitRepositoryAddress repositoryAddress, GitPullRequestSpecification specification, CancellationToken cancellationToken)
 	{
-		Ensure.NotNull(repositoryIdentifier);
+		string repositoryIdentifier = Ensure.NotNull(repositoryAddress.Value);
 		Ensure.NotNull(specification);
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();

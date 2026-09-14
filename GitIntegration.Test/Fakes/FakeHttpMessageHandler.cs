@@ -66,7 +66,34 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 	/// <returns>The same handler, to allow chaining.</returns>
 	public FakeHttpMessageHandler Respond(HttpStatusCode status, string body, params (string Name, string Value)[] headers)
 	{
-		_responses.Enqueue(new QueuedResponse(status, body, headers));
+		_responses.Enqueue(new QueuedResponse(status, body, headers, ExpectedPath: null));
+		_totalQueued++;
+
+		return this;
+	}
+
+	/// <summary>
+	/// Queues the next response, to be returned only if the request that arrives asks for
+	/// <paramref name="expectedPath"/>; any other path is answered <c>404</c>.
+	/// </summary>
+	/// <remarks>
+	/// A route assertion the code under test has to satisfy to get its scripted response at all,
+	/// rather than one made afterwards on a recorded URI. A test that only asserts the URI still
+	/// receives the success body it scripted, so everything downstream of the route — deserialization,
+	/// mapping, the returned model — is exercised against a request the host would have refused. That
+	/// is how a wrong route survived here: a test asserted a URI addressing a repository by an id
+	/// GitHub's name slot cannot accept, and the always-succeeding handler made the whole method look
+	/// correct around it. Answering an unexpected path the way the host would makes the wrong route
+	/// fail where it actually fails.
+	/// </remarks>
+	/// <param name="expectedPath">The <see cref="Uri.AbsolutePath"/> the request must carry, compared exactly.</param>
+	/// <param name="status">The status code the response carries when the path matches.</param>
+	/// <param name="body">The response body, sent as UTF-8 text, when the path matches.</param>
+	/// <param name="headers">Header name/value pairs to attach, routed as <see cref="Respond"/> routes them.</param>
+	/// <returns>The same handler, to allow chaining.</returns>
+	public FakeHttpMessageHandler RespondToPath(string expectedPath, HttpStatusCode status, string body, params (string Name, string Value)[] headers)
+	{
+		_responses.Enqueue(new QueuedResponse(status, body, headers, expectedPath));
 		_totalQueued++;
 
 		return this;
@@ -113,6 +140,21 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 			throw new InvalidOperationException(
 				$"No queued response for {request.Method} {request.RequestUri}: " +
 				$"{_totalQueued} queued, {_requests.Count} arrived.");
+		}
+
+		// The scripted response is conditional on the route when the test made it so, and the
+		// condition is checked after the dequeue rather than before it: a request that misses stays
+		// one request, consuming its own queued response, so a following request still gets the
+		// response the test queued for it rather than this one.
+		if (queued.ExpectedPath is string expectedPath && !string.Equals(request.RequestUri!.AbsolutePath, expectedPath, StringComparison.Ordinal))
+		{
+			return new HttpResponseMessage(HttpStatusCode.NotFound)
+			{
+				Content = new StringContent(
+					$"{{\"message\":\"Not Found\",\"expectedPath\":\"{expectedPath}\",\"requestedPath\":\"{request.RequestUri.AbsolutePath}\"}}",
+					Encoding.UTF8,
+					"application/json"),
+			};
 		}
 
 		HttpResponseMessage response = new(queued.Status)
@@ -163,7 +205,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 		base.Dispose(disposing);
 	}
 
-	private readonly record struct QueuedResponse(HttpStatusCode Status, string Body, (string Name, string Value)[] Headers);
+	private readonly record struct QueuedResponse(HttpStatusCode Status, string Body, (string Name, string Value)[] Headers, string? ExpectedPath);
 
 	/// <summary>A single request this handler received, captured in full.</summary>
 	/// <param name="Method">The HTTP method used.</param>

@@ -88,6 +88,33 @@ public class FakeHttpMessageHandlerTests
 	}
 
 	[TestMethod]
+	public async Task ReturnsAPathScopedResponseOnlyForThatPathAsync()
+	{
+		// The route has to be a condition of getting the scripted response, not merely something a
+		// test inspects afterwards: a handler that answers every path alike lets a wrong route run the
+		// whole success path and look correct, which is how a wrong route shipped here once.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repos/contoso/my-repo/pulls", HttpStatusCode.OK, "[]")
+			.RespondToPath("/repos/contoso/my-repo/pulls", HttpStatusCode.OK, "[]");
+		using HttpClient client = new(handler);
+
+		using HttpResponseMessage matched = await client.GetAsync(new Uri("https://example.invalid/repos/contoso/my-repo/pulls?state=open"), TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		using HttpResponseMessage missed = await client.GetAsync(new Uri("https://example.invalid/repos/contoso/90000001/pulls"), TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// The query string is no part of the comparison — a route is the path.
+		Assert.AreEqual(HttpStatusCode.OK, matched.StatusCode);
+
+		Assert.AreEqual(HttpStatusCode.NotFound, missed.StatusCode);
+		StringAssert.Contains(
+			await missed.Content.ReadAsStringAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false),
+			"/repos/contoso/90000001/pulls");
+
+		// A missed request still consumed its own queued response rather than the next one's, so a
+		// following request is answered by what the test queued for it.
+		Assert.AreEqual(2, handler.Requests.Count);
+	}
+
+	[TestMethod]
 	public async Task AttachesResponseHeadersWhenGivenAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
