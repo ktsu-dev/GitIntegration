@@ -182,8 +182,9 @@ public class GitRoundTripTests
 		// IsClean is asserted beside the entry because it is the property a caller reads before
 		// discarding a working copy — reporting true here would mean losing that file.
 		Assert.IsFalse(status.IsClean);
-		Assert.IsTrue(
-			status.Entries.Any(entry => entry.Path.WeakString.EndsWith("untracked.txt", StringComparison.Ordinal)),
+		Assert.Contains(
+			entry => entry.Path.WeakString.EndsWith("untracked.txt", StringComparison.Ordinal),
+			status.Entries,
 			"Status() dropped the untracked file because the repository's status.showUntrackedFiles said to.");
 
 		// A caller's own choice still wins, including in the direction the config happens to agree with:

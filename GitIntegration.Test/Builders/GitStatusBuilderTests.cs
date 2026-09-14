@@ -66,10 +66,12 @@ public class GitStatusBuilderTests
 		GitStatusBuilder builder = new(runner, TestPaths.Root);
 		_ = builder.WithUntrackedFiles(GitUntrackedFilesMode.No);
 
-		string[] arguments = [.. builder.BuildArguments()];
+		IReadOnlyList<string> arguments = builder.BuildArguments();
 
-		Assert.AreEqual(1, arguments.Count(argument => argument.StartsWith("--untracked-files=", StringComparison.Ordinal)));
-		CollectionAssert.DoesNotContain(arguments, "--untracked-files=normal");
+		string untracked = Assert.ContainsSingle(
+			argument => argument.StartsWith("--untracked-files=", StringComparison.Ordinal),
+			arguments);
+		Assert.AreEqual("--untracked-files=no", untracked);
 	}
 
 	[TestMethod]
