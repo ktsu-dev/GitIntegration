@@ -328,6 +328,17 @@ Non-obvious, load-bearing design points:
     positional, because a rename is spelled differently in each section. A binary file's counts are
     `-`, which is why they are nullable — a binary change is not a zero-line change.
 
+14. **`Status()` emits `--untracked-files` whether or not the caller chose a mode.** Git resolves the
+    flag from `status.showUntrackedFiles` when a command omits it, and a host — a minimal CI image, a
+    developer's `~/.gitconfig` — can set that to `no` to keep `git status` fast in a large tree. The
+    same working copy would then report `IsClean == true` with untracked files sitting in it, which is
+    exactly the answer a caller deciding whether a directory is safe to discard must not get. So
+    `GitStatusBuilder.DefaultUntrackedFiles` (git's own documented default, `normal`) is pinned into
+    the argument vector alongside the `--no-pager`, `core.quotepath=false` and `color.ui=false` that
+    `GitCommandBuilder.BuildArguments` already pins — same reasoning, and this was the one verb still
+    leaving a host-configurable default unspecified. `WithUntrackedFiles(...)` replaces the default
+    rather than joining it, so the vector never carries two `--untracked-files` values.
+
 **Hosting layer.** `GitProvider` is an abstract base with two implementations: `GitHubProvider` over
 Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
 library uses (see the dependency note below). Both go through the same shape: every request-issuing

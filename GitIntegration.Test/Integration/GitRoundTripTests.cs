@@ -154,6 +154,47 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task StatusReportsUntrackedWorkEvenWhereTheHostHidesItAsync()
+	{
+		// status.showUntrackedFiles is a host setting — a CI image or a developer's ~/.gitconfig can set
+		// it to "no" to keep git status fast in a large tree — and git applies it to any status command
+		// carrying no --untracked-files of its own. Written into the throwaway repository's own config
+		// rather than the runner's global one: it is the same variable resolved from the nearest scope,
+		// so the override is exercised without the test depending on, or disturbing, the host.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "status.showUntrackedFiles", "no")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("untracked.txt", "two\n");
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// IsClean is asserted beside the entry because it is the property a caller reads before
+		// discarding a working copy — reporting true here would mean losing that file.
+		Assert.IsFalse(status.IsClean);
+		Assert.IsTrue(
+			status.Entries.Any(entry => entry.Path.WeakString.EndsWith("untracked.txt", StringComparison.Ordinal)),
+			"Status() dropped the untracked file because the repository's status.showUntrackedFiles said to.");
+
+		// A caller's own choice still wins, including in the direction the config happens to agree with:
+		// the pinned default replaces the host's setting rather than overriding the caller's.
+		GitStatus suppressed = await repository.Status()
+			.WithUntrackedFiles(GitUntrackedFilesMode.No)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(suppressed.IsClean);
+	}
+
+	[TestMethod]
 	public async Task BranchCreateCheckoutAndDeleteRoundTripAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

@@ -16,6 +16,11 @@ public interface IGitStatusBuilder : IGitCommandBuilder<GitStatus>
 	/// <summary>
 	/// Sets how much untracked detail git should report.
 	/// </summary>
+	/// <remarks>
+	/// Without this call the command reports untracked files the way
+	/// <see cref="GitUntrackedFilesMode.Normal"/> describes, whatever the host's
+	/// <c>status.showUntrackedFiles</c> is set to.
+	/// </remarks>
 	/// <param name="mode">The reporting mode.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="InvalidEnumArgumentException"><paramref name="mode"/> is not a recognised value.</exception>
@@ -29,14 +34,23 @@ public interface IGitStatusBuilder : IGitCommandBuilder<GitStatus>
 }
 
 /// <summary>
-/// Builds <c>git status --porcelain=v2 --branch -z</c>.
+/// Builds <c>git status --porcelain=v2 --branch -z --untracked-files=normal</c>.
 /// </summary>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">The repository to scope the command to.</param>
 internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath repositoryPath)
 	: GitCommandBuilder<GitStatus>(runner, repositoryPath), IGitStatusBuilder
 {
-	private GitUntrackedFilesMode? _untrackedFiles;
+	/// <summary>
+	/// The untracked reporting mode emitted when the caller never calls <see cref="WithUntrackedFiles"/>.
+	/// </summary>
+	/// <remarks>
+	/// Git's own documented default for <c>status.showUntrackedFiles</c>, so pinning it changes nothing
+	/// on a host that has not set the variable and everything on a host that has.
+	/// </remarks>
+	internal const GitUntrackedFilesMode DefaultUntrackedFiles = GitUntrackedFilesMode.Normal;
+
+	private GitUntrackedFilesMode _untrackedFiles = DefaultUntrackedFiles;
 	private bool _includeIgnored;
 
 	/// <inheritdoc />
@@ -76,10 +90,13 @@ internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirecto
 		arguments.Add("--branch");
 		arguments.Add("-z");
 
-		if (_untrackedFiles is GitUntrackedFilesMode mode)
-		{
-			arguments.Add("--untracked-files=" + ToOptionValue(mode));
-		}
+		// Emitted whether or not the caller chose a mode. Omitting the flag hands the decision to
+		// status.showUntrackedFiles, which a CI image or a developer's ~/.gitconfig can set to "no" to
+		// speed up status in a large tree — and then the same working copy reports IsClean == true with
+		// an untracked file sitting in it. A caller asking "is there work here I would destroy?"
+		// deserves the same answer on every host, so the default is pinned in the argument vector
+		// beside --no-pager, core.quotepath and color.ui rather than left to the host.
+		arguments.Add("--untracked-files=" + ToOptionValue(_untrackedFiles));
 
 		if (_includeIgnored)
 		{

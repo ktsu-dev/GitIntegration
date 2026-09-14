@@ -28,6 +28,11 @@ public class GitStatusBuilderTests
 			"--porcelain=v2",
 			"--branch",
 			"-z",
+
+			// Present without the caller asking for it: left off, the mode would come from the host's
+			// status.showUntrackedFiles, and a host that sets it to "no" would report a working copy
+			// with untracked files in it as clean.
+			"--untracked-files=normal",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
 	}
@@ -48,6 +53,23 @@ public class GitStatusBuilderTests
 		GitStatusBuilder all = new(runner, TestPaths.Root);
 		_ = all.WithUntrackedFiles(GitUntrackedFilesMode.All);
 		CollectionAssert.Contains(all.BuildArguments().ToArray(), "--untracked-files=all");
+	}
+
+	[TestMethod]
+	public void ChoosingAModeReplacesThePinnedDefaultRatherThanJoiningIt()
+	{
+		// The default is emitted unconditionally, so the risk it introduces is a vector carrying both
+		// --untracked-files=normal and the caller's choice. Git would honour the last one, which is the
+		// caller's, but only by accident of ordering — and a No caller who silently got a "normal" pass
+		// over a large tree first would pay for a mode they declined.
+		RecordingGitProcessRunner runner = new();
+		GitStatusBuilder builder = new(runner, TestPaths.Root);
+		_ = builder.WithUntrackedFiles(GitUntrackedFilesMode.No);
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		Assert.AreEqual(1, arguments.Count(argument => argument.StartsWith("--untracked-files=", StringComparison.Ordinal)));
+		CollectionAssert.DoesNotContain(arguments, "--untracked-files=normal");
 	}
 
 	[TestMethod]
