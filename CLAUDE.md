@@ -301,7 +301,25 @@ Non-obvious, load-bearing design points:
     submodule has moved: `Sha` is the recorded gitlink, `CheckedOutSha` is what the working directory
     holds. `CheckedOutSha` is null when uninitialised, because git prints the recorded gitlink again
     on that line and reporting it verbatim would make an uninitialised submodule indistinguishable
-    from a synchronised one. Listing does not recurse: `ls-files` enumerates only the superproject's
+    from a synchronised one.
+
+    **The stage field is the third thing `ls-files` says, and it decides how many records a path
+    gets.** A merged path carries stage `0` once; an unmerged one — a submodule both sides of a merge
+    moved to divergent commits — carries no stage `0` at all and appears once per stage present, each
+    naming a different commit, while `submodule status` reports that path once with a `U` marker and
+    the *null object id*. Filtering on the mode alone therefore reported one submodule three times
+    with three contradictory `Sha` values, each carrying forty zeroes as its `CheckedOutSha`.
+    `ParseGitlinks` collapses to one entry per path — stage `0` when present, otherwise `2` ("ours")
+    then `3` then `1`, since a submodule deleted on one side produces `1` and `3` with no `2` — and
+    `Apply` treats an all-zero object id the way it already treats `Uninitialised`. Two details worth
+    keeping: the mode filter runs *before* the stage is validated, so an unmerged blob (most of any
+    real conflict) is skipped rather than held to a gitlink's expectations; and the stages are a
+    closed set where a fifth throws, unlike `submodule status`'s marker characters, because
+    `ls-files` is plumbing and an unexpected stage means the record was misread rather than that git
+    grew a state. The all-zero test is by digit rather than against a constant, since the id is 64
+    characters under `--object-format=sha256`.
+
+    Listing does not recurse: `ls-files` enumerates only the superproject's
     index, so nested paths could only come from the wrapper. A caller recurses by composition, opening
     each submodule as its own `GitRepository`.
 
