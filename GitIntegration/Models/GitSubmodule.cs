@@ -24,6 +24,13 @@ public sealed record GitSubmodule
 	/// The gitlink itself, read from the superproject's index. This is what a
 	/// <c>submodule update</c> would check out, and it does not change when someone commits inside
 	/// the submodule's working directory — <see cref="CheckedOutSha"/> is what moves then.
+	/// <para>
+	/// A submodule whose <see cref="State"/> is <see cref="GitSubmoduleState.Conflicted"/> has no
+	/// single recorded gitlink: the index holds one per merge stage. This is the "ours" stage — the
+	/// commit recorded by the branch being merged into — falling back to "theirs" and then to the
+	/// merge base when the side that would carry it deleted the submodule instead. The listing still
+	/// reports one entry per submodule, since one is what exists on disk.
+	/// </para>
 	/// </remarks>
 	public required GitCommitSha Sha { get; init; }
 
@@ -38,6 +45,11 @@ public sealed record GitSubmodule
 	/// submodule, whose working directory holds no checkout to report — git prints the recorded
 	/// gitlink again in that case, which would otherwise make an uninitialised submodule look
 	/// indistinguishable from a synchronised one.
+	/// <para>
+	/// Also <see langword="null"/> for a <see cref="GitSubmoduleState.Conflicted"/> submodule, where
+	/// git prints its null object id rather than a commit. That value is well-formed enough to pass
+	/// for a commit id, so reporting it verbatim would hand a caller forty zeroes to look up.
+	/// </para>
 	/// </remarks>
 	public GitCommitSha? CheckedOutSha { get; init; }
 

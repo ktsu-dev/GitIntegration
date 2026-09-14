@@ -194,6 +194,92 @@ public class GitSubmoduleListBuilderTests
 	}
 
 	[TestMethod]
+	public async Task CollapsesAnUnmergedSubmoduleIntoOneEntryAsync()
+	{
+		// Captured from git 2.43: a superproject merge where both sides moved the same gitlink to
+		// divergent commits. ls-files emits no stage 0 for such a path and one record per stage
+		// instead, so filtering on the mode alone reports one submodule three times, with three
+		// contradictory ids, for one directory on disk. The surrounding gitlinks are here so the
+		// collapse is seen to keep git's ordering rather than sorting or appending.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput:
+				"160000 1f2bee80cfcf06ee5ba820b17fe3b6ddca460915 0\tlibs/before\0" +
+				"160000 941c54aba3ecbbf714e1aa40a2aa1a1e4dfe7ff0 1\tlibs/sub\0" +
+				"160000 7182602cb7a28003eb333e162df18908e81a7866 2\tlibs/sub\0" +
+				"160000 d62f3736e0a7fef1a8dc59dfff3a2b84ffd8c095 3\tlibs/sub\0" +
+				"160000 120669ec6b336c651886335053ac0644d7821e09 0\tlibs/after\0")
+			.Then(standardOutput:
+				" 1f2bee80cfcf06ee5ba820b17fe3b6ddca460915 libs/before (heads/master)\n" +
+				"U0000000000000000000000000000000000000000 libs/sub\n" +
+				" 120669ec6b336c651886335053ac0644d7821e09 libs/after (heads/master)\n");
+		GitSubmoduleListBuilder builder = new(runner, TestPaths.Root);
+
+		IReadOnlyList<GitSubmodule> submodules =
+			await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// The collapse keeps git's own ordering rather than sorting or appending: the unmerged path
+		// stays where git first listed it, between the two merged ones.
+		Assert.AreEqual(3, submodules.Count);
+		Assert.AreEqual("libs/before".As<RelativeDirectoryPath>(), submodules[0].Path);
+		Assert.AreEqual("libs/sub".As<RelativeDirectoryPath>(), submodules[1].Path);
+		Assert.AreEqual("libs/after".As<RelativeDirectoryPath>(), submodules[2].Path);
+
+		GitSubmodule conflicted = submodules[1];
+
+		Assert.AreEqual(GitSubmoduleState.Conflicted, conflicted.State);
+
+		// Stage 2 — "ours", the commit the branch being merged into records. Not stage 1's merge base
+		// (which git listed first, so a first-wins collapse would pick it) and not stage 3's "theirs"
+		// (which git listed last, so a last-wins collapse would pick that).
+		Assert.AreEqual("7182602cb7a28003eb333e162df18908e81a7866".As<GitCommitSha>(), conflicted.Sha);
+
+		// git prints its null object id on the status line, and it is well-formed enough that nothing
+		// downstream would question forty zeroes presented as a commit.
+		Assert.IsNull(conflicted.CheckedOutSha);
+	}
+
+	[TestMethod]
+	public void FallsBackToTheirStageWhenOursIsAbsent()
+	{
+		// A submodule deleted on the side being merged into: git emits the merge base and "theirs"
+		// with no stage 2 at all. Preferring stage 2 must degrade rather than drop the path, since a
+		// gitlink still in the index is exactly what a caller deciding whether a directory is safe to
+		// delete needs to see.
+		IReadOnlyList<GitSubmodule> gitlinks = GitSubmoduleParser.ParseGitlinks(
+			"160000 941c54aba3ecbbf714e1aa40a2aa1a1e4dfe7ff0 1\tlibs/sub\0" +
+			"160000 d62f3736e0a7fef1a8dc59dfff3a2b84ffd8c095 3\tlibs/sub\0");
+
+		Assert.AreEqual(1, gitlinks.Count);
+		Assert.AreEqual("d62f3736e0a7fef1a8dc59dfff3a2b84ffd8c095".As<GitCommitSha>(), gitlinks[0].Sha);
+	}
+
+	[TestMethod]
+	public void SkipsAnUnmergedBlobWithoutReadingItsStage()
+	{
+		// Most of any real conflict is unmerged *blobs*, which carry the same per-stage records. The
+		// mode filter has to run first, so a blob is skipped exactly as it always was rather than being
+		// held to a gitlink's expectations of its stage field.
+		IReadOnlyList<GitSubmodule> gitlinks = GitSubmoduleParser.ParseGitlinks(
+			"100644 abc1234000000000000000000000000000000000 1\tREADME.md\0" +
+			"100644 def5678000000000000000000000000000000000 2\tREADME.md\0" +
+			"160000 7182602cb7a28003eb333e162df18908e81a7866 0\tlibs/sub\0");
+
+		Assert.AreEqual(1, gitlinks.Count);
+		Assert.AreEqual("libs/sub".As<RelativeDirectoryPath>(), gitlinks[0].Path);
+	}
+
+	[TestMethod]
+	public void ThrowsForAStageGitDoesNotDefine()
+	{
+		// Unlike submodule status's marker characters, the stages are a closed set: ls-files is
+		// plumbing and git defines exactly 0 through 3. A fifth means the record was misread, and
+		// ranking it anyway would pick one of an unmerged path's commit ids at random.
+		_ = Assert.ThrowsExactly<GitParseException>(
+			() => _ = GitSubmoduleParser.ParseGitlinks(
+				"160000 1f2bee80cfcf06ee5ba820b17fe3b6ddca460915 4\tlibs/sub\0"));
+	}
+
+	[TestMethod]
 	public void ThrowsForAMalformedGitlinkRecord()
 	{
 		_ = Assert.ThrowsExactly<GitParseException>(

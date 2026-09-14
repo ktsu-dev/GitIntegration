@@ -48,18 +48,34 @@ internal static class GitSubmoduleParser
 	/// Reads the recorded gitlinks from NUL-terminated <c>ls-files --stage</c> output.
 	/// </summary>
 	/// <remarks>
+	/// <para>
 	/// Each record is <c>&lt;mode&gt; &lt;object&gt; &lt;stage&gt;\t&lt;path&gt;</c>. Everything that
 	/// is not a gitlink is skipped, which is most of a repository: this command lists the whole index,
 	/// and the mode filter is what turns that into a submodule listing.
+	/// </para>
+	/// <para>
+	/// The stage field is read rather than discarded, because it is the field that says whether a path
+	/// appears once or several times. A merged path carries stage <c>0</c> and appears exactly once;
+	/// an <em>unmerged</em> one — a submodule both sides of a merge moved to divergent commits —
+	/// carries no stage <c>0</c> record at all and instead appears once per stage present, each naming
+	/// a different commit. Listing those verbatim would report one submodule three times, with three
+	/// contradictory <see cref="GitSubmodule.Sha"/> values, for a directory that exists once on disk.
+	/// One entry per path is emitted instead — see <see cref="StagePrecedence"/> for which record wins.
+	/// </para>
 	/// </remarks>
 	/// <param name="output">Everything git wrote to standard output.</param>
-	/// <returns>One entry per gitlink, in the order git listed them, with no state resolved yet.</returns>
+	/// <returns>One entry per gitlink path, in the order git first listed it, with no state resolved yet.</returns>
 	/// <exception cref="GitParseException">A gitlink record did not have the expected shape.</exception>
 	internal static IReadOnlyList<GitSubmodule> ParseGitlinks(string output)
 	{
 		Ensure.NotNull(output);
 
-		List<GitSubmodule> submodules = [];
+		// The dictionary carries the winning record per path and the order list carries git's own
+		// ordering, because the two questions are separate: a later stage of a path already seen
+		// revises that path's entry without moving it, so an unmerged submodule stays where git put it
+		// rather than jumping to wherever its highest-precedence stage happened to appear.
+		Dictionary<string, (int Precedence, GitSubmodule Submodule)> byPath = [];
+		List<string> order = [];
 
 		foreach (string record in output.Split('\0'))
 		{
@@ -86,21 +102,68 @@ internal static class GitSubmoduleParser
 				throw new GitParseException($"Malformed ls-files record: '{record}'.");
 			}
 
+			// The mode filter runs before the stage is validated, so an unmerged *blob* — which this
+			// command also emits one record per stage for, and which is most of any real conflict — is
+			// skipped exactly as it always was rather than being held to a gitlink's expectations.
 			if (!string.Equals(fields[0], GitlinkMode, StringComparison.Ordinal))
 			{
 				continue;
 			}
 
-			submodules.Add(new GitSubmodule
+			string path = record[(tab + 1)..];
+			int precedence = StagePrecedence(fields[2], record);
+
+			bool seen = byPath.TryGetValue(path, out (int Precedence, GitSubmodule Submodule) existing);
+
+			if (seen && existing.Precedence >= precedence)
 			{
-				Path = GitParseValues.ToRelativeDirectoryPath(record[(tab + 1)..]),
+				continue;
+			}
+
+			if (!seen)
+			{
+				order.Add(path);
+			}
+
+			byPath[path] = (precedence, new GitSubmodule
+			{
+				Path = GitParseValues.ToRelativeDirectoryPath(path),
 				Sha = GitParseValues.ToSemantic<GitCommitSha>(fields[1], "submodule gitlink object id"),
 				State = GitSubmoduleState.Unknown,
 			});
 		}
 
-		return submodules;
+		return [.. order.Select(path => byPath[path].Submodule)];
 	}
+
+	/// <summary>
+	/// Ranks an <c>ls-files --stage</c> stage field, so the record that best represents a path wins.
+	/// </summary>
+	/// <remarks>
+	/// Stage <c>0</c> outranks everything: it is what a merged path carries, and its presence means
+	/// there is nothing to collapse. Among the unmerged stages the order is <c>2</c> then <c>3</c>
+	/// then <c>1</c> — "ours" first, because a caller inspecting a repository mid-merge is standing on
+	/// the branch that is being merged <em>into</em> and that is the commit its history records;
+	/// "theirs" next, and the merge base last, since the base is the one commit neither side chose.
+	/// The fallbacks are not theoretical: a submodule deleted on one side of the merge produces stages
+	/// <c>1</c> and <c>3</c> with no <c>2</c> at all.
+	/// </remarks>
+	/// <param name="stage">The stage field, exactly as git spelled it.</param>
+	/// <param name="record">The whole record, for the diagnostic.</param>
+	/// <returns>A rank, where higher wins.</returns>
+	/// <exception cref="GitParseException">The stage was not one git defines.</exception>
+	private static int StagePrecedence(string stage, string record) => stage switch
+	{
+		"0" => 3,
+		"2" => 2,
+		"3" => 1,
+		"1" => 0,
+
+		// A closed set, unlike submodule status's marker characters: this is plumbing, and git defines
+		// exactly these four stages. A fifth would mean the record was misread, not that git grew a
+		// state — and inventing a rank for it would silently pick a commit id at random.
+		_ => throw new GitParseException($"Malformed ls-files record: '{record}'."),
+	};
 
 	/// <summary>
 	/// Resolves each gitlink's working-directory state from <c>submodule status</c> output.
@@ -213,11 +276,29 @@ internal static class GitSubmoduleParser
 		// git prints the recorded gitlink again for an uninitialised submodule, which would make it
 		// indistinguishable from a synchronised one. Nothing is checked out there, so nothing is
 		// reported.
-		CheckedOutSha = status.State == GitSubmoduleState.Uninitialised
+		//
+		// The null object id is the same question asked by the other command: git prints it for an
+		// unmerged submodule, where there is no single checked-out commit to name. It is a well-formed
+		// object id as far as the semantic type is concerned, so nothing downstream would catch it —
+		// it would simply read as a commit that happens to be all zeroes.
+		CheckedOutSha = status.State == GitSubmoduleState.Uninitialised || IsNullObjectId(status.ObjectId)
 			? null
 			: GitParseValues.ToSemantic<GitCommitSha>(status.ObjectId, "submodule checked-out object id"),
 		Describe = describe,
 	};
+
+	/// <summary>
+	/// Reports whether an object id is git's null id — the absence of an object, not an object.
+	/// </summary>
+	/// <remarks>
+	/// Tested by its digits rather than against a constant, because the id's width is the repository's
+	/// object format: 40 characters under SHA-1 and 64 under <c>--object-format=sha256</c>. The empty
+	/// case is excluded explicitly, so "nothing at all" is never mistaken for "all zeroes".
+	/// </remarks>
+	/// <param name="objectId">The object id git printed.</param>
+	/// <returns><see langword="true"/> when every character is a zero.</returns>
+	private static bool IsNullObjectId(string objectId) =>
+		objectId.Length > 0 && objectId.AsSpan().IndexOfAnyExcept('0') < 0;
 
 	/// <summary>
 	/// Spells a path the way git prints it, so a status line can be matched against it.

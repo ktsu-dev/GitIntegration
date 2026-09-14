@@ -228,6 +228,125 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
+	public async Task ReportsAConflictedSubmoduleOnceWithNoCheckedOutCommitAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		// The submodule's own working copy, as a repository in its own right — the same composition a
+		// caller uses to recurse, and the only way to move the gitlink somewhere the superproject can
+		// then record.
+		GitRepository checkout = new()
+		{
+			LocalPath = System.IO.Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
+			ProcessRunner = super.ProcessRunner,
+		};
+
+		await IntegrationGitFixture.ConfigureIdentityAsync(checkout, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+
+		// Both branches are cut from the submodule's single commit before either moves, so the two
+		// commits below genuinely diverge. git resolves a submodule merge itself when one side is an
+		// ancestor of the other, and a merge it can resolve produces no conflict to read.
+		GitBranchName ours = "ours".As<GitBranchName>();
+		GitBranchName theirs = "theirs".As<GitBranchName>();
+
+		_ = await checkout.CreateBranch(ours).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await checkout.CreateBranch(theirs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommitSha oursSha = await CommitInSubmoduleAsync(
+			checkout, superDirectory, ours, "ours\n", cancellationToken).ConfigureAwait(false);
+		GitCommitSha theirsSha = await CommitInSubmoduleAsync(
+			checkout, superDirectory, theirs, "theirs\n", cancellationToken).ConfigureAwait(false);
+
+		// A branch of the superproject per side, each recording its own gitlink. "other" is the branch
+		// the merge runs on, so its gitlink is the one git stages as stage 2.
+		GitBranchName other = "other".As<GitBranchName>();
+		_ = await super.CreateBranch(other).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await super.Checkout("other".As<GitRefName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		await RecordGitlinkAsync(super, checkout, ours, cancellationToken).ConfigureAwait(false);
+
+		_ = await super.Checkout("main".As<GitRefName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		await RecordGitlinkAsync(super, checkout, theirs, cancellationToken).ConfigureAwait(false);
+
+		_ = await super.Checkout("other".As<GitRefName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// merge is out of scope for this library, so the fixture runs it directly. It is expected to
+		// fail: "Recursive merging with submodules currently only supports trivial cases", which is
+		// precisely the unmerged index this test needs.
+		GitProcessResult merged = await super.ProcessRunner!.RunAsync(
+			new GitProcessRequest
+			{
+				Arguments = ["-C", superDirectory.RootPath, "merge", "--no-edit", "main"],
+			},
+			cancellationToken).ConfigureAwait(false);
+
+		Assert.IsFalse(merged.Success, "the submodule merge was expected to conflict but succeeded");
+
+		IReadOnlyList<GitSubmodule> submodules =
+			await super.Submodules().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// One entry, not one per merge stage: ls-files emits three records for this path, and the
+		// directory they all describe exists once.
+		Assert.AreEqual(1, submodules.Count);
+		Assert.AreEqual("libs/sub".As<RelativeDirectoryPath>(), submodules[0].Path);
+		Assert.AreEqual(GitSubmoduleState.Conflicted, submodules[0].State);
+
+		// Stage 2 — what the branch being merged into records — rather than the merge base or theirs.
+		Assert.AreEqual(oursSha, submodules[0].Sha);
+		Assert.AreNotEqual(theirsSha, submodules[0].Sha);
+
+		// git prints its null object id here. Reporting it verbatim would present forty zeroes as a
+		// commit, which is well-formed enough that nothing downstream would question it.
+		Assert.IsNull(submodules[0].CheckedOutSha);
+	}
+
+	/// <summary>Commits a change on one of the submodule's branches, and reports the commit.</summary>
+	private static async Task<GitCommitSha> CommitInSubmoduleAsync(
+		GitRepository checkout,
+		TemporaryRepository superDirectory,
+		GitBranchName branch,
+		string contents,
+		CancellationToken cancellationToken)
+	{
+		_ = await checkout.Checkout(branch.WeakString.As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		superDirectory.WriteFile("libs/sub/s.txt", contents);
+
+		_ = await checkout.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommit commit = await checkout.Commit(branch.WeakString.As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return commit.Sha;
+	}
+
+	/// <summary>Checks a branch out in the submodule and records the result as the superproject's gitlink.</summary>
+	private static async Task RecordGitlinkAsync(
+		GitRepository super,
+		GitRepository checkout,
+		GitBranchName branch,
+		CancellationToken cancellationToken)
+	{
+		_ = await checkout.Checkout(branch.WeakString.As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await super.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await super.Commit($"record {branch.WeakString}".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	[TestMethod]
 	public async Task ReportsNoSubmodulesForARepositoryWithNoneAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
