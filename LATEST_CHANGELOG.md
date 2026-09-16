@@ -1,4 +1,6 @@
-## v3.0.3
+## v3.0.4 (patch)
 
-No significant changes detected since v3.0.3.
+Changes since v3.0.3:
+
+- Gate Dependabot auto-merge on CI actually being green ([@Claude](https://github.com/Claude))
 
