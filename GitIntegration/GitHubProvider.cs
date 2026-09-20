@@ -288,6 +288,10 @@ public sealed class GitHubProvider : GitProvider
 	private static Credentials ToOctokitCredentials(HostingCredential credential) => credential switch
 	{
 		{ Kind: HostingCredentialKind.Token, Token: string token } => new Credentials(token),
+		// AuthenticationType.Bearer rather than the single-argument constructor above, which defaults
+		// to Oauth and sends "Token <value>". GitHub requires "Bearer <value>" for a JWT such as a
+		// GitHub App installation token, and rejects it under the Token scheme.
+		{ Kind: HostingCredentialKind.BearerToken, Token: string bearerToken } => new Credentials(bearerToken, AuthenticationType.Bearer),
 		{ Kind: HostingCredentialKind.UsernamePassword, Username: string username, Password: string password } => new Credentials(username, password),
 		_ => Credentials.Anonymous,
 	};
