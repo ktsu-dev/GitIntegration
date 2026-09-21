@@ -66,6 +66,22 @@ public class GitResultTests
 	}
 
 	[TestMethod]
+	public void FromValueRejectsNullValue()
+	{
+		_ = Assert.ThrowsExactly<ArgumentNullException>(() => GitResult<string>.FromValue(null!));
+	}
+
+	[TestMethod]
+	public void FromValueRejectsNullValueForAnyReferenceType()
+	{
+		// GitCommandBuilder<TResult> is public, unsealed, and puts no notnull constraint on TResult,
+		// so a derived builder whose ParseResult returns null on an edge case reaches FromValue with
+		// null for whatever reference type it closed over — not just string.
+		_ = Assert.ThrowsExactly<ArgumentNullException>(
+			() => GitResult<IReadOnlyList<string>>.FromValue(null!));
+	}
+
+	[TestMethod]
 	public void ProcessResultReportsSuccessOnZeroExitCode()
 	{
 		GitProcessResult result = new()

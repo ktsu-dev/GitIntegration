@@ -13,7 +13,11 @@ using ktsu.Semantics.Paths;
 /// The shared behaviour of every git command builder: global argument injection, execution, and
 /// failure translation.
 /// </summary>
-/// <typeparam name="TResult">The parsed result type.</typeparam>
+/// <typeparam name="TResult">
+/// The parsed result type. Constrained to <c>notnull</c> so that a derived builder whose
+/// <see cref="ParseResult"/> returns null on some edge case cannot yield a successful-looking
+/// <see cref="GitResult{T}"/> with a null value; <see cref="GitResult{T}.FromValue(T)"/> throws instead.
+/// </typeparam>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">
 /// The repository to scope the command to, or <see langword="null"/> for commands that are not
@@ -21,6 +25,7 @@ using ktsu.Semantics.Paths;
 /// </param>
 public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)
 	: IGitCommandBuilder<TResult>
+	where TResult : notnull
 {
 	/// <summary>
 	/// Gets the runner this builder executes through.
