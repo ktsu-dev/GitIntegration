@@ -85,13 +85,34 @@ public sealed class GitHubProviderTests
 		[{"id":90000001,"name":"{{name}}","html_url":"https://github.com/example-user/example-repo","clone_url":"https://github.com/example-user/example-repo.git"}]
 		""";
 
+	/// <summary>
+	/// Builds the response <c>GET /users/{login}</c> and <c>GET /user</c> return, carrying only the
+	/// two fields <see cref="GitHubProvider"/>'s route selection reads.
+	/// </summary>
+	/// <remarks>
+	/// Written inline for the reason <see cref="SingleRepositoryArray"/> is: the routing decision
+	/// reads <c>type</c> and <c>login</c> and nothing else, and a captured account payload would
+	/// carry thirty fields whose presence no assertion depends on, inviting a later reader to wonder
+	/// which of them mattered.
+	/// </remarks>
+	/// <param name="login">The value to send as the account's <c>login</c> field.</param>
+	/// <param name="type">The value to send as the account's <c>type</c> field — GitHub sends <c>User</c> or <c>Organization</c>.</param>
+	private static string AccountPayload(string login, string type) =>
+		$$"""
+		{"id":90000002,"login":"{{login}}","type":"{{type}}"}
+		""";
+
 	[TestMethod]
 	public async Task AppliesATokenCredentialToTheRequestAsync()
 	{
 		PersonaGUID persona = CredentialCache.CreatePersonaGUID();
 		CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token = "ghp_abc123".As<CredentialToken>() });
 
+		// Two responses because a credential is supplied: an authenticated enumeration establishes the
+		// owner's type before choosing a route. The assertion is on the first request either way — the
+		// credential has to reach every request this provider issues, probe included.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, AccountPayload("contoso", "Organization"), ("Content-Type", "application/json"))
 			.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"));
 		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), PersonaGUID = persona, Handler = handler };
 
@@ -109,6 +130,7 @@ public sealed class GitHubProviderTests
 		// scheme for each: "Token" for a PAT, "Bearer" for a JWT such as a GitHub App token. Proves
 		// the BearerToken kind reaches the Octokit client as Bearer rather than collapsing to Token.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, AccountPayload("contoso", "Organization"), ("Content-Type", "application/json"))
 			.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"));
 		GitHubProvider provider = new()
 		{
@@ -133,9 +155,9 @@ public sealed class GitHubProviderTests
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		// The route this provider calls is a documented part of its contract, not an Octokit detail:
-		// GET /users/{login}/repos is exactly why GetRepositoriesAsync returns public repositories
-		// only, and GET /user/repos would silently return the token's own repositories instead of the
-		// configured owner's. Nothing else in the suite pins it.
+		// GET /users/{login}/repos is the owner-honouring route that needs no credential, and
+		// GET /user/repos would silently return the token's own repositories instead of the configured
+		// owner's. Nothing else in the suite pins it for the unauthenticated case.
 		Assert.AreEqual("/users/contoso/repos", handler.Requests[0].Uri.AbsolutePath);
 
 		// Asserted on the parsed fields of the first two entries, against the fixture's real
@@ -149,6 +171,151 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual("example-repo-2".As<GitRepositoryName>(), repositories[1].Name);
 		Assert.AreEqual("https://github.com/example-user/example-repo-2.git".As<GitRepositoryRemotePath>(), repositories[1].RemotePath);
 		Assert.AreEqual("https://github.com/example-user/example-repo-2".As<GitRepositoryWebURI>(), repositories[1].WebURI);
+	}
+
+	[TestMethod]
+	public async Task IssuesNoOwnerTypeProbeWithoutACredentialAsync()
+	{
+		// The unauthenticated enumeration is one request, not three. Every route this provider can
+		// choose between collapses to the same public answer without a credential, so probing which
+		// one to ask for would spend two requests distinguishing identical answers. Asserted as an
+		// exact count rather than on the one path, because a probe that ran and was ignored would
+		// leave that path assertion passing.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/users/contoso/repos", HttpStatusCode.OK, SingleRepositoryArray("public-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(1, handler.Requests.Count);
+		Assert.AreEqual("public-repo".As<GitRepositoryName>(), repositories[0].Name);
+	}
+
+	[TestMethod]
+	public async Task EnumeratesAnOrganisationOnTheOrgRouteWhenAuthenticatedAsync()
+	{
+		// The case this whole route selection exists for. GET /users/{login}/repos is public-only even
+		// with a token, so an organisation's private repositories were invisible to a credential that
+		// could plainly see them — the divergence from AzureDevOpsProvider, which reports everything
+		// its token reaches, under one interface that promises the same coverage of both.
+		//
+		// RespondToPath rather than an assertion on the recorded URI: a scripted success returned
+		// regardless of route would let the wrong route parse and map a body GitHub would never have
+		// sent it, and the test would pass on a provider that still asks the public endpoint.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/users/contoso", HttpStatusCode.OK, AccountPayload("contoso", "Organization"), ("Content-Type", "application/json"))
+			.RespondToPath("/orgs/contoso/repos", HttpStatusCode.OK, SingleRepositoryArray("private-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromToken("ghp_abc123"),
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(2, handler.Requests.Count);
+		Assert.AreEqual("/users/contoso", handler.Requests[0].Uri.AbsolutePath);
+		Assert.AreEqual("/orgs/contoso/repos", handler.Requests[1].Uri.AbsolutePath);
+
+		// The repository is named for the route that produced it: the public route is scripted to
+		// answer nothing here, so this name can only have arrived through /orgs/contoso/repos.
+		Assert.AreEqual("private-repo".As<GitRepositoryName>(), repositories[0].Name);
+	}
+
+	[TestMethod]
+	public async Task EnumeratesTheCredentialsOwnAccountOnTheCurrentUserRouteAsync()
+	{
+		// A user owner that is the credential's own account. GET /user/repos is the only route that
+		// reveals that account's private repositories, and it is reachable only once GET /user has
+		// confirmed the configured owner IS that account — the endpoint describes the token's own
+		// repositories regardless of which owner was configured, so reaching it any earlier would
+		// stop honouring Owner.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			// Scripted at the owner's own casing, because that is the spelling this provider sends:
+			// GitHub resolves a login case-insensitively, the recorded path is compared exactly, and
+			// nothing here canonicalises Owner before putting it in a URI.
+			.RespondToPath("/users/Octocat", HttpStatusCode.OK, AccountPayload("octocat", "User"), ("Content-Type", "application/json"))
+			.RespondToPath("/user", HttpStatusCode.OK, AccountPayload("octocat", "User"), ("Content-Type", "application/json"))
+			.RespondToPath("/user/repos", HttpStatusCode.OK, SingleRepositoryArray("private-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			// Deliberately cased differently from the login GET /user reports. GitHub logins are
+			// unique case-insensitively, so "Octocat" and "octocat" name one account, and an ordinal
+			// comparison here would demote the owner's own repositories to the public-only route.
+			Owner = "Octocat".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromToken("ghp_abc123"),
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(3, handler.Requests.Count);
+		Assert.AreEqual("/user/repos", handler.Requests[2].Uri.AbsolutePath);
+
+		// Owner affiliation, not the unfiltered default: GET /user/repos with no affiliation also
+		// returns repositories the account merely collaborates on or reaches through an organisation,
+		// which would report another owner's work under this owner's name.
+		Assert.AreEqual("?affiliation=owner", handler.Requests[2].Uri.Query);
+
+		Assert.AreEqual("private-repo".As<GitRepositoryName>(), repositories[0].Name);
+	}
+
+	[TestMethod]
+	public async Task FallsBackToThePublicRouteForAUserOtherThanTheCredentialsOwnAsync()
+	{
+		// The one case where the public-only limit is real rather than a defect: GitHub publishes no
+		// authenticated route that honours an arbitrary user owner. Worth pinning, because the
+		// tempting shortcut — sending GET /user/repos anyway — would answer with the token holder's
+		// own repositories under someone else's name.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/users/someone-else", HttpStatusCode.OK, AccountPayload("someone-else", "User"), ("Content-Type", "application/json"))
+			.RespondToPath("/user", HttpStatusCode.OK, AccountPayload("octocat", "User"), ("Content-Type", "application/json"))
+			.RespondToPath("/users/someone-else/repos", HttpStatusCode.OK, SingleRepositoryArray("public-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "someone-else".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromToken("ghp_abc123"),
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(3, handler.Requests.Count);
+		Assert.AreEqual("/users/someone-else/repos", handler.Requests[2].Uri.AbsolutePath);
+		Assert.AreEqual("public-repo".As<GitRepositoryName>(), repositories[0].Name);
+	}
+
+	[TestMethod]
+	public async Task FallsBackToThePublicRouteWhenTheCredentialHasNoUserIdentityAsync()
+	{
+		// A GitHub App installation token authenticates but belongs to no user, and GitHub answers its
+		// GET /user with 403. That must not become a thrown GitHostingAuthenticationException: such a
+		// credential enumerated a user owner's public repositories perfectly well before any of this
+		// routing existed, and turning a working call into a failure is a worse regression than the
+		// under-reporting the routing was added to fix. A 401 is deliberately not covered here —
+		// a credential GitHub rejects outright still propagates, and
+		// TranslatesAnUnauthorizedResponseToGitHostingAuthenticationExceptionAsync pins that.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/users/octocat", HttpStatusCode.OK, AccountPayload("octocat", "User"), ("Content-Type", "application/json"))
+			.RespondToPath("/user", HttpStatusCode.Forbidden, "{\"message\":\"Resource not accessible by integration\"}", ("Content-Type", "application/json"))
+			.RespondToPath("/users/octocat/repos", HttpStatusCode.OK, SingleRepositoryArray("public-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromBearerToken("eyJ0eXAiOiJKV1Qi"),
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("/users/octocat/repos", handler.Requests[2].Uri.AbsolutePath);
+		Assert.AreEqual("public-repo".As<GitRepositoryName>(), repositories[0].Name);
 	}
 
 	[TestMethod]
