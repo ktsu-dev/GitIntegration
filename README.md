@@ -70,7 +70,10 @@ builds and parses its requests by hand instead.
   `GitHubProvider` implements it on top of Octokit, `AzureDevOpsProvider` on a raw `HttpClient`
   against Azure DevOps's REST API.
 - **Credential Resolution**: hosting providers integrate with `ktsu.CredentialCache`, so credentials
-  come from the host's native keyring rather than configuration files.
+  come from the host's native keyring rather than configuration files. `CredentialSource` is the
+  escape hatch for a credential a keyring should not hold, such as a short-lived Entra ID access
+  token, and `HostingCredential.FromBearerToken` sends it as `Authorization: Bearer` rather than in
+  the personal-access-token slot.
 - **Semantic Git Types**: validated wrapper types for every identifier Git tooling passes around, so
   mismatched arguments fail at compile time rather than at runtime.
 
@@ -592,6 +595,43 @@ IGitHostingProvider azure = new AzureDevOpsProvider
 IReadOnlyList<GitRepository> repositories = await azure.GetRepositoriesAsync();
 ```
 
+#### Supplying a credential directly
+
+`PersonaGUID` reads the host's native keyring, which suits a long-lived secret such as a personal
+access token and suits nothing about a short-lived one. An Entra ID access token is minted per
+session, expires within the hour, and authenticates against Azure DevOps only as
+`Authorization: Bearer` — the Basic slot a personal access token travels in rejects it. Set
+`CredentialSource` for that case:
+
+```csharp
+using Azure.Core;
+using Azure.Identity;
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+TokenCredential entra = new InteractiveBrowserCredential();
+TokenRequestContext context = new(["499b84ac-1321-427f-aa17-267ca6975798/user_impersonation"]);
+
+IGitHostingProvider azure = new AzureDevOpsProvider
+{
+    Owner = "my-org".As<GitProviderOwner>(),
+    Project = "my-project".As<AzureDevOpsProjectName>(),
+    CredentialSource = () => HostingCredential.FromBearerToken(entra.GetToken(context, default).Token),
+};
+```
+
+The callback runs on the request path and is consulted on every resolution, never cached, so a
+caller can return a freshly refreshed token each time. It should return an already-valid cached
+token rather than block on a network round trip — which is what `TokenCredential.GetToken` and its
+equivalents already do. `CredentialSource` takes precedence over the credential cache when set, so
+there is no need to also clear whatever the keyring holds for the persona. Return
+`HostingCredential.None` to proceed unauthenticated.
+
+`HostingCredential.FromToken` remains the right choice for a host-native token: Azure DevOps sends
+it as Basic with an empty username, which is what its personal access tokens require, and GitHub
+sends it under Octokit's `Token` scheme. `FromBearerToken` maps to Octokit's `Bearer` type on
+GitHub, which is what a GitHub App installation token needs.
+
 `Project` is only required for pull request operations — Azure DevOps has no project-less pull
 request endpoint, and calling `GetPullRequestsAsync` or `CreatePullRequest` without it throws
 `InvalidOperationException` immediately. `GetPullRequestsAsync` returns **open** pull requests
@@ -871,6 +911,7 @@ pull request creation, over whichever transport and authentication scheme the ho
 | `Name` | `GitProviderName` | Display name of the provider. |
 | `Owner` | `GitProviderOwner` | The owner of the repositories in this provider. |
 | `PersonaGUID` | `PersonaGUID` | The persona GUID used for authentication with the provider (from `ktsu.CredentialCache`). |
+| `CredentialSource` | `Func<HostingCredential>?` | Supplies the credential directly, bypassing the credential cache. Consulted on every resolution, so an expiring token can be refreshed. `null` to resolve through `PersonaGUID`. |
 | `IsAuthenticated` | `bool` | Whether requests this provider issues carry a credential. A cache entry that resolves to "proceed unauthenticated", and one of a type the provider cannot apply, both report `false`. |
 
 #### Methods

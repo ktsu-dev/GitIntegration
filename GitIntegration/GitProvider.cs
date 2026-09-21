@@ -49,6 +49,37 @@ public abstract class GitProvider : IGitHostingProvider
 	/// <value>A GUID identifying the authentication persona.</value>
 	public PersonaGUID PersonaGUID { get; init; } = CredentialCache.CreatePersonaGUID();
 
+	/// <summary>
+	/// Gets or initializes a callback supplying this provider's credential directly, bypassing the
+	/// credential cache, or <see langword="null"/> to resolve through <see cref="PersonaGUID"/> as
+	/// usual.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// The seam for a credential the credential cache cannot hold. <see cref="PersonaGUID"/> reads
+	/// the host's native keyring, which suits a long-lived secret such as a personal access token,
+	/// and suits nothing about a short-lived one: an Entra ID access token is minted per session by
+	/// an identity library, expires within the hour, and writing it to a keyring would persist a
+	/// secret that is stale before it is read again.
+	/// </para>
+	/// <para>
+	/// A callback rather than a stored <see cref="HostingCredential"/>, and consulted on every
+	/// resolution rather than cached, precisely so an expiring token can be refreshed: a caller
+	/// returns whatever its identity library hands it at the moment of the call. The cost is that
+	/// the callback runs inline on the request path, so it should return a cached-and-still-valid
+	/// token rather than block on a fresh network round trip each time — which is what
+	/// <c>TokenCredential.GetToken</c> and its equivalents already do.
+	/// </para>
+	/// <para>
+	/// Takes precedence over the credential cache when set, so a caller supplying one never has to
+	/// also clear whatever the keyring happens to hold for its persona. Returning
+	/// <see cref="HostingCredential.None"/> is how it says "proceed unauthenticated"; returning
+	/// <see langword="null"/> is a caller bug and makes <see cref="ResolveCredential"/> throw.
+	/// </para>
+	/// </remarks>
+	/// <value>The callback, or <see langword="null"/> to use the credential cache.</value>
+	public Func<HostingCredential>? CredentialSource { get; init; }
+
 	/// <inheritdoc/>
 	/// <remarks>
 	/// Reports whether a request this provider issues would actually carry a credential, which is a
@@ -236,9 +267,21 @@ public abstract class GitProvider : IGitHostingProvider
 	/// <exception cref="InvalidOperationException">
 	/// A credential was resolved whose runtime type is not one this method recognises.
 	/// </exception>
-	internal HostingCredential ResolveCredential() =>
-		ResolveRecognisedCredential(out Credential? credential) ?? throw new InvalidOperationException(
-			$"Provider '{Name}' resolved a credential of type '{credential!.GetType()}', which this library does not recognise.");
+	internal HostingCredential ResolveCredential()
+	{
+		HostingCredential? resolved = ResolveRecognisedCredential(out Credential? credential);
+		if (resolved is not null)
+		{
+			return resolved;
+		}
+
+		// Two ways to get here, and they are different caller mistakes, so they get different
+		// messages. A null credential means CredentialSource returned null, because that path never
+		// assigns the out parameter; a non-null one means the cache held a subtype not in the table.
+		throw new InvalidOperationException(credential is null
+			? $"Provider '{Name}' has a {nameof(CredentialSource)} that returned null. Return {nameof(HostingCredential)}.{nameof(HostingCredential.None)} to proceed unauthenticated."
+			: $"Provider '{Name}' resolved a credential of type '{credential.GetType()}', which this library does not recognise.");
+	}
 
 	/// <summary>
 	/// Resolves this provider's credential, reporting an unrecognised <see cref="Credential"/>
@@ -258,6 +301,20 @@ public abstract class GitProvider : IGitHostingProvider
 	/// <returns>The resolved credential, or <see langword="null"/> for an unrecognised subtype.</returns>
 	private HostingCredential? ResolveRecognisedCredential(out Credential? credential)
 	{
+		credential = null;
+
+		// Checked before the cache, not merged with it: a caller that supplied a source has said
+		// where its credential comes from, and falling back to the keyring when the source returns
+		// None would silently authenticate as somebody else.
+		if (CredentialSource is not null)
+		{
+			// A null return leaves `credential` null, which is what tells ResolveCredential to
+			// report this as a CredentialSource bug rather than an unrecognised cache subtype. It
+			// reaches IsAuthenticated as "no credential a request could carry", which is a property
+			// getter and so must not throw.
+			return CredentialSource();
+		}
+
 		if (!TryGetCredential(out credential) || credential is null or CredentialWithNothing)
 		{
 			return HostingCredential.None;
@@ -498,9 +555,13 @@ internal readonly record struct GitRepositoryAddress(string Value, bool IsHostRe
 /// A record with a <see cref="HostingCredentialKind"/> discriminator rather than a type hierarchy:
 /// a provider applying this result switches on <see cref="Kind"/> exactly once, so a closed set of
 /// fields on one type reads as clearly as a hierarchy would and avoids a second type family
-/// alongside <see cref="Credential"/> for what is, here, an internal implementation detail.
+/// alongside <see cref="Credential"/>.
+/// <para>
+/// Public because <see cref="GitProvider.CredentialSource"/> is the vocabulary a caller supplies a
+/// credential in.
+/// </para>
 /// </remarks>
-internal sealed record HostingCredential
+public sealed record HostingCredential
 {
 	/// <summary>The singleton result for "no credential to apply".</summary>
 	public static readonly HostingCredential None = new() { Kind = HostingCredentialKind.None };
@@ -508,7 +569,14 @@ internal sealed record HostingCredential
 	/// <summary>Gets which of the credential's fields are populated.</summary>
 	public required HostingCredentialKind Kind { get; init; }
 
-	/// <summary>Gets the bearer token, when <see cref="Kind"/> is <see cref="HostingCredentialKind.Token"/>.</summary>
+	/// <summary>
+	/// Gets the token, when <see cref="Kind"/> is <see cref="HostingCredentialKind.Token"/> or
+	/// <see cref="HostingCredentialKind.BearerToken"/>.
+	/// </summary>
+	/// <remarks>
+	/// One field for both kinds, because both carry exactly one opaque string and it is
+	/// <see cref="Kind"/>, not the value, that decides which scheme a provider sends it under.
+	/// </remarks>
 	public string? Token { get; init; }
 
 	/// <summary>Gets the username, when <see cref="Kind"/> is <see cref="HostingCredentialKind.UsernamePassword"/>.</summary>
@@ -517,10 +585,29 @@ internal sealed record HostingCredential
 	/// <summary>Gets the password, when <see cref="Kind"/> is <see cref="HostingCredentialKind.UsernamePassword"/>.</summary>
 	public string? Password { get; init; }
 
-	/// <summary>Creates a result carrying a bearer token.</summary>
+	/// <summary>Creates a result carrying a host-native token, such as a personal access token.</summary>
+	/// <remarks>
+	/// Not a bearer token. Azure DevOps sends this kind as Basic with an empty username, the scheme
+	/// its personal access tokens require, and GitHub sends it as Octokit's <c>Token</c> scheme. Use
+	/// <see cref="FromBearerToken(string)"/> for a credential that must travel as
+	/// <c>Authorization: Bearer</c>.
+	/// </remarks>
 	/// <param name="token">The token.</param>
 	/// <returns>The resolved credential.</returns>
 	public static HostingCredential FromToken(string token) => new() { Kind = HostingCredentialKind.Token, Token = token };
+
+	/// <summary>Creates a result carrying a token to send as <c>Authorization: Bearer</c>.</summary>
+	/// <remarks>
+	/// Distinct from <see cref="FromToken(string)"/> because the two travel under different schemes
+	/// and hosts do not accept them interchangeably. An Entra ID access token authenticates against
+	/// Azure DevOps only as Bearer, and fails outright in the Basic slot a personal access token
+	/// uses; on GitHub this maps to Octokit's <c>Bearer</c> authentication type, which is what a
+	/// GitHub App installation token requires.
+	/// </remarks>
+	/// <param name="token">The token.</param>
+	/// <returns>The resolved credential.</returns>
+	public static HostingCredential FromBearerToken(string token) =>
+		new() { Kind = HostingCredentialKind.BearerToken, Token = token };
 
 	/// <summary>Creates a result carrying a username and password.</summary>
 	/// <param name="username">The username.</param>
@@ -530,14 +617,24 @@ internal sealed record HostingCredential
 		new() { Kind = HostingCredentialKind.UsernamePassword, Username = username, Password = password };
 }
 
-/// <summary>Which fields a <see cref="HostingCredential"/> carries.</summary>
-internal enum HostingCredentialKind
+/// <summary>Which fields a <see cref="HostingCredential"/> carries, and under which scheme it travels.</summary>
+public enum HostingCredentialKind
 {
 	/// <summary>No credential — proceed unauthenticated.</summary>
 	None,
 
-	/// <summary>A bearer token, in <see cref="HostingCredential.Token"/>.</summary>
+	/// <summary>
+	/// A host-native token, in <see cref="HostingCredential.Token"/>, such as a personal access
+	/// token. Azure DevOps sends it as Basic with an empty username; GitHub sends it as Octokit's
+	/// <c>Token</c> scheme.
+	/// </summary>
 	Token,
+
+	/// <summary>
+	/// A token, in <see cref="HostingCredential.Token"/>, to send as <c>Authorization: Bearer</c> —
+	/// an Entra ID access token against Azure DevOps, or a GitHub App token against GitHub.
+	/// </summary>
+	BearerToken,
 
 	/// <summary>A username and password, in <see cref="HostingCredential.Username"/> and <see cref="HostingCredential.Password"/>.</summary>
 	UsernamePassword,

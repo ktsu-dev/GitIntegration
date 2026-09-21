@@ -103,6 +103,26 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task SendsBearerAuthForABearerTokenCredentialAsync()
+	{
+		// GitHub distinguishes the two as Octokit AuthenticationType values, and sends a different
+		// scheme for each: "Token" for a PAT, "Bearer" for a JWT such as a GitHub App token. Proves
+		// the BearerToken kind reaches the Octokit client as Bearer rather than collapsing to Token.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromBearerToken("eyJ0eXAiOiJKV1Qi"),
+		};
+
+		_ = await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("Bearer eyJ0eXAiOiJKV1Qi", handler.Requests[0].Headers["Authorization"]);
+	}
+
+	[TestMethod]
 	public async Task EnumeratesRepositoriesForTheOwnerAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()

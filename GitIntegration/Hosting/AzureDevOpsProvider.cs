@@ -427,6 +427,12 @@ public sealed class AzureDevOpsProvider : GitProvider
 			case HostingCredentialKind.Token:
 				request.Headers.Authorization = BasicAuthenticationHeader(string.Empty, credential.Token ?? string.Empty);
 				break;
+			case HostingCredentialKind.BearerToken:
+				// Sent as-is under the Bearer scheme, not base64-encoded into the Basic slot above.
+				// Azure DevOps accepts an Entra ID access token only this way; the same token in the
+				// personal-access-token slot does not authenticate.
+				request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.Token ?? string.Empty);
+				break;
 			case HostingCredentialKind.UsernamePassword:
 				request.Headers.Authorization = BasicAuthenticationHeader(credential.Username ?? string.Empty, credential.Password ?? string.Empty);
 				break;

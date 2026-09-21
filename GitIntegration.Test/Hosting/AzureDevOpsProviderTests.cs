@@ -341,6 +341,28 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	[TestMethod]
+	public async Task SendsBearerAuthForABearerTokenCredentialAsync()
+	{
+		// The whole point of the BearerToken kind. Azure DevOps accepts an Entra ID access token only
+		// in a Bearer header; putting one in the Basic/PAT slot fails to authenticate, so a provider
+		// that collapsed the two kinds onto one header would silently break Entra callers.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("azure-devops-repositories.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromBearerToken("eyJ0eXAiOiJKV1Qi"),
+		};
+
+		_ = await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// Asserted verbatim and un-decoded: a Bearer header carries the token as-is, and any
+		// base64 round-trip here would mean it had been through the Basic path by mistake.
+		Assert.AreEqual("Bearer eyJ0eXAiOiJKV1Qi", handler.Requests[0].Headers["Authorization"]);
+	}
+
+	[TestMethod]
 	public async Task SendsNoAuthorizationHeaderWhenUnauthenticatedAsync()
 	{
 		// A fresh persona that nothing ever seeded — proceeding unauthenticated is legitimate for

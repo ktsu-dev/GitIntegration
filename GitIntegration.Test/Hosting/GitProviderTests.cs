@@ -62,6 +62,101 @@ public sealed class GitProviderTests
 	}
 
 	[TestMethod]
+	public void UsesABearerTokenFromTheCredentialSource()
+	{
+		// The case the credential cache cannot serve: an Entra ID access token is minted per session
+		// by an identity library and expires, so it never belongs in the OS keyring PersonaGUID reads.
+		TestProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			CredentialSource = () => HostingCredential.FromBearerToken("eyJ0eXAiOiJKV1Qi"),
+		};
+
+		HostingCredential resolved = provider.CallResolveCredential();
+
+		Assert.AreEqual(HostingCredentialKind.BearerToken, resolved.Kind);
+		Assert.AreEqual("eyJ0eXAiOiJKV1Qi", resolved.Token);
+	}
+
+	[TestMethod]
+	public void PrefersTheCredentialSourceOverTheCredentialCache()
+	{
+		// Both are configured. The explicitly injected one wins, so a caller that supplies a source
+		// never has to also clear whatever the keyring happens to hold for its persona.
+		PersonaGUID persona = SeedCredential(new CredentialWithToken { Token = "pat-from-cache".As<CredentialToken>() });
+		TestProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			PersonaGUID = persona,
+			CredentialSource = () => HostingCredential.FromBearerToken("token-from-source"),
+		};
+
+		HostingCredential resolved = provider.CallResolveCredential();
+
+		Assert.AreEqual(HostingCredentialKind.BearerToken, resolved.Kind);
+		Assert.AreEqual("token-from-source", resolved.Token);
+	}
+
+	[TestMethod]
+	public void ConsultsTheCredentialSourceOnEveryResolution()
+	{
+		// An access token expires. A caller returning a fresh one per call has to actually be asked
+		// each time, so the first answer must not be cached anywhere.
+		int calls = 0;
+		TestProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			CredentialSource = () => HostingCredential.FromBearerToken($"token-{++calls}"),
+		};
+
+		Assert.AreEqual("token-1", provider.CallResolveCredential().Token);
+		Assert.AreEqual("token-2", provider.CallResolveCredential().Token);
+		Assert.AreEqual(2, calls);
+	}
+
+	[TestMethod]
+	public void ProceedsUnauthenticatedWhenTheCredentialSourceSuppliesNone()
+	{
+		// HostingCredential.None is how a source says "proceed unauthenticated" — the same meaning a
+		// resolved CredentialWithNothing carries on the cache path.
+		TestProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			CredentialSource = () => HostingCredential.None,
+		};
+
+		Assert.AreEqual(HostingCredentialKind.None, provider.CallResolveCredential().Kind);
+		Assert.IsFalse(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void ReportsAuthenticatedForACredentialSourceSupplyingAToken()
+	{
+		TestProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			CredentialSource = () => HostingCredential.FromBearerToken("eyJ0eXAiOiJKV1Qi"),
+		};
+
+		Assert.IsTrue(provider.IsAuthenticated);
+	}
+
+	[TestMethod]
+	public void ThrowsWhenTheCredentialSourceReturnsNull()
+	{
+		// Returning null is a caller bug, not a way to say "unauthenticated" — HostingCredential.None
+		// says that explicitly. Treating null as None would hide the bug, which is the same reason an
+		// unrecognised Credential subtype throws rather than proceeding.
+		TestProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			CredentialSource = () => null!,
+		};
+
+		_ = Assert.ThrowsExactly<InvalidOperationException>(provider.CallResolveCredential);
+	}
+
+	[TestMethod]
 	public void ProceedsUnauthenticatedWhenNoCredentialIsResolved()
 	{
 		// A fresh persona that nothing ever seeded: TryGet reports false, and ResolveCredential
