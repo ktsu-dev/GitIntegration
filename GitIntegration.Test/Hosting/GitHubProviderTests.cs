@@ -188,7 +188,7 @@ public sealed class GitHubProviderTests
 		IReadOnlyList<GitRepository> repositories =
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(1, handler.Requests.Count);
+		Assert.HasCount(1, handler.Requests);
 		Assert.AreEqual("public-repo".As<GitRepositoryName>(), repositories[0].Name);
 	}
 
@@ -216,7 +216,7 @@ public sealed class GitHubProviderTests
 		IReadOnlyList<GitRepository> repositories =
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(2, handler.Requests.Count);
+		Assert.HasCount(2, handler.Requests);
 		Assert.AreEqual("/users/contoso", handler.Requests[0].Uri.AbsolutePath);
 		Assert.AreEqual("/orgs/contoso/repos", handler.Requests[1].Uri.AbsolutePath);
 
@@ -253,7 +253,7 @@ public sealed class GitHubProviderTests
 		IReadOnlyList<GitRepository> repositories =
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(3, handler.Requests.Count);
+		Assert.HasCount(3, handler.Requests);
 		Assert.AreEqual("/user/repos", handler.Requests[2].Uri.AbsolutePath);
 
 		// Owner affiliation, not the unfiltered default: GET /user/repos with no affiliation also
@@ -285,7 +285,7 @@ public sealed class GitHubProviderTests
 		IReadOnlyList<GitRepository> repositories =
 			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(3, handler.Requests.Count);
+		Assert.HasCount(3, handler.Requests);
 		Assert.AreEqual("/users/someone-else/repos", handler.Requests[2].Uri.AbsolutePath);
 		Assert.AreEqual("public-repo".As<GitRepositoryName>(), repositories[0].Name);
 	}
