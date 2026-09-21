@@ -557,9 +557,8 @@ internal readonly record struct GitRepositoryAddress(string Value, bool IsHostRe
 /// fields on one type reads as clearly as a hierarchy would and avoids a second type family
 /// alongside <see cref="Credential"/>.
 /// <para>
-/// Public rather than internal, because <see cref="GitProvider.CredentialSource"/> is the vocabulary
-/// a caller supplies a credential in. It was internal while the credential cache was the only way in
-/// and this type was purely an implementation detail of that path.
+/// Public because <see cref="GitProvider.CredentialSource"/> is the vocabulary a caller supplies a
+/// credential in.
 /// </para>
 /// </remarks>
 public sealed record HostingCredential
@@ -588,10 +587,10 @@ public sealed record HostingCredential
 
 	/// <summary>Creates a result carrying a host-native token, such as a personal access token.</summary>
 	/// <remarks>
-	/// Not a bearer token, despite what this method was once documented as: Azure DevOps sends this
-	/// kind as Basic with an empty username, the scheme its personal access tokens require, and
-	/// GitHub sends it as Octokit's <c>Token</c> scheme. Use <see cref="FromBearerToken(string)"/>
-	/// for a credential that must travel as <c>Authorization: Bearer</c>.
+	/// Not a bearer token. Azure DevOps sends this kind as Basic with an empty username, the scheme
+	/// its personal access tokens require, and GitHub sends it as Octokit's <c>Token</c> scheme. Use
+	/// <see cref="FromBearerToken(string)"/> for a credential that must travel as
+	/// <c>Authorization: Bearer</c>.
 	/// </remarks>
 	/// <param name="token">The token.</param>
 	/// <returns>The resolved credential.</returns>
