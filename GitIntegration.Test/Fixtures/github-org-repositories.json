@@ -22,7 +22,7 @@
       "repos_url": "https://api.github.com/users/example-user/repos",
       "events_url": "https://api.github.com/users/example-user/events{/privacy}",
       "received_events_url": "https://api.github.com/users/example-user/received_events",
-      "type": "User",
+      "type": "Organization",
       "user_view_type": "public",
       "site_admin": false
     },
@@ -125,7 +125,7 @@
       "repos_url": "https://api.github.com/users/example-user/repos",
       "events_url": "https://api.github.com/users/example-user/events{/privacy}",
       "received_events_url": "https://api.github.com/users/example-user/received_events",
-      "type": "User",
+      "type": "Organization",
       "user_view_type": "public",
       "site_admin": false
     },

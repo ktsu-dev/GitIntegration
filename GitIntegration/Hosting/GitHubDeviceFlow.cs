@@ -171,16 +171,20 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	internal Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = Task.Delay;
 
 	/// <summary>
-	/// Gets or initializes the monotonic clock <see cref="WaitForTokenAsync"/> reads to enforce
-	/// <see cref="GitHubDeviceCode.ExpiresIn"/>.
+	/// Gets or initializes the monotonic clock, in milliseconds, <see cref="WaitForTokenAsync"/> reads
+	/// to enforce <see cref="GitHubDeviceCode.ExpiresIn"/>.
 	/// </summary>
 	/// <remarks>
 	/// Defaults to <see cref="Environment.TickCount64"/>, a monotonic source deliberately chosen over
 	/// <see cref="DateTime.Now"/> or <see cref="DateTimeOffset.UtcNow"/>: neither is guaranteed
 	/// monotonic, and a clock adjustment during a wait that can last minutes must not extend or
-	/// collapse the window this flow enforces. Internal for the same reason <see cref="Delay"/> is.
+	/// collapse the window this flow enforces. Named for its unit rather than for the .NET member it
+	/// defaults to: a future replacement built on, say, <see cref="DateTime.UtcNow"/>'s <c>Ticks</c>
+	/// (100-nanosecond units) would silently widen the deadline computed from it roughly ten-thousand
+	/// fold, and a name that already states "milliseconds" is what stops that substitution compiling
+	/// clean while quietly breaking the deadline. Internal for the same reason <see cref="Delay"/> is.
 	/// </remarks>
-	internal Func<long> NowTicks { get; init; } = () => Environment.TickCount64;
+	internal Func<long> NowMilliseconds { get; init; } = () => Environment.TickCount64;
 
 	/// <summary>
 	/// Asks GitHub to begin a device flow.
@@ -214,11 +218,23 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 		GitHubDeviceCodeResponseBody parsed = DeserializeOrThrow(
 			body, GitHubDeviceFlowJsonContext.Default.GitHubDeviceCodeResponseBody, "device code");
 
+		// TryCreate, not `new Uri(...)`: `verification_uri` being present (required by the response
+		// shape) says nothing about its content. An empty string, a relative path, or a truncated
+		// body all reach here as a syntactically valid JSON string, and `new Uri` would throw
+		// UriFormatException straight past this method's documented failure surface, which is
+		// GitHostingRequestException alone, exactly the leak class DeserializeOrThrow already guards
+		// against for JsonException.
+		if (!Uri.TryCreate(parsed.VerificationUri, UriKind.Absolute, out Uri? verificationUri))
+		{
+			throw new GitHostingRequestException(
+				$"GitHub reported success but returned a verification URI that is not an absolute URI: \"{parsed.VerificationUri}\".");
+		}
+
 		return new GitHubDeviceCode
 		{
 			UserCode = parsed.UserCode,
 			DeviceCode = parsed.DeviceCode,
-			VerificationUri = new Uri(parsed.VerificationUri),
+			VerificationUri = verificationUri,
 			// GitHub reports both as integer seconds, the conversion happens once, here.
 			ExpiresIn = TimeSpan.FromSeconds(parsed.ExpiresIn),
 			Interval = TimeSpan.FromSeconds(parsed.Interval),
@@ -229,6 +245,7 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// Waits for the user to authorise the flow, then returns the credential GitHub issues.
 	/// </summary>
 	/// <remarks>
+	/// <para>
 	/// Polls until the user authorises, the code expires, or <paramref name="cancellationToken"/> is
 	/// cancelled, so this may block for as long as <see cref="GitHubDeviceCode.ExpiresIn"/>. A
 	/// <c>authorization_pending</c> answer waits <see cref="GitHubDeviceCode.Interval"/> and tries
@@ -237,13 +254,33 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// <c>authorization_pending</c> past <see cref="GitHubDeviceCode.ExpiresIn"/> would otherwise poll
 	/// forever, since nothing about that answer's shape distinguishes a slow user from a server that
 	/// never intends to resolve.
+	/// </para>
+	/// <para>
+	/// Every other OAuth error code is split by what a caller can do about it, not merely by whether
+	/// GitHub happened to send one. <c>access_denied</c> and <c>expired_token</c> are a fact about the
+	/// person authorising and become <see cref="GitHostingAuthenticationException"/>, since offering
+	/// the sign-in again is the caller's correct remedy for both. <c>incorrect_client_credentials</c>,
+	/// <c>unsupported_grant_type</c>, and <c>device_flow_disabled</c> are a fact about the caller's own
+	/// configuration and become <see cref="GitHostingRequestException"/> instead: none of the three can
+	/// be fixed by the user trying again, so reporting them as an authentication failure would loop a
+	/// person through a sign-in that can never succeed. A code this method does not recognise is
+	/// deliberately treated as a <see cref="GitHostingRequestException"/> as well, on the same
+	/// reasoning: an unrecognised code is either a GitHub error this library has not been taught yet or
+	/// something upstream of GitHub answering instead, and in both cases a caller is better served
+	/// being told something is wrong with the request than being invited to retry a sign-in for a
+	/// reason nobody has verified sign-in can fix.
+	/// </para>
 	/// </remarks>
 	/// <param name="code">What <see cref="RequestDeviceCodeAsync"/> returned.</param>
 	/// <param name="cancellationToken">Abandons the wait.</param>
 	/// <returns>A host-native token credential.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="code"/> is <see langword="null"/>.</exception>
 	/// <exception cref="GitHostingAuthenticationException">The user refused, or the code expired.</exception>
-	/// <exception cref="GitHostingRequestException">GitHub refused the request or could not be reached.</exception>
+	/// <exception cref="GitHostingRequestException">
+	/// GitHub refused the request, could not be reached, reported a configuration fault
+	/// (<c>incorrect_client_credentials</c>, <c>unsupported_grant_type</c>, <c>device_flow_disabled</c>),
+	/// or reported an error code this method does not recognise.
+	/// </exception>
 	public async Task<HostingCredential> WaitForTokenAsync(GitHubDeviceCode code, CancellationToken cancellationToken = default)
 	{
 		Ensure.NotNull(code);
@@ -262,17 +299,17 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 
 		TimeSpan interval = code.Interval;
 
-		// A monotonic elapsed-time budget rather than a fixed end-of-wall-clock instant: NowTicks
-		// wraps Environment.TickCount64 by default, which is what makes this immune to the machine's
-		// clock being changed mid-wait, forward or back.
-		long startTicks = NowTicks();
+		// A monotonic elapsed-time budget rather than a fixed end-of-wall-clock instant:
+		// NowMilliseconds wraps Environment.TickCount64 by default, which is what makes this immune
+		// to the machine's clock being changed mid-wait, forward or back.
+		long startMilliseconds = NowMilliseconds();
 		long expiresInMilliseconds = (long)code.ExpiresIn.TotalMilliseconds;
 
 		while (true)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			if (NowTicks() - startTicks >= expiresInMilliseconds)
+			if (NowMilliseconds() - startMilliseconds >= expiresInMilliseconds)
 			{
 				throw new GitHostingAuthenticationException("GitHub did not issue a token before the device code expired.");
 			}
@@ -304,12 +341,35 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 					await WaitAsync(interval, cancellationToken).ConfigureAwait(false);
 					continue;
 
-				case string error:
+				case "access_denied" or "expired_token":
 					// GitHub reports a refusal and an expiry as a 200 carrying an error field
 					// rather than as a failure status, which is why this is read from the body
-					// rather than caught as a failed HttpResponseMessage above.
+					// rather than caught as a failed HttpResponseMessage above. These two, and
+					// only these two, are a fact about the person authorising: they said no, or
+					// ran out of time, and the caller's own remedy is to offer the sign-in again.
 					throw new GitHostingAuthenticationException(
-						$"GitHub did not issue a token: {error}. {parsed.ErrorDescription}".TrimEnd());
+						$"GitHub did not issue a token: {parsed.Error}. {parsed.ErrorDescription}".TrimEnd());
+
+				case "incorrect_client_credentials" or "unsupported_grant_type" or "device_flow_disabled":
+					// A fact about this library's caller, not about the person authorising: the
+					// client identifier is wrong, revoked, or device flow was never enabled for it.
+					// Retrying the sign-in cannot fix any of the three, so these are a request
+					// fault rather than an authentication failure, matching the design's Failures
+					// table. Offering the user another sign-in attempt here would loop them through
+					// a flow that can never succeed.
+					throw new GitHostingRequestException(
+						$"GitHub refused the device flow token request: {parsed.Error}. {parsed.ErrorDescription}".TrimEnd());
+
+				case string unrecognisedError:
+					// A code this library does not recognise is treated as a request fault rather
+					// than an authentication failure, deliberately: the two known authentication
+					// codes above are enumerated explicitly, so anything else reaching here is
+					// either a new GitHub error this library has not been taught yet, or a
+					// misbehaving proxy or interstitial, and in both cases looping the user through
+					// another sign-in attempt is more likely to be wrong than treating it as
+					// something the caller or its configuration needs to look at.
+					throw new GitHostingRequestException(
+						$"GitHub reported an unrecognised device flow error: {unrecognisedError}. {parsed.ErrorDescription}".TrimEnd());
 
 				case null when string.IsNullOrEmpty(parsed.AccessToken):
 					throw new GitHostingRequestException("GitHub reported neither a token nor an error.");

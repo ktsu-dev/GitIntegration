@@ -343,12 +343,21 @@ No new exception family. Everything lands in the hosting hierarchy that already 
 |---|---|
 | `access_denied` (user refused) | `GitHostingAuthenticationException` |
 | `expired_token` (code timed out) | `GitHostingAuthenticationException` |
-| `incorrect_client_credentials`, `unsupported_grant_type` | `GitHostingRequestException` |
-| transport failure, unparsable body | `GitHostingRequestException` |
+| `incorrect_client_credentials`, `unsupported_grant_type`, `device_flow_disabled` | `GitHostingRequestException` |
+| an error code this library does not recognise | `GitHostingRequestException` |
+| transport failure, unparsable body, a non-absolute `verification_uri` | `GitHostingRequestException` |
 
 Denial and expiry share an exception and are distinguished by message. They are the same fact to a
 caller — no credential was obtained, offer to start again — and splitting them would add a type nobody
 switches on.
+
+`device_flow_disabled` joins the request-fault row alongside the two the design first listed, for the
+same reason as both: it is a fact about the OAuth App's configuration, not about the person
+authorising, and no amount of retrying the sign-in fixes it. An error code this library has not been
+taught falls into the same bucket by deliberate choice, not by falling through unhandled: only
+`access_denied` and `expired_token` are enumerated as authentication failures, so anything else is
+either a GitHub error introduced after this was written or a misbehaving intermediary, and looping a
+person through another sign-in attempt is the worse guess of the two available.
 
 ### The client identifier
 

@@ -42,12 +42,12 @@ public sealed class GitHubDeviceFlowTests
 	private static GitHubDeviceFlow CreateFlow(
 		FakeHttpMessageHandler handler,
 		Func<TimeSpan, CancellationToken, Task>? delay = null,
-		Func<long>? nowTicks = null) =>
+		Func<long>? nowMilliseconds = null) =>
 		new("Iv1.0123456789abcdef".As<GitHubOAuthClientId>(), ["repo", "read:org"])
 		{
 			Handler = handler,
 			Delay = delay ?? Task.Delay,
-			NowTicks = nowTicks ?? (() => Environment.TickCount64),
+			NowMilliseconds = nowMilliseconds ?? (() => Environment.TickCount64),
 		};
 
 	[TestMethod]
@@ -136,6 +136,114 @@ public sealed class GitHubDeviceFlowTests
 
 		_ = await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
 			async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	[DataRow("incorrect_client_credentials")]
+	[DataRow("unsupported_grant_type")]
+	[DataRow("device_flow_disabled")]
+	public async Task ReportsAConfigurationFaultAsARequestFailureAsync(string errorCode)
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(
+			HttpStatusCode.OK,
+			$"{{\"error\":\"{errorCode}\",\"error_description\":\"unusable\"}}",
+			("Content-Type", "application/json"));
+
+		GitHubDeviceFlow flow = CreateFlow(handler);
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// Not GitHostingAuthenticationException: none of these three codes can be fixed by the user
+		// trying the sign-in again, so reporting them as an authentication failure would loop them
+		// through a flow that can never succeed.
+		GitHostingRequestException exception =
+			await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, errorCode);
+	}
+
+	[TestMethod]
+	public async Task ReportsAnUnrecognisedErrorCodeAsARequestFailureAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(
+			HttpStatusCode.OK,
+			"{\"error\":\"some_future_github_error\",\"error_description\":\"not yet catalogued\"}",
+			("Content-Type", "application/json"));
+
+		GitHubDeviceFlow flow = CreateFlow(handler);
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// The deliberate default for a code this library was not taught: a request fault, not an
+		// authentication failure, so an unrecognised error never invites retrying a sign-in.
+		GitHostingRequestException exception =
+			await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "some_future_github_error");
+	}
+
+	[TestMethod]
+	public async Task DoesNotEchoTheTokenEndpointResponseBodyOnFailureAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(
+			HttpStatusCode.InternalServerError,
+			"{\"secret\":\"do-not-leak-me\"}",
+			("Content-Type", "application/json"));
+
+		GitHubDeviceFlow flow = CreateFlow(handler);
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// A deliberate omission, not an oversight: this asserts a future edit cannot add the body
+		// back "for symmetry" with RequestDeviceCodeAsync's own failure message without CI catching it.
+		GitHostingRequestException exception =
+			await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+				async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+		Assert.IsFalse(exception.Message.Contains("do-not-leak-me", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public async Task ReportsAnEmptyVerificationUriAsARequestFailureAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(
+			HttpStatusCode.OK,
+			"{\"device_code\":\"dev-abc\",\"user_code\":\"WXYZ-1234\"," +
+			"\"verification_uri\":\"\",\"expires_in\":900,\"interval\":5}",
+			("Content-Type", "application/json"));
+
+		_ = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await CreateFlow(handler)
+				.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task ReportsANonAbsoluteVerificationUriAsARequestFailureAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(
+			HttpStatusCode.OK,
+			// Not a leading-slash path: Uri.TryCreate(..., UriKind.Absolute, ...) accepts one of
+			// those as an absolute file:// URI, which would defeat this test. A scheme-less
+			// authority-and-path string is what genuinely fails UriKind.Absolute parsing.
+			"{\"device_code\":\"dev-abc\",\"user_code\":\"WXYZ-1234\"," +
+			"\"verification_uri\":\"github.com/login/device\",\"expires_in\":900,\"interval\":5}",
+			("Content-Type", "application/json"));
+
+		_ = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await CreateFlow(handler)
+				.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
 			.ConfigureAwait(false);
 	}
 
@@ -279,7 +387,7 @@ public sealed class GitHubDeviceFlowTests
 				now += (long)TimeSpan.FromSeconds(900).TotalMilliseconds + 1_000;
 				return Task.CompletedTask;
 			},
-			nowTicks: () => now);
+			nowMilliseconds: () => now);
 
 		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
