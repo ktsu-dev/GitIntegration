@@ -758,5 +758,101 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual("example-repo-1".As<GitRepositoryName>(), second[0].Name);
 	}
 
+	[TestMethod]
+	public async Task EnumeratesAnOrganisationThroughTheOrgsRoute()
+	{
+		// The route is a documented part of this provider's contract, not an Octokit detail:
+		// GET /orgs/{org}/repos is the only one of the three that reports an organisation's private
+		// repositories to a token that can see them.
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, Fixture("github-org-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			OwnerKind = GitHubOwnerKind.Organization,
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("/orgs/contoso/repos", handler.Requests[0].Uri.AbsolutePath);
+		Assert.AreEqual(2, repositories.Count);
+		Assert.AreEqual("org-public-repo".As<GitRepositoryName>(), repositories[0].Name);
+		Assert.AreEqual("org-private-repo".As<GitRepositoryName>(), repositories[1].Name);
+	}
+
+	[TestMethod]
+	public async Task EnumeratesTheAuthenticatedAccountThroughTheUserRoute()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, Fixture("github-org-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			OwnerKind = GitHubOwnerKind.AuthenticatedUser,
+			Handler = handler,
+		};
+
+		_ = await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("/user/repos", handler.Requests[0].Uri.AbsolutePath);
+		// Octokit serializes the flags enum as "owner, organization_member" (comma-space), which
+		// escapes to "%2C%20" — verified against this build's actual request rather than assumed.
+		StringAssert.Contains(handler.Requests[0].Uri.Query, "affiliation=owner%2C%20organization_member");
+	}
+
+	[TestMethod]
+	public async Task DropsRepositoriesBelongingToAnotherOwnerWhenEnumeratingTheAuthenticatedAccount()
+	{
+		// GET /user/repos takes no owner parameter, so routing to it unfiltered would silently ignore
+		// a configured Owner. The filter is what keeps this method's contract "Owner's repositories".
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, Fixture("github-org-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "someone-else".As<GitProviderOwner>(),
+			OwnerKind = GitHubOwnerKind.AuthenticatedUser,
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(0, repositories.Count);
+	}
+
+	[TestMethod]
+	public async Task MatchesTheOwnerWithoutRegardToCase()
+	{
+		// GitHub treats logins as case-insensitive. An ordinal comparison would drop a caller's
+		// repositories over a capital letter the caller did not choose.
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, Fixture("github-org-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "CONTOSO".As<GitProviderOwner>(),
+			OwnerKind = GitHubOwnerKind.AuthenticatedUser,
+			Handler = handler,
+		};
+
+		IReadOnlyList<GitRepository> repositories =
+			await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(2, repositories.Count);
+	}
+
+	[TestMethod]
+	public async Task DefaultsToTheUserRouteItAlwaysUsed()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		_ = await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("/users/contoso/repos", handler.Requests[0].Uri.AbsolutePath);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

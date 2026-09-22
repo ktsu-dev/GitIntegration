@@ -174,3 +174,35 @@ public enum GitSubmodulePushCheck
 	/// <summary>Push the submodules' commits and stop, leaving the superproject unpushed.</summary>
 	Only,
 }
+
+/// <summary>
+/// What kind of account a <see cref="GitHubProvider"/>'s owner is, which decides the endpoint its
+/// repository enumeration can use.
+/// </summary>
+/// <remarks>
+/// GitHub answers "which repositories does this owner have" at three different routes with three
+/// different coverages, and no single one of them serves every caller. Stating the kind is what lets
+/// this provider pick correctly without probing, and without a contract that depends on what GitHub
+/// answers to a speculative request.
+/// </remarks>
+public enum GitHubOwnerKind
+{
+	/// <summary>
+	/// A user account other than the token's own. Enumerates that user's <b>public</b> repositories
+	/// only, whatever credential is supplied.
+	/// </summary>
+	User,
+
+	/// <summary>
+	/// An organisation. Enumerates the organisation's repositories, including private ones the
+	/// credential can see.
+	/// </summary>
+	Organization,
+
+	/// <summary>
+	/// The account the credential belongs to. Enumerates every repository that account owns or can
+	/// reach through an organisation membership, narrowed to
+	/// <see cref="GitProvider.Owner"/>.
+	/// </summary>
+	AuthenticatedUser,
+}

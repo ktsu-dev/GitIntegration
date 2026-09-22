@@ -42,6 +42,17 @@ public sealed class GitHubProvider : GitProvider
 	/// </summary>
 	public override GitProviderName Name => "GitHub".As<GitProviderName>();
 
+	/// <summary>
+	/// Gets what kind of account <see cref="GitProvider.Owner"/> is.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="GitHubOwnerKind.User"/> by default, which is the route and the coverage this
+	/// provider has always had. A caller needing an organisation's private repositories sets
+	/// <see cref="GitHubOwnerKind.Organization"/>; one needing its own sets
+	/// <see cref="GitHubOwnerKind.AuthenticatedUser"/>.
+	/// </remarks>
+	public GitHubOwnerKind OwnerKind { get; init; } = GitHubOwnerKind.User;
+
 	/// <inheritdoc/>
 	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
 
@@ -71,16 +82,23 @@ public sealed class GitHubProvider : GitProvider
 	/// neither is a copy of the other. An edit that moves this explanation must leave that pointer
 	/// aimed somewhere real.
 	/// <para>
-	/// Calls GitHub's <c>GET /users/{login}/repos</c>, which returns only <see cref="GitProvider.Owner"/>'s
-	/// <b>public</b> repositories. Supplying a token does not widen this: that endpoint does not
-	/// honour authentication to reveal private repositories the way <c>GET /user/repos</c> would for
-	/// the token's own account, and switching to that endpoint would silently stop honouring
-	/// <see cref="GitProvider.Owner"/> — it always describes the token's own repositories, regardless
-	/// of which owner was configured, which would break callers who name someone else's owner on
-	/// purpose. A caller that needs private repositories for a specific owner has no equivalent
-	/// through this provider today; do not assume this method's coverage matches an
-	/// <c>AzureDevOpsProvider</c> equivalent, whose token can see everything it has access to under
-	/// the same interface.
+	/// The route, and therefore the coverage, is decided by <see cref="OwnerKind"/>.
+	/// <see cref="GitHubOwnerKind.User"/> — the default — calls <c>GET /users/{login}/repos</c>,
+	/// which returns <see cref="GitProvider.Owner"/>'s <b>public</b> repositories only; supplying a
+	/// token does not widen it, because that endpoint does not honour authentication to reveal
+	/// private repositories. <see cref="GitHubOwnerKind.Organization"/> calls
+	/// <c>GET /orgs/{org}/repos</c>, which does report private repositories the credential can see.
+	/// <see cref="GitHubOwnerKind.AuthenticatedUser"/> calls <c>GET /user/repos</c> with
+	/// <c>affiliation=owner,organization_member</c>.
+	/// </para>
+	/// <para>
+	/// <c>GET /user/repos</c> takes no owner parameter — it always describes the token's own
+	/// reachable repositories — so that route's results are filtered to
+	/// <see cref="GitProvider.Owner"/> here, case-insensitively, since GitHub treats logins that way.
+	/// Without the filter, selecting that kind would silently ignore a configured owner, which is the
+	/// objection that kept this method on the user route in the first place. Filtering rather than
+	/// validating the token's login against <see cref="GitProvider.Owner"/> costs no extra request
+	/// and still serves an organisation the token is merely a member of.
 	/// </para>
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
@@ -92,7 +110,15 @@ public sealed class GitHubProvider : GitProvider
 
 		try
 		{
-			IReadOnlyList<Repository> repositories = await client.Repository.GetAllForUser(Owner.WeakString).ConfigureAwait(false);
+			IReadOnlyList<Repository> repositories = OwnerKind switch
+			{
+				GitHubOwnerKind.Organization =>
+					await client.Repository.GetAllForOrg(Owner.WeakString).ConfigureAwait(false),
+				GitHubOwnerKind.AuthenticatedUser =>
+					FilterToOwner(await client.Repository.GetAllForCurrent(AuthenticatedUserRequest).ConfigureAwait(false)),
+				_ => await client.Repository.GetAllForUser(Owner.WeakString).ConfigureAwait(false),
+			};
+
 			return [.. repositories.Select(ToGitRepository)];
 		}
 		catch (ApiException exception)
@@ -100,6 +126,33 @@ public sealed class GitHubProvider : GitProvider
 			throw Translate(exception);
 		}
 	}
+
+	/// <summary>
+	/// The request <see cref="GitHubOwnerKind.AuthenticatedUser"/> enumerates with.
+	/// </summary>
+	/// <remarks>
+	/// The affiliation is stated explicitly rather than left to GitHub's default, for the reason the
+	/// pull request listing states its own filter: this provider's coverage is defined by this
+	/// library, not by restating whichever default a vendor happens to ship today.
+	/// </remarks>
+	private static RepositoryRequest AuthenticatedUserRequest => new()
+	{
+		Affiliation = RepositoryAffiliation.OwnerAndOrganizationMember,
+	};
+
+	/// <summary>
+	/// Drops repositories belonging to anyone but <see cref="GitProvider.Owner"/>.
+	/// </summary>
+	/// <remarks>
+	/// Only <see cref="GitHubOwnerKind.AuthenticatedUser"/> needs this: the other two routes carry
+	/// the owner in the request path and cannot answer for anybody else. Compared with
+	/// <see cref="StringComparison.OrdinalIgnoreCase"/> because GitHub logins are case-insensitive.
+	/// </remarks>
+	/// <param name="repositories">Everything the route reported.</param>
+	/// <returns>The subset this provider's owner has.</returns>
+	private IReadOnlyList<Repository> FilterToOwner(IReadOnlyList<Repository> repositories) =>
+		[.. repositories.Where(repository =>
+			string.Equals(repository.Owner?.Login, Owner.WeakString, StringComparison.OrdinalIgnoreCase))];
 
 	/// <inheritdoc/>
 	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken)
