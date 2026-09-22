@@ -857,6 +857,7 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `Tags()` | `IGitTagListBuilder` | Builds `git for-each-ref` over `refs/tags`. |
 | `Remotes()` | `IGitRemoteListBuilder` | Builds `git remote -v`. |
 | `Submodules()` | `IGitSubmoduleListBuilder` | Reads `git ls-files --stage -z` for the recorded gitlinks and `git submodule status` for what is checked out. |
+| `Worktrees()` | `IGitWorktreeListBuilder` | Builds `git worktree list --porcelain`. |
 | `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision. |
 | `RevList(GitRefName)` | `IGitRevListBuilder` | Builds `git rev-list --count`, counting commits without listing them. |
 | `Divergence(GitRefName, GitRefName)` | `IGitRevListDivergenceBuilder` | Builds `git rev-list --count --left-right`, reporting ahead and behind for any two revisions. |
@@ -874,6 +875,9 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `Pull()` | `IGitPullBuilder` | Builds `git pull`. |
 | `Push()` | `IGitPushBuilder` | Builds `git push --porcelain`. |
 | `UpdateSubmodules()` | `IGitSubmoduleUpdateBuilder` | Builds `git submodule update`. |
+| `AddWorktree(AbsoluteDirectoryPath)` | `IGitWorktreeAddBuilder` | Builds `git worktree add`. |
+| `RemoveWorktree(AbsoluteDirectoryPath)` | `IGitWorktreeRemoveBuilder` | Builds `git worktree remove <path>`. |
+| `PruneWorktrees()` | `IGitWorktreePruneBuilder` | Builds `git worktree prune`. |
 | `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree. |
 | `OpenWebClient()` | `void` | Opens `WebURI` in the default browser, when it is an absolute `http`/`https` URI. |
 
@@ -900,6 +904,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `IGitTagListBuilder` | *(none)* | `IReadOnlyList<GitTag>` |
 | `IGitRemoteListBuilder` | *(none)* | `IReadOnlyList<GitRemote>` |
 | `IGitSubmoduleListBuilder` | *(none)* | `IReadOnlyList<GitSubmodule>` |
+| `IGitWorktreeListBuilder` | *(none)* | `IReadOnlyList<GitWorktree>` |
 | `IGitRevParseBuilder` | *(none — revision supplied via `GitRepository.RevParse`)* | `GitCommitSha` |
 | `IGitRevListBuilder` | `FirstParentOnly()`, `ForPath(RelativeFilePath)` | `int` |
 | `IGitRevListDivergenceBuilder` | *(none — revisions supplied via `GitRepository.Divergence`)* | `GitDivergence` |
@@ -919,6 +924,9 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `IGitPullBuilder` | `FromRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `FastForwardOnly()`, `Rebase()`, `Merge()`, `Prune()`, `RecursingSubmodules(GitSubmoduleRecursion)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
 | `IGitPushBuilder` | `ToRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `SettingUpstream()`, `Force()`, `ForceWithLease()`, `DeletingRemoteBranch()`, `DryRun()`, `CheckingSubmodules(GitSubmodulePushCheck)`, `ReportingProgress(IProgress<string>)` | `GitPushResult` |
 | `IGitSubmoduleUpdateBuilder` | `Initialise()`, `Recursive()`, `FromRemote()`, `Force()`, `WithDepth(int)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
+| `IGitWorktreeAddBuilder` | `CheckingOut(GitBranchName)`, `CreatingBranch(GitBranchName)`, `CreatingOrResettingBranch(GitBranchName)`, `Detached()`, `From(GitRefName)`, `Force()`, `WithoutCheckout()` | `GitCompleted` |
+| `IGitWorktreeRemoveBuilder` | `Force()` | `GitCompleted` |
+| `IGitWorktreePruneBuilder` | *(none)* | `GitCompleted` |
 
 ### Result and Execution Models
 
@@ -959,6 +967,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`. |
 | `GitRemote` | `Name`, `FetchUrl`, `PushUrl`. |
 | `GitDiffEntry` | `Kind`, `Path`, `OriginalPath`, `SimilarityPercent`. |
+| `GitWorktree` | `Path`, `Head`, `Branch`, `IsMain`, `IsBare`, `IsDetached`, `IsLocked`, `LockReason`, `IsPrunable`, `PrunableReason` for one working tree. `IsMain` is positional: true only for the first record git emits, since git's porcelain has no attribute for it. |
 | `GitVersion` | `Major`, `Minor`, `Patch`, `Raw`, plus `AtLeast(major, minor)`. |
 | `GitFileState` | Enum: `Unmodified`, `Modified`, `Added`, `Deleted`, `Renamed`, `Copied`, `Untracked`, `Ignored`, `Unmerged`, `TypeChanged`. |
 | `GitChangeKind` | Enum: `Added`, `Copied`, `Deleted`, `Modified`, `Renamed`, `TypeChanged`, `Unmerged`, `Unknown`. |
@@ -1012,9 +1021,28 @@ one connection pool rather than building and tearing down one per request. Neith
 
 ### `GitHubProvider`
 
-`GitProvider` implementation backed by Octokit. `GetRepositoriesAsync` returns only `Owner`'s
-**public** repositories — GitHub's `GET /users/{login}/repos` does not honour authentication to
-reveal private ones, and supplying a token does not widen this.
+`GitProvider` implementation backed by Octokit. `GetRepositoriesAsync` routes by `OwnerKind`, which
+defaults to `GitHubOwnerKind.User`, so existing callers see no change. `User` calls
+`GET /users/{login}/repos`, returning only `Owner`'s **public** repositories, and supplying a token
+does not widen this. `Organization` calls `GET /orgs/{org}/repos` and `AuthenticatedUser` calls
+`GET /user/repos`, and both report private repositories the credential can see.
+
+### `GitHubDeviceFlow`
+
+Obtains a GitHub credential through GitHub's OAuth device flow. The constructor takes a
+`GitHubOAuthClientId` and the scopes to request. Split into two calls rather than one because the
+pause between them is minutes long, and a caller displaying the user code needs to keep it on
+screen while `WaitForTokenAsync` runs. Stores nothing: the caller decides where the resulting
+credential lives.
+
+| Name | Return Type | Description |
+|------|-------------|-------------|
+| `RequestDeviceCodeAsync(CancellationToken)` | `Task<GitHubDeviceCode>` | Asks GitHub to begin a device flow. |
+| `WaitForTokenAsync(GitHubDeviceCode, CancellationToken)` | `Task<HostingCredential>` | Polls until the user authorises, the code expires, or cancellation, returning the issued credential. |
+
+`GitHubDeviceCode` carries `UserCode`, `DeviceCode`, `VerificationUri`, `ExpiresIn`, and `Interval`.
+`UserCode` is shown to the human at `VerificationUri`, and `DeviceCode` is sent in the poll instead.
+The two are not interchangeable.
 
 ### `AzureDevOpsProvider`
 
@@ -1069,6 +1097,7 @@ nor `AzureDevOpsProvider` has a constructor dependency a container could supply.
 | `GitBranchName` | Branch name |
 | `GitCommitMessage` | Commit message |
 | `GitCommitSha` | Commit object id (abbreviated or full, including SHA-256 repositories) |
+| `GitHubOAuthClientId` | A GitHub OAuth App's client identifier, used to construct `GitHubDeviceFlow` |
 | `GitProviderName` | Hosting provider display name |
 | `GitProviderOwner` | Account or organization owning a repository |
 | `GitRefName` | A branch, tag, SHA, or revision expression |

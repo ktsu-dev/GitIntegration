@@ -67,7 +67,7 @@ public sealed record GitHubDeviceCode
 /// GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(cancellationToken);
 /// // show code.UserCode and open code.VerificationUri
 /// HostingCredential credential = await flow.WaitForTokenAsync(code, cancellationToken);
-/// CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token = credential.Token! });
+/// CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token = credential.Token!.As&lt;CredentialToken&gt;() });
 /// </code>
 /// <para>
 /// Built on a raw <see cref="HttpClient"/> rather than on <c>Octokit.IOauthClient</c>, even though

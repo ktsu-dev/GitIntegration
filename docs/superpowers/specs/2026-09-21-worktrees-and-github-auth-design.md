@@ -310,7 +310,7 @@ connects them.
 
 ```csharp
 HostingCredential credential = await flow.WaitForTokenAsync(code, cancellationToken);
-CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token = credential.Token! });
+CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token = credential.Token!.As<CredentialToken>() });
 ```
 
 Two lines at the call site, in exchange for a type that can be tested without a keyring and that does
