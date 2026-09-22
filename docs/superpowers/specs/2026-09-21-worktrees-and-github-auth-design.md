@@ -261,6 +261,7 @@ already reads `Retry-After`, and for the same reason.
 public sealed record GitHubDeviceCode
 {
     public required string UserCode { get; init; }
+    public required string DeviceCode { get; init; }
     public required Uri VerificationUri { get; init; }
     public required TimeSpan ExpiresIn { get; init; }
     public required TimeSpan Interval { get; init; }
@@ -272,6 +273,11 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
     public Task<HostingCredential> WaitForTokenAsync(GitHubDeviceCode code, CancellationToken cancellationToken = default);
 }
 ```
+
+`DeviceCode` is the opaque code the polling request carries, distinct from `UserCode`, which is the
+short string a human types at `VerificationUri`. Octokit's own device-flow exchange needs the device
+code to resume, and showing one code where the other belongs fails in a way that looks like a broken
+sign-in.
 
 ### Why two calls rather than one
 
