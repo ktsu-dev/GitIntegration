@@ -42,17 +42,6 @@ public sealed class GitHubProvider : GitProvider
 	/// </summary>
 	public override GitProviderName Name => "GitHub".As<GitProviderName>();
 
-	/// <summary>
-	/// Gets what kind of account <see cref="GitProvider.Owner"/> is.
-	/// </summary>
-	/// <remarks>
-	/// <see cref="GitHubOwnerKind.User"/> by default, which is the route and the coverage this
-	/// provider has always had. A caller needing an organisation's private repositories sets
-	/// <see cref="GitHubOwnerKind.Organization"/>; one needing its own sets
-	/// <see cref="GitHubOwnerKind.AuthenticatedUser"/>.
-	/// </remarks>
-	public GitHubOwnerKind OwnerKind { get; init; } = GitHubOwnerKind.User;
-
 	/// <inheritdoc/>
 	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
 
@@ -77,28 +66,24 @@ public sealed class GitHubProvider : GitProvider
 	/// <inheritdoc/>
 	/// <remarks>
 	/// Adds to the interface's remarks rather than restating them.
-	/// <see cref="IGitHostingProvider.GetRepositoriesAsync"/> says only that implementations differ
-	/// in coverage and points here for this host's specifics, so the two texts have one job each and
-	/// neither is a copy of the other. An edit that moves this explanation must leave that pointer
-	/// aimed somewhere real.
+	/// <see cref="IGitHostingProvider.GetRepositoriesAsync"/> states the coverage every provider
+	/// promises and points here for the routes this host reaches it by, so the two texts have one
+	/// job each and neither is a copy of the other. An edit that moves this explanation must leave
+	/// that pointer aimed somewhere real.
 	/// <para>
-	/// The route, and therefore the coverage, is decided by <see cref="OwnerKind"/>.
-	/// <see cref="GitHubOwnerKind.User"/> — the default — calls <c>GET /users/{login}/repos</c>,
-	/// which returns <see cref="GitProvider.Owner"/>'s <b>public</b> repositories only; supplying a
-	/// token does not widen it, because that endpoint does not honour authentication to reveal
-	/// private repositories. <see cref="GitHubOwnerKind.Organization"/> calls
-	/// <c>GET /orgs/{org}/repos</c>, which does report private repositories the credential can see.
-	/// <see cref="GitHubOwnerKind.AuthenticatedUser"/> calls <c>GET /user/repos</c> with
-	/// <c>affiliation=owner, organization_member</c>.
+	/// GitHub has no single endpoint that both honours <see cref="GitProvider.Owner"/> and reveals
+	/// the private repositories a credential can see, so the route is chosen from what the owner is.
+	/// <c>GET /orgs/{org}/repos</c> does both for an organisation. <c>GET /user/repos</c> does both
+	/// for the credential's own account, but only for that account — it always describes the token's
+	/// own repositories regardless of which owner was configured, so it is reached only once the
+	/// configured owner has been confirmed to be that account. <c>GET /users/{login}/repos</c>,
+	/// which this method used to be alone in calling, honours any owner but is public-only, and
+	/// remains the answer for a user who is not the credential's own: that is genuinely all GitHub
+	/// offers there.
 	/// </para>
 	/// <para>
-	/// <c>GET /user/repos</c> takes no owner parameter — it always describes the token's own
-	/// reachable repositories — so that route's results are filtered to
-	/// <see cref="GitProvider.Owner"/> here, case-insensitively, since GitHub treats logins that way.
-	/// Without the filter, selecting that kind would silently ignore a configured owner, which is the
-	/// objection that kept this method on the user route in the first place. Filtering rather than
-	/// validating the token's login against <see cref="GitProvider.Owner"/> costs no extra request
-	/// and still serves an organisation the token is merely a member of.
+	/// Which one applies is established by <see cref="GetOwnerRepositoriesAsync"/>, whose remarks
+	/// carry the per-branch reasoning and the cost each branch pays in requests.
 	/// </para>
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
@@ -110,15 +95,7 @@ public sealed class GitHubProvider : GitProvider
 
 		try
 		{
-			IReadOnlyList<Repository> repositories = OwnerKind switch
-			{
-				GitHubOwnerKind.Organization =>
-					await client.Repository.GetAllForOrg(Owner.WeakString).ConfigureAwait(false),
-				GitHubOwnerKind.AuthenticatedUser =>
-					FilterToOwner(await client.Repository.GetAllForCurrent(AuthenticatedUserRequest).ConfigureAwait(false)),
-				_ => await client.Repository.GetAllForUser(Owner.WeakString).ConfigureAwait(false),
-			};
-
+			IReadOnlyList<Repository> repositories = await GetOwnerRepositoriesAsync(client).ConfigureAwait(false);
 			return [.. repositories.Select(ToGitRepository)];
 		}
 		catch (ApiException exception)
@@ -128,31 +105,96 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <summary>
-	/// The request <see cref="GitHubOwnerKind.AuthenticatedUser"/> enumerates with.
+	/// Lists <see cref="GitProvider.Owner"/>'s repositories on whichever route reaches the widest
+	/// set this provider's credential is entitled to.
 	/// </summary>
 	/// <remarks>
-	/// The affiliation is stated explicitly rather than left to GitHub's default, for the reason the
-	/// pull request listing states its own filter: this provider's coverage is defined by this
-	/// library, not by restating whichever default a vendor happens to ship today.
+	/// <para>
+	/// An unauthenticated provider skips both probes below and calls the public route directly. This
+	/// is not a shortcut taken for speed: without a credential every route collapses to the same
+	/// public answer — <c>GET /orgs/{org}/repos</c> and <c>GET /user/repos</c> reveal a private
+	/// repository only to a credential entitled to it — so the probes would spend requests
+	/// establishing which of three identical answers to ask for.
+	/// </para>
+	/// <para>
+	/// Authenticated, the owner's type decides the route, and it is read from
+	/// <c>GET /users/{login}</c> rather than inferred from <c>GET /orgs/{login}/repos</c> answering
+	/// <c>404</c>. The inference is the cheaper probe and the wrong one: a token without
+	/// <c>read:org</c>, or one not authorised for an organisation that enforces SSO, is answered
+	/// <c>404</c> by that route for an organisation that plainly exists, and the inference would
+	/// quietly demote it to the public-only user route — reinstating the exact under-reporting this
+	/// method exists to remove, under a condition nothing would report. <c>GET /users/{login}</c> is
+	/// a public endpoint whose <c>type</c> no credential's scope can change, and its <c>404</c> says
+	/// the owner does not exist, which surfaces as <see cref="GitHostingNotFoundException"/> instead
+	/// of an empty list.
+	/// </para>
+	/// <para>
+	/// A user owner then costs a second probe, <c>GET /user</c>, because <c>GET /user/repos</c> is
+	/// correct only when the configured owner <b>is</b> the credential's own account, and nothing
+	/// short of asking establishes that. A credential that has no user to report — a GitHub App
+	/// installation token, whose <c>GET /user</c> is answered <c>403</c> — is not a failure to
+	/// surface: it means only that this branch cannot apply, and the public route is what such a
+	/// credential could reach anyway, so the enumeration continues there rather than throwing where
+	/// it previously succeeded. A <c>401</c> is left to propagate, because a credential GitHub
+	/// rejects outright is a failure the caller has to see.
+	/// </para>
 	/// </remarks>
-	private static RepositoryRequest AuthenticatedUserRequest => new()
+	/// <param name="client">The client this call's transport is wired to.</param>
+	/// <returns>The repositories GitHub reported on the chosen route.</returns>
+	private async Task<IReadOnlyList<Repository>> GetOwnerRepositoriesAsync(GitHubClient client)
 	{
-		Affiliation = RepositoryAffiliation.OwnerAndOrganizationMember,
-	};
+		string owner = Owner.WeakString;
+
+		if (!IsAuthenticated)
+		{
+			return await client.Repository.GetAllForUser(owner).ConfigureAwait(false);
+		}
+
+		User account = await client.User.Get(owner).ConfigureAwait(false);
+
+		if (IsOrganisation(account))
+		{
+			return await client.Repository.GetAllForOrg(owner).ConfigureAwait(false);
+		}
+
+		string? authenticatedLogin;
+
+		try
+		{
+			authenticatedLogin = (await client.User.Current().ConfigureAwait(false)).Login;
+		}
+		catch (ForbiddenException)
+		{
+			authenticatedLogin = null;
+		}
+
+		// Ordinal-ignore-case, because GitHub logins are unique case-insensitively and a caller who
+		// configured "Octocat" for the account GitHub reports as "octocat" named the same account.
+		return string.Equals(authenticatedLogin, owner, StringComparison.OrdinalIgnoreCase)
+			// Affiliation rather than the default: GetAllForCurrent() unfiltered also returns
+			// repositories the account merely collaborates on or reaches through an organisation,
+			// which are not Owner's repositories and would report a different owner's work under
+			// this owner's name. Owner is the affiliation that makes this route mean what
+			// GET /users/{login}/repos means, minus the public-only limit.
+			? await client.Repository.GetAllForCurrent(new RepositoryRequest { Affiliation = RepositoryAffiliation.Owner }).ConfigureAwait(false)
+			: await client.Repository.GetAllForUser(owner).ConfigureAwait(false);
+	}
 
 	/// <summary>
-	/// Drops repositories belonging to anyone but <see cref="GitProvider.Owner"/>.
+	/// Reports whether an account GitHub described is an organisation.
 	/// </summary>
 	/// <remarks>
-	/// Only <see cref="GitHubOwnerKind.AuthenticatedUser"/> needs this: the other two routes carry
-	/// the owner in the request path and cannot answer for anybody else. Compared with
-	/// <see cref="StringComparison.OrdinalIgnoreCase"/> because GitHub logins are case-insensitive.
+	/// Asks whether GitHub said "organisation" rather than whether it said "user", so every other
+	/// answer routes to the user branches: <see cref="Account.Type"/> is nullable and
+	/// <see cref="AccountType"/> already carries <see cref="AccountType.Bot"/> and
+	/// <see cref="AccountType.Mannequin"/> alongside the two this decision is really about. An
+	/// omitted <c>type</c>, and an account kind GitHub adds later, both land on the route this
+	/// method's caller took before any of these branches existed, which is the answer that cannot be
+	/// wrong about coverage — only conservative about it.
 	/// </remarks>
-	/// <param name="repositories">Everything the route reported.</param>
-	/// <returns>The subset this provider's owner has.</returns>
-	private IReadOnlyList<Repository> FilterToOwner(IReadOnlyList<Repository> repositories) =>
-		[.. repositories.Where(repository =>
-			string.Equals(repository.Owner?.Login, Owner.WeakString, StringComparison.OrdinalIgnoreCase))];
+	/// <param name="account">The account <c>GET /users/{login}</c> reported.</param>
+	/// <returns><see langword="true"/> when GitHub called the account an organisation; otherwise, <see langword="false"/>.</returns>
+	private static bool IsOrganisation(User account) => account.Type == AccountType.Organization;
 
 	/// <inheritdoc/>
 	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken)

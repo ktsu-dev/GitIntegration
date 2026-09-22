@@ -196,48 +196,15 @@ English prose to tell a caller something it could have read structurally.
 
 ## GitHub owner kinds
 
-### The property
-
-```csharp
-public enum GitHubOwnerKind
-{
-    User,
-    Organization,
-    AuthenticatedUser,
-}
-```
-
-```csharp
-public GitHubOwnerKind OwnerKind { get; init; } = GitHubOwnerKind.User;
-```
-
-`User` is the default so that a caller who says nothing gets exactly today's route, today's coverage,
-and today's documented contract. This phase adds a way to ask for more, and changes nothing for anyone
-who does not.
-
-### Routing
-
-| `OwnerKind` | Octokit call | Endpoint | Sees private |
-|---|---|---|---|
-| `User` | `Repository.GetAllForUser(Owner)` | `GET /users/{login}/repos` | no |
-| `Organization` | `Repository.GetAllForOrg(Owner)` | `GET /orgs/{org}/repos` | yes, where the token can |
-| `AuthenticatedUser` | `Repository.GetAllForCurrent(...)` | `GET /user/repos` | yes, where the token can |
-
-`AuthenticatedUser` requests `affiliation=owner,organization_member` and then **filters the result to
-`Owner`** client-side, comparing each repository's owner login to `Owner` case-insensitively. GitHub
-treats logins as case-insensitive, so an ordinal comparison would drop a caller's repositories over a
-capital letter the caller did not choose.
-
-The filter is what keeps `Owner` meaningful. `GET /user/repos` describes the token's own reachable
-repositories and takes no owner parameter, so routing to it unfiltered would silently ignore a
-configured `Owner` — which is the precise objection recorded in `GetRepositoriesAsync`'s current
-remarks against switching to that endpoint wholesale. Filtering answers it: the endpoint widens what
-can be seen, and the filter preserves the invariant that this method describes `Owner`'s repositories
-and nobody else's.
-
-Filtering rather than validating the token's login against `Owner` is a deliberate choice between two
-ways of honouring it. Validation costs an extra `GET /user` on every enumeration and rejects the
-legitimate case of an organisation the token is a member of. The filter costs nothing and handles both.
+This capability was superseded before it shipped. While this branch was in flight, upstream merged
+PR #115, which reached the same goal — an organisation's private repositories becoming visible to a
+credential that can see them — by inferring the owner's account type from `GET /users/{login}` and
+routing automatically, rather than by taking an explicit `OwnerKind` from the caller. That approach
+also handles cases the design below did not: an unauthenticated provider skips the probe entirely, a
+GitHub App installation token whose `GET /user` answers `403` falls back to the public route instead
+of failing, and the routing decision is never inferred from a `404`, which an SSO-blocked
+organisation answers just as an absent one would. This branch ships upstream's version; the
+`GitHubOwnerKind` enum and `OwnerKind` property described below were not merged.
 
 ### The single sign-on failure
 

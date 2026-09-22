@@ -55,12 +55,23 @@ public interface IGitHostingProvider
 	/// Retrieves the repositories this provider's owner has, from the remote service.
 	/// </summary>
 	/// <remarks>
-	/// Implementations are not guaranteed to agree on exactly which of the owner's repositories this
-	/// returns — each host's own API shapes that. GitHub's implementation, in particular, returns
-	/// only the owner's <b>public</b> repositories, even when an authenticated credential is
-	/// supplied; see <see cref="GitHubProvider.GetRepositoriesAsync"/> for why. A caller that needs a
-	/// specific host's exact coverage should consult that provider's own remarks rather than assume
-	/// parity across hosts.
+	/// <para>
+	/// Every implementation returns the owner's repositories this provider's credential is entitled
+	/// to see, private ones included, and falls back to the owner's public repositories only where
+	/// the host publishes no owner-scoped route that a credential widens. That is the contract
+	/// callers may rely on, and it is stated here rather than left to each provider to describe its
+	/// own behaviour: a caller who has to read two providers' remarks and work out what they have in
+	/// common is a caller who will get it wrong.
+	/// </para>
+	/// <para>
+	/// The fallback is not hypothetical, and where it applies is worth naming.
+	/// <see cref="AzureDevOpsProvider"/> never takes it — its enumeration is entitlement-scoped
+	/// throughout. <see cref="GitHubProvider"/> takes it in exactly one case: an owner that is a
+	/// GitHub <b>user</b> other than the credential's own account, for which GitHub publishes no
+	/// authenticated owner-scoped route at all. An organisation owner, and the credential's own user
+	/// account, both reach the full entitled set. See
+	/// <see cref="GitHubProvider.GetRepositoriesAsync"/> for the routes that produces.
+	/// </para>
 	/// </remarks>
 	/// <param name="cancellationToken">
 	/// A token to cancel the request. Every provider checks it before issuing a request. Whether it

@@ -69,9 +69,11 @@ builds and parses its requests by hand instead.
 - **Hosting Provider Abstraction**: `IGitHostingProvider` defines a common contract for enumerating
   repositories, listing open pull requests, and creating a pull request —
   `GitHubProvider` implements it on top of Octokit, `AzureDevOpsProvider` on a raw `HttpClient`
-  against Azure DevOps's REST API. `GitHubProvider` routes repository enumeration by `OwnerKind`,
-  and only `Organization` and `AuthenticatedUser` report private repositories. The default,
-  `User`, is limited to public ones regardless of the credential supplied.
+  against Azure DevOps's REST API. `GitHubProvider` infers the owner's account type from
+  `GET /users/{login}` and routes automatically: an organisation's repositories come from
+  `GET /orgs/{org}/repos`, the credential's own account from `GET /user/repos`, and any other
+  owner from the public `GET /users/{login}/repos` route. An unauthenticated provider skips the
+  probe and calls the public route directly.
 - **Interactive GitHub Sign-In**: `GitHubDeviceFlow` obtains a credential through GitHub's OAuth
   device flow, split into two calls, `RequestDeviceCodeAsync` and `WaitForTokenAsync`, so a caller
   can display the user code while the wait for authorisation runs.
@@ -207,27 +209,6 @@ CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token =
 
 The two calls are split so the user code can stay on screen for the minutes the wait may take. The
 flow stores nothing: where the credential lives is the caller's decision.
-
-### Enumerating an Organisation's Private Repositories
-
-```csharp
-using ktsu.GitIntegration;
-using ktsu.Semantics.Strings;
-
-GitHubProvider provider = new()
-{
-    Owner = "contoso".As<GitProviderOwner>(),
-    OwnerKind = GitHubOwnerKind.Organization,
-    PersonaGUID = persona,
-};
-
-IReadOnlyList<GitRepository> repositories = await provider.GetRepositoriesAsync();
-```
-
-`OwnerKind` defaults to `GitHubOwnerKind.User`, which enumerates public repositories only: the route
-this provider has always used. `Organization` and `AuthenticatedUser` report private repositories
-the credential can see. A token that is valid but not authorised for an organisation's single
-sign-on raises `GitHostingAuthenticationException` carrying the URL to authorise it at.
 
 ### Initializing or Cloning a Repository
 
@@ -1021,11 +1002,19 @@ one connection pool rather than building and tearing down one per request. Neith
 
 ### `GitHubProvider`
 
-`GitProvider` implementation backed by Octokit. `GetRepositoriesAsync` routes by `OwnerKind`, which
-defaults to `GitHubOwnerKind.User`, so existing callers see no change. `User` calls
-`GET /users/{login}/repos`, returning only `Owner`'s **public** repositories, and supplying a token
-does not widen this. `Organization` calls `GET /orgs/{org}/repos` and `AuthenticatedUser` calls
-`GET /user/repos`, and both report private repositories the credential can see.
+`GitProvider` implementation backed by Octokit. `GetRepositoriesAsync` has no single endpoint that
+both honours `Owner` and reveals the private repositories a credential can see, so it chooses a
+route from what the owner turns out to be. An unauthenticated provider skips that check and calls
+the public `GET /users/{login}/repos` route directly, since every route collapses to the same
+public answer without a credential. Authenticated, the owner's type is read from
+`GET /users/{login}` — deliberately not inferred from `GET /orgs/{login}/repos` answering `404`,
+because a token lacking `read:org`, or one an SSO-enforcing organisation has not authorised, is
+answered `404` for an organisation that plainly exists, which would wrongly demote it to the
+public-only route. An organisation then goes to `GET /orgs/{org}/repos`. A user owner costs one more
+probe, `GET /user`, to establish whether the owner is the credential's own account: if it is,
+`GET /user/repos` is used, since it always describes the token's own repositories regardless of
+which owner was configured; otherwise, or when a GitHub App installation token's `GET /user`
+answers `403`, the enumeration falls back to the public `GET /users/{login}/repos` route.
 
 ### `GitHubDeviceFlow`
 

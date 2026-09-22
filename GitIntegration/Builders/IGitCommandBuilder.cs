@@ -16,8 +16,12 @@ using System.Threading.Tasks;
 /// a fresh builder per command. The underlying <see cref="IGitProcessRunner"/> is the opposite: it
 /// is a shared singleton and safe to call concurrently.
 /// </remarks>
-/// <typeparam name="TResult">The parsed result type.</typeparam>
+/// <typeparam name="TResult">
+/// The parsed result type. Constrained to <c>notnull</c> because <see cref="GitResult{T}"/> reports
+/// success purely by the absence of an error, so it cannot represent a null success value.
+/// </typeparam>
 public interface IGitCommandBuilder<TResult>
+	where TResult : notnull
 {
 	/// <summary>
 	/// Gets the exact argument vector this builder will pass to git.
