@@ -1,3 +1,20 @@
+## v3.3.0 (minor)
+
+Changes since v3.2.0:
+
+- refactor: address the code quality findings on the pull request ([@matt-edmondson](https://github.com/matt-edmondson))
+- fix: guard the verification URI and align error taxonomy with the spec ([@matt-edmondson](https://github.com/matt-edmondson))
+- docs: cover worktree and device-flow types in the API reference ([@matt-edmondson](https://github.com/matt-edmondson))
+- docs: document worktree verbs, owner kinds, and device flow [minor] ([@matt-edmondson](https://github.com/matt-edmondson))
+- fix: enforce the device flow's expiry deadline and poll interval floor ([@matt-edmondson](https://github.com/matt-edmondson))
+- chore: map hostname-derived author addresses ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: report the single sign-on authorisation url on a forbidden response ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: add the worktree removal and prune verbs ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: add the worktree creation verb ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: add the worktree listing verb ([@matt-edmondson](https://github.com/matt-edmondson))
+- chore: stop ignoring .worktrees in a file ktsu.Sdk regenerates ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: read git worktree list --porcelain into a typed model ([@matt-edmondson](https://github.com/matt-edmondson))
+
 ## v3.2.0 (minor)
 
 Changes since v3.1.0:
@@ -17,8 +34,8 @@ Changes since v3.1.0:
 
 Changes since v3.0.0:
 
-- docs: state credential rationale without narrating history ([@Matthew Edmondson](https://github.com/Matthew Edmondson))
-- feat: add bearer credentials and a credential injection seam ([@Matthew Edmondson](https://github.com/Matthew Edmondson))
+- docs: state credential rationale without narrating history ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: add bearer credentials and a credential injection seam ([@matt-edmondson](https://github.com/matt-edmondson))
 - Gate Dependabot auto-merge on CI actually being green ([@Claude](https://github.com/Claude))
 - test: use the MSTest assertions the analyzers point at [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - fix: pin --untracked-files so status.showUntrackedFiles cannot hide work [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
