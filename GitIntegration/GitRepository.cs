@@ -199,6 +199,11 @@ public class GitRepository
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitTagListBuilder Tags() => new GitTagListBuilder(RequireRunner(), RequireLocalPath());
 
+	/// <summary>Lists the repository's working trees.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitWorktreeListBuilder Worktrees() => new GitWorktreeListBuilder(RequireRunner(), RequireLocalPath());
+
 	/// <summary>Stages changes for the next commit.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
