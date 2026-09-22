@@ -58,3 +58,14 @@ public sealed record GitPullRequestAuthor : SemanticString<GitPullRequestAuthor>
 /// </remarks>
 [HasNonWhitespaceContent]
 public sealed record GitPullRequestWebURI : SemanticString<GitPullRequestWebURI> { }
+
+/// <summary>
+/// The client identifier GitHub issues when an OAuth App is registered.
+/// </summary>
+/// <remarks>
+/// Not a secret. The device flow has no client secret precisely because a desktop binary cannot keep
+/// one, so a consuming application may hold this in ordinary configuration. It is a value this
+/// library takes rather than one it ships: the identifier belongs to whoever registered the app.
+/// </remarks>
+[HasNonWhitespaceContent]
+public sealed record GitHubOAuthClientId : SemanticString<GitHubOAuthClientId> { }

@@ -925,5 +925,44 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual("example-repo-1".As<GitRepositoryName>(), second[0].Name);
 	}
 
+	[TestMethod]
+	public async Task ReportsTheSingleSignOnAuthorisationUrlOnAForbiddenResponse()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(
+			HttpStatusCode.Forbidden,
+			"{\"message\":\"Resource protected by organization SAML enforcement.\"}",
+			("Content-Type", "application/json"),
+			("X-GitHub-SSO", "required; url=https://github.com/orgs/contoso/sso?authorization_request=ABC123"));
+		GitHubProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Handler = handler,
+		};
+
+		GitHostingAuthenticationException exception =
+			await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+				async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "https://github.com/orgs/contoso/sso?authorization_request=ABC123");
+	}
+
+	[TestMethod]
+	public async Task StillReportsAForbiddenResponseCarryingNoSingleSignOnHeader()
+	{
+		// The URL is an addition to the message, never a requirement for classifying the failure.
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(
+			HttpStatusCode.Forbidden,
+			"{\"message\":\"Bad credentials\"}",
+			("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		_ = await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

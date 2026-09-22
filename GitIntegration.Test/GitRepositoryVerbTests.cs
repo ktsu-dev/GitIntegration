@@ -28,6 +28,7 @@ public class GitRepositoryVerbTests
 			[.. repository.Remotes().BuildArguments()],
 			[.. repository.RevParse("HEAD".As<GitRefName>()).BuildArguments()],
 			[.. repository.Tags().BuildArguments()],
+			[.. repository.Worktrees().BuildArguments()],
 			[.. repository.Submodules().BuildArguments()],
 			[.. repository.UpdateSubmodules().BuildArguments()],
 			[.. repository.RevList("HEAD".As<GitRefName>()).BuildArguments()],
@@ -76,6 +77,7 @@ public class GitRepositoryVerbTests
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Branches());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Remotes());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Tags());
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Worktrees());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Submodules());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.UpdateSubmodules());
 		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.RevList("HEAD".As<GitRefName>()));
@@ -143,6 +145,22 @@ public class GitRepositoryVerbTests
 		bool isCloned = await repository.IsClonedAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.IsFalse(isCloned);
+	}
+
+	[TestMethod]
+	public void WorktreesRequiresAProcessRunner()
+	{
+		GitRepository repository = new() { LocalPath = TestPaths.Root };
+
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Worktrees());
+	}
+
+	[TestMethod]
+	public void WorktreesRequiresALocalPath()
+	{
+		GitRepository repository = new() { ProcessRunner = new RecordingGitProcessRunner() };
+
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => _ = repository.Worktrees());
 	}
 
 	public TestContext TestContext { get; set; } = null!;

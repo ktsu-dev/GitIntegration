@@ -100,4 +100,44 @@ public class GitRepositoryMutatingVerbTests
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.Checkout(null!));
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = repository.AddRemote(null!, Url));
 	}
+
+	[TestMethod]
+	public void AddWorktreeRejectsANullPath()
+	{
+		GitRepository repository = new()
+		{
+			LocalPath = TestPaths.Root,
+			ProcessRunner = new RecordingGitProcessRunner(),
+		};
+
+		_ = Assert.ThrowsExactly<ArgumentNullException>(() => repository.AddWorktree(null!));
+	}
+
+	[TestMethod]
+	public void AddWorktreeRequiresAProcessRunner()
+	{
+		GitRepository repository = new() { LocalPath = TestPaths.Root };
+
+		_ = Assert.ThrowsExactly<InvalidOperationException>(() => repository.AddWorktree(TestPaths.Worktree));
+	}
+
+	[TestMethod]
+	public void RemoveWorktreeRejectsANullPath()
+	{
+		GitRepository repository = new()
+		{
+			LocalPath = TestPaths.Root,
+			ProcessRunner = new RecordingGitProcessRunner(),
+		};
+
+		_ = Assert.ThrowsExactly<ArgumentNullException>(() => repository.RemoveWorktree(null!));
+	}
+
+	[TestMethod]
+	public void PruneWorktreesRequiresAProcessRunner()
+	{
+		GitRepository repository = new() { LocalPath = TestPaths.Root };
+
+		_ = Assert.ThrowsExactly<InvalidOperationException>(repository.PruneWorktrees);
+	}
 }

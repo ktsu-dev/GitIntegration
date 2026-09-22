@@ -2,6 +2,8 @@
 
 namespace ktsu.GitIntegration;
 
+using System.IO;
+
 using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
@@ -89,5 +91,38 @@ internal static class GitParseValues
 
 		throw new GitParseException(
 			$"git reported a path that cannot be represented as a relative directory path: '{value}'.");
+	}
+
+	/// <summary>
+	/// Converts a raw path field into an absolute directory path.
+	/// </summary>
+	/// <remarks>
+	/// The absolute counterpart to <see cref="ToRelativeDirectoryPath"/>, for the fields git reports
+	/// as whole paths rather than as paths within a repository — a worktree's own directory is the
+	/// first of them. An empty field is a malformed record, and a path this type refuses is one git
+	/// produced and this library cannot represent, which is a parse failure rather than a value to
+	/// pass along unchecked. <see cref="Path.IsPathRooted(string)"/> is checked explicitly rather
+	/// than left to <see cref="AbsoluteDirectoryPath"/>'s own creation logic alone, so that this
+	/// method's documented refusal of a relative path holds even if that type's own validation ever
+	/// loosens.
+	/// </remarks>
+	/// <param name="value">The raw path as git printed it.</param>
+	/// <returns>The converted path.</returns>
+	/// <exception cref="GitParseException">
+	/// <paramref name="value"/> is empty, relative, or cannot be represented as an absolute
+	/// directory path.
+	/// </exception>
+	internal static AbsoluteDirectoryPath ToAbsoluteDirectoryPath(string value)
+	{
+		if (!string.IsNullOrEmpty(value) &&
+			Path.IsPathRooted(value) &&
+			AbsoluteDirectoryPath.TryCreate(value, out AbsoluteDirectoryPath? path) &&
+			path is not null)
+		{
+			return path;
+		}
+
+		throw new GitParseException(
+			$"git reported a path that cannot be represented as an absolute directory path: '{value}'.");
 	}
 }

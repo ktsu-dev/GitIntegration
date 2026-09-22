@@ -132,4 +132,8 @@ internal static class TestPaths
 {
 	public static AbsoluteDirectoryPath Root { get; } =
 		(OperatingSystem.IsWindows() ? @"C:\" : "/").As<AbsoluteDirectoryPath>();
+
+	/// <summary>An absolute directory distinct from <see cref="Root"/>, used as a worktree destination.</summary>
+	public static AbsoluteDirectoryPath Worktree { get; } =
+		(OperatingSystem.IsWindows() ? @"C:\project-feature" : "/project-feature").As<AbsoluteDirectoryPath>();
 }
