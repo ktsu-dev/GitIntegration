@@ -38,12 +38,13 @@ builds and parses its requests by hand instead.
   `IsRepositoryAsync`, `OpenAsync`, `DiscoverAsync` — and creates new ones — `Init(...)`,
   `Clone(...)` — by delegating every invocation to `ktsu.RunCommand`.
 - **Fluent Verb Builders**: `GitRepository` exposes one builder per read-only verb — `Status()`,
-  `Log()`, `Diff()`, `Branches()`, `Tags()`, `Remotes()`, `Submodules()`, `RevParse(...)`,
-  `RevList(...)`, `Divergence(...)` — and one per mutating verb — `Add()`, `Commit(...)`,
-  `CreateBranch(...)`, `DeleteBranch(...)`, `CreateTag(...)`, `DeleteTag(...)`, `Checkout(...)`,
-  `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()`,
-  `UpdateSubmodules()` — each configurable via chained method calls and run with `ExecuteAsync` or
-  the non-throwing `TryExecuteAsync`.
+  `Log()`, `Diff()`, `Branches()`, `Tags()`, `Remotes()`, `Submodules()`, `Worktrees()`,
+  `RevParse(...)`, `RevList(...)`, `Divergence(...)` — and one per mutating verb — `Add()`,
+  `Commit(...)`, `CreateBranch(...)`, `DeleteBranch(...)`, `CreateTag(...)`, `DeleteTag(...)`,
+  `Checkout(...)`, `AddRemote(...)`, `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`,
+  `Push()`, `UpdateSubmodules()`, `AddWorktree(...)`, `RemoveWorktree(...)`, `PruneWorktrees()` —
+  each configurable via chained method calls and run with `ExecuteAsync` or the non-throwing
+  `TryExecuteAsync`.
 - **Tags and Submodules**: `Tags()`, `CreateTag(...)`, and `DeleteTag(...)` cover both lightweight
   and annotated tags; `Submodules()` reports each submodule's recorded gitlink alongside what is
   actually checked out, and `UpdateSubmodules()` checks the recorded commits out.
@@ -53,9 +54,9 @@ builds and parses its requests by hand instead.
   `GitFetchResult`/`GitPushResult`, and a rejected push is the one place in this library where
   `ExecuteAsync` and `TryExecuteAsync` diverge in more than exception-versus-result.
 - **Strongly-Typed Results**: `GitStatus`, `GitCommit`, `GitBranch`, `GitRemote`, `GitDiffEntry`,
-  `GitVersion`, `GitInitResult`, `GitCompleted`, `GitFetchResult`, `GitPushResult`, and
-  `GitRefUpdate` records replace ad-hoc porcelain parsing with typed models — `GitCompleted` is the
-  shared result for mutating verbs whose only outcome is success.
+  `GitVersion`, `GitInitResult`, `GitCompleted`, `GitFetchResult`, `GitPushResult`, `GitRefUpdate`,
+  and `GitWorktree` records replace ad-hoc porcelain parsing with typed models — `GitCompleted` is
+  the shared result for mutating verbs whose only outcome is success.
 - **Reproducible Failures**: every command is scoped with `git -C <path>` instead of a process
   working directory, so a failing invocation's exact argument vector can be read off a
   `GitCommandException` and rerun verbatim.
@@ -68,7 +69,12 @@ builds and parses its requests by hand instead.
 - **Hosting Provider Abstraction**: `IGitHostingProvider` defines a common contract for enumerating
   repositories, listing open pull requests, and creating a pull request —
   `GitHubProvider` implements it on top of Octokit, `AzureDevOpsProvider` on a raw `HttpClient`
-  against Azure DevOps's REST API.
+  against Azure DevOps's REST API. `GitHubProvider` routes repository enumeration by `OwnerKind`,
+  and only `Organization` and `AuthenticatedUser` report private repositories. The default,
+  `User`, is limited to public ones regardless of the credential supplied.
+- **Interactive GitHub Sign-In**: `GitHubDeviceFlow` obtains a credential through GitHub's OAuth
+  device flow, split into two calls, `RequestDeviceCodeAsync` and `WaitForTokenAsync`, so a caller
+  can display the user code while the wait for authorisation runs.
 - **Credential Resolution**: hosting providers integrate with `ktsu.CredentialCache`, so credentials
   come from the host's native keyring rather than configuration files. `CredentialSource` is the
   escape hatch for a credential a keyring should not hold, such as a short-lived Entra ID access
@@ -155,6 +161,73 @@ IReadOnlyList<GitDiffEntry> changes = await repository.Diff()
     .DetectRenames()
     .ExecuteAsync();
 ```
+
+### One Worktree per Branch
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
+
+IReadOnlyList<GitWorktree> worktrees = await repository.Worktrees().ExecuteAsync();
+
+GitBranchName branch = "feature/search".As<GitBranchName>();
+
+if (!worktrees.Any(worktree => worktree.Branch == branch))
+{
+    AbsoluteDirectoryPath destination = "/repos/project-feature-search".As<AbsoluteDirectoryPath>();
+
+    await repository.AddWorktree(destination)
+        .CreatingBranch(branch)
+        .From("origin/main".As<GitRefName>())
+        .ExecuteAsync();
+}
+```
+
+The main working tree reports `IsMain`, which is how a caller refuses to remove the one that owns
+the repository. It is positional: git emits it first, rather than an attribute git labels.
+
+### Signing In to GitHub
+
+```csharp
+using ktsu.CredentialCache;
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+PersonaGUID persona = CredentialCache.CreatePersonaGUID();
+
+GitHubDeviceFlow flow = new("Iv1.0123456789abcdef".As<GitHubOAuthClientId>(), ["repo", "read:org"]);
+
+GitHubDeviceCode code = await flow.RequestDeviceCodeAsync();
+Console.WriteLine($"Open {code.VerificationUri} and enter {code.UserCode}");
+
+HostingCredential credential = await flow.WaitForTokenAsync(code);
+CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token = credential.Token!.As<CredentialToken>() });
+```
+
+The two calls are split so the user code can stay on screen for the minutes the wait may take. The
+flow stores nothing: where the credential lives is the caller's decision.
+
+### Enumerating an Organisation's Private Repositories
+
+```csharp
+using ktsu.GitIntegration;
+using ktsu.Semantics.Strings;
+
+GitHubProvider provider = new()
+{
+    Owner = "contoso".As<GitProviderOwner>(),
+    OwnerKind = GitHubOwnerKind.Organization,
+    PersonaGUID = persona,
+};
+
+IReadOnlyList<GitRepository> repositories = await provider.GetRepositoriesAsync();
+```
+
+`OwnerKind` defaults to `GitHubOwnerKind.User`, which enumerates public repositories only: the route
+this provider has always used. `Organization` and `AuthenticatedUser` report private repositories
+the credential can see. A token that is valid but not authorised for an organisation's single
+sign-on raises `GitHostingAuthenticationException` carrying the URL to authorise it at.
 
 ### Initializing or Cloning a Repository
 

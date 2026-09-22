@@ -323,17 +323,17 @@ travels under Octokit's `Token` scheme, which is what `FromToken` documents itse
 
 ### Transport and polling
 
-Both calls go through Octokit's `OauthClient` — `InitiateDeviceFlow` and
-`CreateAccessTokenForDeviceFlow` — for the same reason `GitHubProvider` uses Octokit: one client
-library, one set of failure shapes to translate. `CreateAccessTokenForDeviceFlow` handles
-`authorization_pending` and `slow_down` polling internally.
+Built on a raw `HttpClient` rather than Octokit's `OauthClient`, even though Octokit exposes the same
+pair of calls. Two problems turned up empirically against the real package: `InitiateDeviceFlow`
+percent-encodes the scope's colon, so `read:org` travels as `read%3Aorg`, and
+`CreateAccessTokenForDeviceFlow` throws `Octokit.ApiException` for an OAuth `error` body instead of
+returning it, collapsing a refused authorisation and an expired code into the same exception shape a
+transport failure gets.
 
-**This rests on Octokit 14.0.0's actual surface, which is to be verified in the first implementation
-step rather than assumed.** If either method is absent or does not poll, the fallback is two
-`HttpClient` posts to `https://github.com/login/device/code` and
-`https://github.com/login/oauth/access_token` with `Accept: application/json`, polling at `Interval`
-and widening by five seconds on each `slow_down`. That fallback is a smaller amount of code than the
-translation layer it would replace, so the risk here is low either way.
+`GitHubDeviceFlow` instead posts JSON directly to `https://github.com/login/device/code` and
+`https://github.com/login/oauth/access_token`, reading the `error` field itself so a refusal and an
+expiry are told apart, and owns the poll loop: it waits `Interval` between attempts, widening by five
+seconds on each `slow_down`.
 
 ### Failures
 
