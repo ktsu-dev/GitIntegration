@@ -89,7 +89,7 @@ public sealed class GitHubProvider : GitProvider
 	/// private repositories. <see cref="GitHubOwnerKind.Organization"/> calls
 	/// <c>GET /orgs/{org}/repos</c>, which does report private repositories the credential can see.
 	/// <see cref="GitHubOwnerKind.AuthenticatedUser"/> calls <c>GET /user/repos</c> with
-	/// <c>affiliation=owner,organization_member</c>.
+	/// <c>affiliation=owner, organization_member</c>.
 	/// </para>
 	/// <para>
 	/// <c>GET /user/repos</c> takes no owner parameter — it always describes the token's own
@@ -481,14 +481,24 @@ public sealed class GitHubProvider : GitProvider
 		// GitHostingException itself defaults to, rather than throwing while translating a throw.
 		string responseBody = exception.HttpResponse?.Body as string ?? string.Empty;
 
+		// A token that is valid but unauthorised for an organisation's single sign-on arrives as a
+		// plain 403, indistinguishable in status and body from a bad credential. The header is the
+		// only thing carrying the URL that resolves it, and that URL is the whole remedy — without
+		// it, the two failures a caller most needs to tell apart read identically.
+		string? singleSignOnUrl = TryGetSingleSignOnUrl(exception);
+		string authenticationMessage = singleSignOnUrl is null
+			? exception.Message
+			: $"{exception.Message} This organisation requires single sign-on authorisation for " +
+			  $"this credential. Authorise it at: {singleSignOnUrl}";
+
 		return exception switch
 		{
 			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset, exception),
 			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null, exception),
 			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds), exception),
 			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception)), exception),
-			AuthorizationException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody, exception),
-			ForbiddenException => new GitHostingAuthenticationException(exception.Message, Name, exception.StatusCode, responseBody, exception),
+			AuthorizationException => new GitHostingAuthenticationException(authenticationMessage, Name, exception.StatusCode, responseBody, exception),
+			ForbiddenException => new GitHostingAuthenticationException(authenticationMessage, Name, exception.StatusCode, responseBody, exception),
 			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody, exception),
 			_ => new GitHostingRequestException(exception.Message, Name, exception.StatusCode, responseBody, exception),
 		};
@@ -543,6 +553,49 @@ public sealed class GitHubProvider : GitProvider
 			if (int.TryParse(header.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int seconds))
 			{
 				return seconds;
+			}
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	/// Reads the authorisation URL from a failed response's single sign-on header, if it carries one.
+	/// </summary>
+	/// <remarks>
+	/// Scanned case-insensitively rather than looked up by key, for the reason
+	/// <see cref="TryGetRetryAfterSeconds"/> gives: HTTP header names are case-insensitive and
+	/// Octokit's header dictionary compares them ordinally, so a keyed lookup would work only by
+	/// matching whatever casing Octokit happens to canonicalise this header to.
+	/// <para>
+	/// The header's value is a parameter list, <c>required; url=&lt;uri&gt;</c>. Only the URL is read,
+	/// and anything else in the list is left alone: the caller's whole use for this is a link to open.
+	/// </para>
+	/// </remarks>
+	/// <param name="exception">The failed response.</param>
+	/// <returns>The authorisation URL, or <see langword="null"/> when the header is absent or carries none.</returns>
+	private static string? TryGetSingleSignOnUrl(ApiException exception)
+	{
+		const string headerName = "X-GitHub-SSO";
+		const string urlParameter = "url=";
+
+		if (exception.HttpResponse?.Headers is not IReadOnlyDictionary<string, string> headers)
+		{
+			return null;
+		}
+
+		foreach (KeyValuePair<string, string> header in headers.Where(
+			candidate => candidate.Key.Equals(headerName, StringComparison.OrdinalIgnoreCase)))
+		{
+			foreach (string parameter in header.Value.Split(';'))
+			{
+				string trimmed = parameter.Trim();
+
+				if (trimmed.StartsWith(urlParameter, StringComparison.OrdinalIgnoreCase))
+				{
+					string url = trimmed[urlParameter.Length..];
+					return url.Length == 0 ? null : url;
+				}
 			}
 		}
 
