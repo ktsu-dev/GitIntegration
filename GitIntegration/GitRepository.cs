@@ -204,6 +204,18 @@ public class GitRepository
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitWorktreeListBuilder Worktrees() => new GitWorktreeListBuilder(RequireRunner(), RequireLocalPath());
 
+	/// <summary>Creates an additional working tree.</summary>
+	/// <param name="path">Where the new worktree goes.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitWorktreeAddBuilder AddWorktree(AbsoluteDirectoryPath path)
+	{
+		// Argument validation precedes the state check, matching every other verb taking an operand.
+		Ensure.NotNull(path);
+		return new GitWorktreeAddBuilder(RequireRunner(), RequireLocalPath(), path);
+	}
+
 	/// <summary>Stages changes for the next commit.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
