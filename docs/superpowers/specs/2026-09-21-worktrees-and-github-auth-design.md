@@ -275,9 +275,8 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 ```
 
 `DeviceCode` is the opaque code the polling request carries, distinct from `UserCode`, which is the
-short string a human types at `VerificationUri`. Octokit's own device-flow exchange needs the device
-code to resume, and showing one code where the other belongs fails in a way that looks like a broken
-sign-in.
+short string a human types at `VerificationUri`. Showing one code where the other belongs fails in a
+way that looks like a broken sign-in.
 
 ### Why two calls rather than one
 

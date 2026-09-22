@@ -3,7 +3,9 @@
 namespace ktsu.GitIntegration.Test;
 
 using System;
+using System.Collections.Generic;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 using ktsu.Semantics.Strings;
@@ -18,8 +20,35 @@ public sealed class GitHubDeviceFlowTests
 		"\"verification_uri\":\"https://github.com/login/device\"," +
 		"\"expires_in\":900,\"interval\":5}";
 
-	private static GitHubDeviceFlow CreateFlow(FakeHttpMessageHandler handler) =>
-		new("Iv1.0123456789abcdef".As<GitHubOAuthClientId>(), ["repo", "read:org"]) { Handler = handler };
+	private const string DeviceCodeBodyWithZeroInterval =
+		"{\"device_code\":\"dev-abc\",\"user_code\":\"WXYZ-1234\"," +
+		"\"verification_uri\":\"https://github.com/login/device\"," +
+		"\"expires_in\":900,\"interval\":0}";
+
+	private const string SuccessTokenBody =
+		"{\"access_token\":\"gho_realtoken\",\"token_type\":\"bearer\",\"scope\":\"repo,read:org\"}";
+
+	private const string AuthorizationPendingBody = "{\"error\":\"authorization_pending\"}";
+
+	private const string SlowDownBody = "{\"error\":\"slow_down\"}";
+
+	/// <summary>
+	/// Creates a flow against <paramref name="handler"/>, optionally replacing the wait and clock a
+	/// test needs to observe or fast-forward without a real wait. Omitting both keeps this identical
+	/// to the flow's own defaults (<see cref="Task.Delay(TimeSpan, CancellationToken)"/> and
+	/// <see cref="Environment.TickCount64"/>), which is what the tests already written against this
+	/// helper rely on.
+	/// </summary>
+	private static GitHubDeviceFlow CreateFlow(
+		FakeHttpMessageHandler handler,
+		Func<TimeSpan, CancellationToken, Task>? delay = null,
+		Func<long>? nowTicks = null) =>
+		new("Iv1.0123456789abcdef".As<GitHubOAuthClientId>(), ["repo", "read:org"])
+		{
+			Handler = handler,
+			Delay = delay ?? Task.Delay,
+			NowTicks = nowTicks ?? (() => Environment.TickCount64),
+		};
 
 	[TestMethod]
 	public async Task RequestsADeviceCodeAndReportsWhatTheUserNeeds()
@@ -46,8 +75,10 @@ public sealed class GitHubDeviceFlowTests
 		_ = await CreateFlow(handler)
 			.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		StringAssert.Contains(handler.Requests[0].Body, "repo");
-		StringAssert.Contains(handler.Requests[0].Body, "read:org");
+		// Space-separated, not comma-joined: GitHub's device-flow request wants scopes
+		// space-separated, and this exact substring is what rules out a comma (or any other
+		// separator) sneaking back in.
+		StringAssert.Contains(handler.Requests[0].Body, "\"scope\":\"repo read:org\"");
 	}
 
 	[TestMethod]
@@ -121,6 +152,176 @@ public sealed class GitHubDeviceFlowTests
 			async () => await CreateFlow(handler)
 				.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
 			.ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task PollRequestCarriesTheDeviceCodeAndNotTheUserCodeAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, SuccessTokenBody, ("Content-Type", "application/json"));
+
+		GitHubDeviceFlow flow = CreateFlow(handler);
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		_ = await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(new Uri("https://github.com/login/device/code"), handler.Requests[0].Uri);
+		Assert.AreEqual(new Uri("https://github.com/login/oauth/access_token"), handler.Requests[1].Uri);
+		StringAssert.Contains(handler.Requests[1].Body, "\"device_code\":\"dev-abc\"");
+		StringAssert.Contains(handler.Requests[1].Body, "\"grant_type\":\"urn:ietf:params:oauth:grant-type:device_code\"");
+
+		// The exact confusion GitHubDeviceCode's own XML doc warns about: the poll request must
+		// never carry the code a human types, only the opaque one it was issued alongside.
+		Assert.IsFalse(handler.Requests[1].Body!.Contains("user_code", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public async Task ReportsAResponseWithNeitherTokenNorErrorAsARequestFailureAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, "{\"token_type\":\"bearer\"}", ("Content-Type", "application/json"));
+
+		GitHubDeviceFlow flow = CreateFlow(handler);
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		_ = await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
+			async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task PollsThroughAuthorizationPendingToSuccessAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, AuthorizationPendingBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, SuccessTokenBody, ("Content-Type", "application/json"));
+
+		// A no-op wait: this test is about the pending-then-success transition, not about timing, so
+		// the interval is never actually slept.
+		GitHubDeviceFlow flow = CreateFlow(handler, delay: (_, _) => Task.CompletedTask);
+
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		HostingCredential credential = await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("gho_realtoken", credential.Token);
+		Assert.AreEqual(3, handler.Requests.Count);
+	}
+
+	[TestMethod]
+	public async Task WidensTheIntervalCumulativelyOnRepeatedSlowDownAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, SlowDownBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, SlowDownBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, SuccessTokenBody, ("Content-Type", "application/json"));
+
+		List<TimeSpan> delays = [];
+
+		GitHubDeviceFlow flow = CreateFlow(handler, delay: (interval, _) =>
+		{
+			delays.Add(interval);
+			return Task.CompletedTask;
+		});
+
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		_ = await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		// DeviceCodeBody's interval is 5 seconds. Two slow_down answers must widen it twice, to 10
+		// then 15, not reset it back to 10 each time.
+		Assert.AreEqual(2, delays.Count);
+		Assert.AreEqual(TimeSpan.FromSeconds(10), delays[0]);
+		Assert.AreEqual(TimeSpan.FromSeconds(15), delays[1]);
+	}
+
+	[TestMethod]
+	public async Task FloorsAZeroIntervalFromTheWireAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBodyWithZeroInterval, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, AuthorizationPendingBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, SuccessTokenBody, ("Content-Type", "application/json"));
+
+		List<TimeSpan> delays = [];
+
+		GitHubDeviceFlow flow = CreateFlow(handler, delay: (interval, _) =>
+		{
+			delays.Add(interval);
+			return Task.CompletedTask;
+		});
+
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.AreEqual(TimeSpan.Zero, code.Interval);
+
+		_ = await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(1, delays.Count);
+		Assert.AreEqual(TimeSpan.FromSeconds(5), delays[0]);
+	}
+
+	[TestMethod]
+	public async Task ThrowsOnceTheDeviceCodeExpiresAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, AuthorizationPendingBody, ("Content-Type", "application/json"));
+
+		// The fake clock jumps past DeviceCodeBody's 900-second expiry the moment the first wait is
+		// asked for, simulating a server that answers authorization_pending forever without this
+		// test actually waiting 900 seconds for it.
+		long now = 0;
+		GitHubDeviceFlow flow = CreateFlow(
+			handler,
+			delay: (_, _) =>
+			{
+				now += (long)TimeSpan.FromSeconds(900).TotalMilliseconds + 1_000;
+				return Task.CompletedTask;
+			},
+			nowTicks: () => now);
+
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		GitHostingAuthenticationException exception =
+			await Assert.ThrowsExactlyAsync<GitHostingAuthenticationException>(
+				async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+				.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "expired");
+
+		// Exactly the one poll that answered authorization_pending: the deadline is caught before a
+		// second poll is ever sent, not by a poll response saying so.
+		Assert.AreEqual(2, handler.Requests.Count);
+	}
+
+	[TestMethod]
+	public async Task CancelsDuringTheWaitBetweenPollsAsync()
+	{
+		using FakeHttpMessageHandler handler = new();
+		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
+		_ = handler.Respond(HttpStatusCode.OK, AuthorizationPendingBody, ("Content-Type", "application/json"));
+
+		using CancellationTokenSource cts = new();
+		TaskCompletionSource waitStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		// Never completes on its own: it only resolves when the token passed to it is cancelled,
+		// which is exactly the wait this test needs to cancel into rather than before.
+		GitHubDeviceFlow flow = CreateFlow(handler, delay: (_, cancellationToken) =>
+		{
+			waitStarted.TrySetResult();
+			return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+		});
+
+		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Task<HostingCredential> waitTask = flow.WaitForTokenAsync(code, cts.Token);
+
+		await waitStarted.Task.ConfigureAwait(false);
+		await cts.CancelAsync().ConfigureAwait(false);
+
+		_ = await Assert.ThrowsExactlyAsync<TaskCanceledException>(
+			async () => await waitTask.ConfigureAwait(false)).ConfigureAwait(false);
 	}
 
 	[TestMethod]

@@ -96,6 +96,14 @@ public sealed record GitHubDeviceCode
 /// <see cref="GitHubDeviceCode.Interval"/> between attempts, widening it by five seconds whenever
 /// GitHub answers <c>slow_down</c>, exactly as GitHub's documentation for the device flow describes.
 /// </para>
+/// <para>
+/// Both endpoints are sent a JSON request body, with <c>Accept: application/json</c>, even though
+/// GitHub's own published documentation shows the device flow using form-url-encoded requests.
+/// GitHub's actual service accepts the JSON form in practice, which is what let
+/// <see cref="RequestDeviceCodeAsync"/> avoid the scope-encoding problem above, but this is
+/// undocumented behaviour this library now depends on, and nothing in this library's test suite
+/// verifies it against the real service, only against the fake transport.
+/// </para>
 /// </remarks>
 /// <param name="clientId">The OAuth App's client identifier.</param>
 /// <param name="scopes">The scopes to request, such as <c>repo</c> and <c>read:org</c>.</param>
@@ -112,6 +120,20 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 
 	/// <summary>How much longer to wait after GitHub answers <c>slow_down</c>.</summary>
 	private static readonly TimeSpan SlowDownIncrement = TimeSpan.FromSeconds(5);
+
+	/// <summary>
+	/// The shortest wait this flow will ever use between polls, regardless of what
+	/// <see cref="GitHubDeviceCode.Interval"/> says.
+	/// </summary>
+	/// <remarks>
+	/// GitHub's own device-flow documentation states five seconds as the minimum polling interval.
+	/// <see cref="GitHubDeviceCode"/> is public with an unvalidated <see langword="required init"/>
+	/// <see cref="GitHubDeviceCode.Interval"/>, so a value of zero, or one hand-built by a caller,
+	/// must not be able to produce an unthrottled loop against github.com. Applied at the point each
+	/// wait is issued, not when a wire response is parsed, so a hand-built
+	/// <see cref="GitHubDeviceCode"/> is covered exactly as a parsed one is.
+	/// </remarks>
+	private static readonly TimeSpan MinimumPollInterval = TimeSpan.FromSeconds(5);
 
 	/// <summary>
 	/// The transport every flow shares when no <see cref="Handler"/> was injected.
@@ -136,6 +158,29 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// <see cref="GitProvider.Handler"/> provides.
 	/// </remarks>
 	internal HttpMessageHandler? Handler { get; init; }
+
+	/// <summary>
+	/// Gets or initializes the wait <see cref="WaitForTokenAsync"/> performs between polls.
+	/// </summary>
+	/// <remarks>
+	/// Defaults to <see cref="Task.Delay(TimeSpan, CancellationToken)"/>. Internal for the same
+	/// reason as <see cref="Handler"/>: this exists so a test can replace minutes of real waiting
+	/// with an instantaneous one while still exercising the interval, the widening, and the deadline
+	/// arithmetic that surround it, not so a caller can tune polling behaviour.
+	/// </remarks>
+	internal Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = Task.Delay;
+
+	/// <summary>
+	/// Gets or initializes the monotonic clock <see cref="WaitForTokenAsync"/> reads to enforce
+	/// <see cref="GitHubDeviceCode.ExpiresIn"/>.
+	/// </summary>
+	/// <remarks>
+	/// Defaults to <see cref="Environment.TickCount64"/>, a monotonic source deliberately chosen over
+	/// <see cref="DateTime.Now"/> or <see cref="DateTimeOffset.UtcNow"/>: neither is guaranteed
+	/// monotonic, and a clock adjustment during a wait that can last minutes must not extend or
+	/// collapse the window this flow enforces. Internal for the same reason <see cref="Delay"/> is.
+	/// </remarks>
+	internal Func<long> NowTicks { get; init; } = () => Environment.TickCount64;
 
 	/// <summary>
 	/// Asks GitHub to begin a device flow.
@@ -188,6 +233,10 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// cancelled, so this may block for as long as <see cref="GitHubDeviceCode.ExpiresIn"/>. A
 	/// <c>authorization_pending</c> answer waits <see cref="GitHubDeviceCode.Interval"/> and tries
 	/// again; a <c>slow_down</c> answer widens that wait by <see cref="SlowDownIncrement"/> first.
+	/// The deadline is enforced by this flow, not left to GitHub: a server that keeps answering
+	/// <c>authorization_pending</c> past <see cref="GitHubDeviceCode.ExpiresIn"/> would otherwise poll
+	/// forever, since nothing about that answer's shape distinguishes a slow user from a server that
+	/// never intends to resolve.
 	/// </remarks>
 	/// <param name="code">What <see cref="RequestDeviceCodeAsync"/> returned.</param>
 	/// <param name="cancellationToken">Abandons the wait.</param>
@@ -213,9 +262,20 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 
 		TimeSpan interval = code.Interval;
 
+		// A monotonic elapsed-time budget rather than a fixed end-of-wall-clock instant: NowTicks
+		// wraps Environment.TickCount64 by default, which is what makes this immune to the machine's
+		// clock being changed mid-wait, forward or back.
+		long startTicks = NowTicks();
+		long expiresInMilliseconds = (long)code.ExpiresIn.TotalMilliseconds;
+
 		while (true)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+
+			if (NowTicks() - startTicks >= expiresInMilliseconds)
+			{
+				throw new GitHostingAuthenticationException("GitHub did not issue a token before the device code expired.");
+			}
 
 			using HttpRequestMessage request = CreateJsonRequest(AccessTokenEndpoint, requestJson);
 			using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -223,8 +283,11 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 
 			if (!response.IsSuccessStatusCode)
 			{
+				// Status and reason phrase only, not the body: this is the one place in this type
+				// where a failure response comes from the endpoint that issues tokens, and a body
+				// echoed back into an exception message is a body that can end up in a log.
 				throw new GitHostingRequestException(
-					$"GitHub refused the device flow token request: {(int)response.StatusCode} {response.ReasonPhrase}. {body}".TrimEnd());
+					$"GitHub refused the device flow token request: {(int)response.StatusCode} {response.ReasonPhrase}".TrimEnd());
 			}
 
 			GitHubAccessTokenResponseBody parsed = DeserializeOrThrow(
@@ -233,12 +296,12 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 			switch (parsed.Error)
 			{
 				case "authorization_pending":
-					await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+					await WaitAsync(interval, cancellationToken).ConfigureAwait(false);
 					continue;
 
 				case "slow_down":
 					interval += SlowDownIncrement;
-					await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+					await WaitAsync(interval, cancellationToken).ConfigureAwait(false);
 					continue;
 
 				case string error:
@@ -259,6 +322,13 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 			}
 		}
 	}
+
+	/// <summary>Waits between polls, never for less than <see cref="MinimumPollInterval"/>.</summary>
+	/// <param name="interval">The wait this flow would otherwise use.</param>
+	/// <param name="cancellationToken">Cancels the wait.</param>
+	/// <returns>A task that completes once the (possibly floored) wait has elapsed.</returns>
+	private Task WaitAsync(TimeSpan interval, CancellationToken cancellationToken) =>
+		Delay(interval < MinimumPollInterval ? MinimumPollInterval : interval, cancellationToken);
 
 	/// <summary>Creates the transport this flow's calls share.</summary>
 	/// <remarks>
