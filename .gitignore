@@ -651,6 +651,3 @@ Temporary Items
 
 # ImGui.ini files
 imgui.ini
-
-# Git worktrees used for isolated feature work
-.worktrees/
