@@ -160,5 +160,39 @@ public sealed class GitWorktreeBuilderTests
 		CollectionAssert.AreEqual(builder.BuildArguments().ToArray(), completed.Arguments.ToArray());
 	}
 
+	[TestMethod]
+	public void BuildsTheWorktreeRemoveVector()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitWorktreeRemoveBuilder builder = new(runner, TestPaths.Root, TestPaths.Worktree);
+
+		CollectionAssert.AreEqual(
+			Expect("worktree", "remove", "--end-of-options", TestPaths.Worktree.WeakString),
+			builder.BuildArguments().ToArray());
+	}
+
+	[TestMethod]
+	public void EmitsForceOnRemoveBeforeThePath()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitWorktreeRemoveBuilder builder = new(runner, TestPaths.Root, TestPaths.Worktree);
+		_ = builder.Force();
+
+		CollectionAssert.AreEqual(
+			Expect("worktree", "remove", "--force", "--end-of-options", TestPaths.Worktree.WeakString),
+			builder.BuildArguments().ToArray());
+	}
+
+	[TestMethod]
+	public void BuildsTheWorktreePruneVector()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitWorktreePruneBuilder builder = new(runner, TestPaths.Root);
+
+		CollectionAssert.AreEqual(
+			Expect("worktree", "prune"),
+			builder.BuildArguments().ToArray());
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

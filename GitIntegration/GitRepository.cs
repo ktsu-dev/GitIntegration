@@ -216,6 +216,23 @@ public class GitRepository
 		return new GitWorktreeAddBuilder(RequireRunner(), RequireLocalPath(), path);
 	}
 
+	/// <summary>Removes a working tree and the administrative record of it.</summary>
+	/// <param name="path">The worktree to remove.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitWorktreeRemoveBuilder RemoveWorktree(AbsoluteDirectoryPath path)
+	{
+		Ensure.NotNull(path);
+		return new GitWorktreeRemoveBuilder(RequireRunner(), RequireLocalPath(), path);
+	}
+
+	/// <summary>Removes administrative records for working trees whose directories have gone.</summary>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitWorktreePruneBuilder PruneWorktrees() =>
+		new GitWorktreePruneBuilder(RequireRunner(), RequireLocalPath());
+
 	/// <summary>Stages changes for the next commit.</summary>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
