@@ -371,14 +371,19 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 					throw new GitHostingRequestException(
 						$"GitHub reported an unrecognised device flow error: {unrecognisedError}. {parsed.ErrorDescription}".TrimEnd());
 
-				case null when string.IsNullOrEmpty(parsed.AccessToken):
-					throw new GitHostingRequestException("GitHub reported neither a token nor an error.");
-
 				default:
+					// Every non-null error is handled above, so the error is null by the time control
+					// reaches here and testing it again would be testing a constant. The only question
+					// left is whether a token actually arrived alongside that absent error.
+					if (string.IsNullOrEmpty(parsed.AccessToken))
+					{
+						throw new GitHostingRequestException("GitHub reported neither a token nor an error.");
+					}
+
 					// FromToken, not FromBearerToken: a GitHub OAuth token travels under Octokit's
 					// Token scheme, which is what FromToken means. FromBearerToken is for an Entra
 					// ID access token against Azure DevOps.
-					return HostingCredential.FromToken(parsed.AccessToken!);
+					return HostingCredential.FromToken(parsed.AccessToken);
 			}
 		}
 	}

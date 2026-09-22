@@ -629,10 +629,8 @@ public sealed class GitHubProvider : GitProvider
 		foreach (KeyValuePair<string, string> header in headers.Where(
 			candidate => candidate.Key.Equals(headerName, StringComparison.OrdinalIgnoreCase)))
 		{
-			foreach (string parameter in header.Value.Split(';'))
+			foreach (string trimmed in header.Value.Split(';').Select(static parameter => parameter.Trim()))
 			{
-				string trimmed = parameter.Trim();
-
 				if (trimmed.StartsWith(urlParameter, StringComparison.OrdinalIgnoreCase))
 				{
 					string url = trimmed[urlParameter.Length..];

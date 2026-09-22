@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// Reads <c>git worktree list --porcelain</c>.
@@ -31,10 +32,10 @@ internal static class GitWorktreeParser
 		List<GitWorktree> worktrees = [];
 		List<string> record = [];
 
-		foreach (string line in output.Split('\n'))
+		// Trimmed at the enumeration source rather than inside the loop: the carriage return is a
+		// line-ending artefact, not something any record's content means, so nothing below sees it.
+		foreach (string entry in output.Split('\n').Select(static line => line.TrimEnd('\r')))
 		{
-			string entry = line.TrimEnd('\r');
-
 			if (entry.Length != 0)
 			{
 				record.Add(entry);
