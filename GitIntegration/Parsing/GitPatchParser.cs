@@ -144,8 +144,11 @@ internal static class GitPatchParser
 			if (boundary.StartsWith(ConflictHunkPrefix, StringComparison.Ordinal))
 			{
 				// Combined format from an unmerged path is not a patch git apply accepts, so its
-				// body is skipped rather than misread as ordinary hunks.
+				// body is skipped rather than misread as ordinary hunks. Kind follows the same
+				// enum member GitDiffParser reports for the path, so a caller switching on
+				// GitChangeKind gets one answer from both verbs.
 				isConflicted = true;
+				kind = GitChangeKind.Unmerged;
 				index++;
 
 				while (index < lines.Count && !IsFileStart(Line(output, lines, index)))
@@ -155,7 +158,11 @@ internal static class GitPatchParser
 			}
 			else if (!isBinary)
 			{
-				while (index < lines.Count && !IsFileStart(Line(output, lines, index)))
+				// Only a hunk header may reach ParseHunk. Stopping at anything else keeps a content
+				// line git emitted in a shape this parser does not recognize out of a range parser,
+				// where it would fail as an index exception rather than as GitParseException.
+				while (index < lines.Count &&
+					Line(output, lines, index).StartsWith(HunkPrefix, StringComparison.Ordinal))
 				{
 					hunks.Add(ParseHunk(output, lines, ref index));
 				}

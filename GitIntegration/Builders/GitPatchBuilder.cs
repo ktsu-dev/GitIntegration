@@ -11,6 +11,18 @@ using ktsu.Semantics.Paths;
 /// Reads a patch: the hunks and lines a caller needs to show or stage a change, rather than the
 /// per-file counts <see cref="IGitDiffBuilder"/> reports.
 /// </summary>
+/// <remarks>
+/// An untracked file never appears, because <c>git diff</c> does not show one. Staging it is
+/// <see cref="IGitAddBuilder"/>. A staging view therefore draws its file list from
+/// <see cref="IGitStatusBuilder"/> and its hunks from here, and those two sources disagree about
+/// untracked content.
+/// <para>
+/// Git's output is decoded as UTF-8, so a file whose bytes are not valid UTF-8 comes back with
+/// every invalid byte replaced by U+FFFD. Git diffs such a file as text, because it decides binary
+/// on NUL bytes rather than on encoding validity, and <see cref="GitRepository.Apply"/> refuses a
+/// patch carrying that character rather than staging the replacement bytes.
+/// </para>
+/// </remarks>
 public interface IGitPatchBuilder : IGitCommandBuilder<GitPatch>
 {
 	/// <summary>Compares the index against HEAD instead of the working tree against the index.</summary>
@@ -18,9 +30,18 @@ public interface IGitPatchBuilder : IGitCommandBuilder<GitPatch>
 	public IGitPatchBuilder Staged();
 
 	/// <summary>Sets how many lines of surrounding context each hunk carries.</summary>
-	/// <param name="lines">The number of context lines. Git's own default applies when this is never called.</param>
+	/// <remarks>
+	/// Zero is refused. A zero-context patch is one <c>git apply</c> accepts only under
+	/// <c>--unidiff-zero</c>, an option <see cref="IGitApplyBuilder"/> does not offer, so a hunk read
+	/// that way could never be staged through this library and the failure would name the index
+	/// rather than the setting that caused it.
+	/// </remarks>
+	/// <param name="lines">
+	/// The number of context lines, at least one. Git's own default applies when this is never
+	/// called.
+	/// </param>
 	/// <returns>The same builder, to allow chaining.</returns>
-	/// <exception cref="ArgumentOutOfRangeException"><paramref name="lines"/> is negative.</exception>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="lines"/> is less than one.</exception>
 	public IGitPatchBuilder WithContext(int lines);
 
 	/// <summary>Limits the result to this path. May be called more than once.</summary>
@@ -54,8 +75,8 @@ public interface IGitPatchBuilder : IGitCommandBuilder<GitPatch>
 }
 
 /// <summary>
-/// Builds <c>git diff --no-ext-diff --no-textconv --no-color</c> and parses its output through
-/// <see cref="GitPatchParser"/>.
+/// Builds <c>git diff</c>, with every option and setting pinned that would otherwise change the
+/// shape of the patch, and parses its output through <see cref="GitPatchParser"/>.
 /// </summary>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">The repository to scope the command to.</param>
@@ -80,7 +101,16 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	/// <inheritdoc />
 	public IGitPatchBuilder WithContext(int lines)
 	{
-		ArgumentOutOfRangeException.ThrowIfNegative(lines);
+		if (lines < 1)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(lines),
+				lines,
+				"A hunk needs at least one line of context. Git apply reads a zero-context patch only "
+				+ "with --unidiff-zero, which this library does not offer, so a patch read that way "
+				+ "could never be staged back through Apply.");
+		}
+
 		_contextLines = lines;
 		return this;
 	}
@@ -118,6 +148,13 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	{
 		Ensure.NotNull(arguments);
 
+		// diff.suppressBlankEmpty makes git print an empty context line as a bare newline with no
+		// leading space, which a patch reader cannot tell from the end of a hunk. A -c on the
+		// vector beats the value in any config file, and it has to precede the subcommand to be
+		// read at all.
+		arguments.Add("-c");
+		arguments.Add("diff.suppressBlankEmpty=false");
+
 		arguments.Add("diff");
 
 		// Correctness, not tidiness. A repository with a gitattributes diff driver emits
@@ -128,6 +165,12 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		arguments.Add("--no-ext-diff");
 		arguments.Add("--no-textconv");
 		arguments.Add("--no-color");
+
+		// diff.noprefix drops the a/ and b/ prefixes entirely, and diff.mnemonicPrefix replaces
+		// them with i/ and w/. Either leaves a header with no new-side path for the parser to find,
+		// and a patch that needs -p0 to apply. Pinning both prefixes overrides both settings.
+		arguments.Add("--src-prefix=a/");
+		arguments.Add("--dst-prefix=b/");
 
 		if (_staged)
 		{

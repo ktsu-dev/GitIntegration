@@ -10,7 +10,9 @@ using System.Linq;
 public class GitPatchParserTests
 {
 	// Fixtures captured from git version 2.54.0 (Apple Git-157) on macOS, with
-	// `git -c color.ui=false diff --no-ext-diff --no-textconv -U3`.
+	// `git -c color.ui=false diff --no-ext-diff --no-textconv -U3`. patch-new-file.txt and
+	// patch-deleted-file.txt add `--cached` to that, because `new file mode` and `deleted file
+	// mode` headers only appear for a change that is already in the index.
 
 	/// <summary>Reads a captured fixture's raw text from the test output's Fixtures directory.</summary>
 	private static string Fixture(string name) =>
@@ -91,6 +93,54 @@ public class GitPatchParserTests
 			"\r",
 			StringComparison.Ordinal,
 			"A patch is byte-sensitive, so content line endings survive parsing.");
+	}
+
+	[TestMethod]
+	public void ReadsAnAddedFileAsAdded()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-new-file.txt")).Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Added, file.Kind);
+		Assert.AreEqual("added.txt", file.Path.WeakString);
+		Assert.AreEqual(1, file.Hunks.Count);
+		Assert.IsTrue(
+			file.Hunks.Single().Lines.All(line => line.Kind == GitPatchLineKind.Added),
+			"A new file's only hunk is every one of its lines added, with no context to anchor it.");
+	}
+
+	[TestMethod]
+	public void ReadsADeletedFileAsDeleted()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-deleted-file.txt")).Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Deleted, file.Kind);
+		Assert.AreEqual("gone.txt", file.Path.WeakString);
+		Assert.AreEqual(1, file.Hunks.Count);
+		Assert.IsTrue(
+			file.Hunks.Single().Lines.All(line => line.Kind == GitPatchLineKind.Removed),
+			"A deleted file's only hunk is every one of its lines removed.");
+	}
+
+	[TestMethod]
+	public void ReadsAConflictedFileAsUnmerged() =>
+		Assert.AreEqual(
+			GitChangeKind.Unmerged,
+			GitPatchParser.Parse(Fixture("patch-conflict.txt")).Files.Single().Kind,
+			"GitDiffParser reports the same path as Unmerged, and a caller switching on one enum must not get two answers for it.");
+
+	[TestMethod]
+	public void StopsAtALineThatIsNotAHunkHeader()
+	{
+		// diff.suppressBlankEmpty writes an empty context line as a bare newline. The hunk body
+		// ends there, and what follows must not reach the header parser, which would index past
+		// the end of a short line.
+		string output =
+			"diff --git a/f.txt b/f.txt\nindex 111..222 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+			"@@ -1,3 +1,3 @@\n a\n\n-b\n+B\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual(1, file.Hunks.Count);
 	}
 
 	[TestMethod]
