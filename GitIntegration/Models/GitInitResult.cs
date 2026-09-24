@@ -3,7 +3,7 @@
 namespace ktsu.GitIntegration;
 
 /// <summary>
-/// The outcome of initialising a repository.
+/// The outcome of initializing a repository.
 /// </summary>
 public sealed record GitInitResult
 {
@@ -14,7 +14,7 @@ public sealed record GitInitResult
 	/// Gets a value indicating whether a repository was already present at the target path.
 	/// </summary>
 	/// <remarks>
-	/// <c>git init</c> is idempotent: run against an existing repository it reinitialises and exits
+	/// <c>git init</c> is idempotent: run against an existing repository it reinitializes and exits
 	/// zero, announcing the difference only in prose that this library does not parse. It also
 	/// silently ignores <c>--initial-branch</c> on that path, so a caller that asked for a
 	/// particular initial branch and got <see langword="true"/> here did not get the branch it

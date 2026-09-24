@@ -64,7 +64,7 @@ public enum GitChangeKind
 	/// <summary>The path has conflicting changes from an unfinished merge.</summary>
 	Unmerged,
 
-	/// <summary>Git reported a status letter this library does not recognise.</summary>
+	/// <summary>Git reported a status letter this library does not recognize.</summary>
 	Unknown,
 }
 
@@ -106,7 +106,7 @@ public enum GitUntrackedFilesMode
 public enum GitSubmoduleState
 {
 	/// <summary>
-	/// Git reported a marker this library does not recognise.
+	/// Git reported a marker this library does not recognize.
 	/// </summary>
 	/// <remarks>
 	/// Also the state of a gitlink the superproject records but that <c>submodule status</c> did not
@@ -126,10 +126,10 @@ public enum GitSubmoduleState
 	DifferentCommit,
 
 	/// <summary>
-	/// The submodule is registered but not initialised, so its working directory holds no checkout.
+	/// The submodule is registered but not initialized, so its working directory holds no checkout.
 	/// </summary>
 	/// <remarks>Git's <c>-</c> marker.</remarks>
-	Uninitialised,
+	Uninitialized,
 
 	/// <summary>The submodule has conflicting changes from an unfinished merge.</summary>
 	/// <remarks>Git's <c>U</c> marker.</remarks>

@@ -92,7 +92,7 @@ public class GitCommandException : GitException
 /// Git did not complete within <see cref="GitOptions.Timeout"/> and was terminated.
 /// </summary>
 /// <remarks>
-/// Distinct from <see cref="OperationCanceledException"/>, which means the caller cancelled. The
+/// Distinct from <see cref="OperationCanceledException"/>, which means the caller canceled. The
 /// distinction matters because a timeout is a candidate for retry while a caller's cancellation is
 /// not. A credential prompt is not among the causes: every invocation runs with
 /// <c>GIT_TERMINAL_PROMPT=0</c>, so a remote operation needing credentials it does not have fails

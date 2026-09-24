@@ -195,7 +195,7 @@ public class GitPullBuilderTests
 	}
 
 	[TestMethod]
-	public async Task RecognisesARebaseConflictTooAsync()
+	public async Task RecognizesARebaseConflictTooAsync()
 	{
 		// A rebase reports its conflicts with different prose but the same "CONFLICT" marker, and
 		// leaves the repository mid-rebase rather than mid-merge. Both are conflicts to a caller.

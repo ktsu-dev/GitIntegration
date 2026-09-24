@@ -160,7 +160,7 @@ wanting to unstage a binary file has nothing else, since a binary file has no hu
 Four cases where the model reports rather than pretends:
 
 **Conflicted files.** An unmerged path produces combined format, with `@@@` and two columns, which is
-not an applyable patch. The parser recognises it and sets `IsConflicted`, leaving `Hunks` empty. A
+not an applyable patch. The parser recognizes it and sets `IsConflicted`, leaving `Hunks` empty. A
 caller stages such a file whole or not at all. Mis-parsing combined hunks into ordinary ones would
 produce patches git rejects, with nothing on screen explaining why.
 

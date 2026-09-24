@@ -73,7 +73,7 @@ public sealed class GitHubProvider : GitProvider
 	/// <para>
 	/// GitHub has no single endpoint that both honours <see cref="GitProvider.Owner"/> and reveals
 	/// the private repositories a credential can see, so the route is chosen from what the owner is.
-	/// <c>GET /orgs/{org}/repos</c> does both for an organisation. <c>GET /user/repos</c> does both
+	/// <c>GET /orgs/{org}/repos</c> does both for an organization. <c>GET /user/repos</c> does both
 	/// for the credential's own account, but only for that account — it always describes the token's
 	/// own repositories regardless of which owner was configured, so it is reached only once the
 	/// configured owner has been confirmed to be that account. <c>GET /users/{login}/repos</c>,
@@ -120,8 +120,8 @@ public sealed class GitHubProvider : GitProvider
 	/// Authenticated, the owner's type decides the route, and it is read from
 	/// <c>GET /users/{login}</c> rather than inferred from <c>GET /orgs/{login}/repos</c> answering
 	/// <c>404</c>. The inference is the cheaper probe and the wrong one: a token without
-	/// <c>read:org</c>, or one not authorised for an organisation that enforces SSO, is answered
-	/// <c>404</c> by that route for an organisation that plainly exists, and the inference would
+	/// <c>read:org</c>, or one not authorised for an organization that enforces SSO, is answered
+	/// <c>404</c> by that route for an organization that plainly exists, and the inference would
 	/// quietly demote it to the public-only user route — reinstating the exact under-reporting this
 	/// method exists to remove, under a condition nothing would report. <c>GET /users/{login}</c> is
 	/// a public endpoint whose <c>type</c> no credential's scope can change, and its <c>404</c> says
@@ -152,7 +152,7 @@ public sealed class GitHubProvider : GitProvider
 
 		User account = await client.User.Get(owner).ConfigureAwait(false);
 
-		if (IsOrganisation(account))
+		if (IsOrganization(account))
 		{
 			return await client.Repository.GetAllForOrg(owner).ConfigureAwait(false);
 		}
@@ -172,7 +172,7 @@ public sealed class GitHubProvider : GitProvider
 		// configured "Octocat" for the account GitHub reports as "octocat" named the same account.
 		return string.Equals(authenticatedLogin, owner, StringComparison.OrdinalIgnoreCase)
 			// Affiliation rather than the default: GetAllForCurrent() unfiltered also returns
-			// repositories the account merely collaborates on or reaches through an organisation,
+			// repositories the account merely collaborates on or reaches through an organization,
 			// which are not Owner's repositories and would report a different owner's work under
 			// this owner's name. Owner is the affiliation that makes this route mean what
 			// GET /users/{login}/repos means, minus the public-only limit.
@@ -181,10 +181,10 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <summary>
-	/// Reports whether an account GitHub described is an organisation.
+	/// Reports whether an account GitHub described is an organization.
 	/// </summary>
 	/// <remarks>
-	/// Asks whether GitHub said "organisation" rather than whether it said "user", so every other
+	/// Asks whether GitHub said "organization" rather than whether it said "user", so every other
 	/// answer routes to the user branches: <see cref="Account.Type"/> is nullable and
 	/// <see cref="AccountType"/> already carries <see cref="AccountType.Bot"/> and
 	/// <see cref="AccountType.Mannequin"/> alongside the two this decision is really about. An
@@ -193,8 +193,8 @@ public sealed class GitHubProvider : GitProvider
 	/// wrong about coverage — only conservative about it.
 	/// </remarks>
 	/// <param name="account">The account <c>GET /users/{login}</c> reported.</param>
-	/// <returns><see langword="true"/> when GitHub called the account an organisation; otherwise, <see langword="false"/>.</returns>
-	private static bool IsOrganisation(User account) => account.Type == AccountType.Organization;
+	/// <returns><see langword="true"/> when GitHub called the account an organization; otherwise, <see langword="false"/>.</returns>
+	private static bool IsOrganization(User account) => account.Type == AccountType.Organization;
 
 	/// <inheritdoc/>
 	internal override async Task<IReadOnlyList<GitPullRequest>> GetPullRequestsCoreAsync(GitRepositoryAddress repositoryAddress, CancellationToken cancellationToken)
@@ -316,7 +316,7 @@ public sealed class GitHubProvider : GitProvider
 	/// <para>
 	/// <see cref="GitProvider.ResolveCredential"/> runs before either transport is constructed: it
 	/// can throw <see cref="InvalidOperationException"/> for a credential subtype this library does
-	/// not recognise, and running it first means that throw can never leave a constructed
+	/// not recognize, and running it first means that throw can never leave a constructed
 	/// <see cref="HttpClientAdapter"/> stranded with nothing left to dispose it — there is nothing to
 	/// strand yet.
 	/// </para>
@@ -472,7 +472,7 @@ public sealed class GitHubProvider : GitProvider
 			// ItemState has exactly these two members, mirroring GitHub's own state field, which is
 			// documented to be only ever "open" or "closed" — this is unreachable in practice, but the
 			// switch must still be exhaustive.
-			_ => throw new NotSupportedException($"GitHub reported an unrecognised pull request state '{pullRequest.State.StringValue}'."),
+			_ => throw new NotSupportedException($"GitHub reported an unrecognized pull request state '{pullRequest.State.StringValue}'."),
 		};
 	}
 
@@ -523,14 +523,14 @@ public sealed class GitHubProvider : GitProvider
 		// GitHostingException itself defaults to, rather than throwing while translating a throw.
 		string responseBody = exception.HttpResponse?.Body as string ?? string.Empty;
 
-		// A token that is valid but unauthorised for an organisation's single sign-on arrives as a
+		// A token that is valid but unauthorised for an organization's single sign-on arrives as a
 		// plain 403, indistinguishable in status and body from a bad credential. The header is the
 		// only thing carrying the URL that resolves it, and that URL is the whole remedy — without
 		// it, the two failures a caller most needs to tell apart read identically.
 		string? singleSignOnUrl = TryGetSingleSignOnUrl(exception);
 		string authenticationMessage = singleSignOnUrl is null
 			? exception.Message
-			: $"{exception.Message} This organisation requires single sign-on authorisation for " +
+			: $"{exception.Message} This organization requires single sign-on authorisation for " +
 			  $"this credential. Authorise it at: {singleSignOnUrl}";
 
 		return exception switch
@@ -577,7 +577,7 @@ public sealed class GitHubProvider : GitProvider
 	///
 	/// <c>Retry-After</c> may also carry an HTTP date rather than a delay in seconds. GitHub sends
 	/// seconds, and a value that does not parse as seconds yields <see langword="null"/>, so an
-	/// unrecognised form leaves <see cref="GitHostingRateLimitException.ResetsAt"/> unset rather than
+	/// unrecognized form leaves <see cref="GitHostingRateLimitException.ResetsAt"/> unset rather than
 	/// carrying an invented instant.
 	/// </remarks>
 	/// <param name="exception">The failure Octokit reported.</param>

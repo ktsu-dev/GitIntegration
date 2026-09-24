@@ -85,11 +85,11 @@ public abstract class GitProvider : IGitHostingProvider
 	/// Reports whether a request this provider issues would actually carry a credential, which is a
 	/// narrower question than whether the credential cache holds an entry. A resolved
 	/// <see cref="CredentialWithNothing"/> is an entry that says "proceed unauthenticated", and a
-	/// subtype <see cref="ResolveCredential"/> does not recognise is one no request can ever carry,
-	/// so both report <see langword="false"/> here. Both share <see cref="ResolveRecognisedCredential"/>
+	/// subtype <see cref="ResolveCredential"/> does not recognize is one no request can ever carry,
+	/// so both report <see langword="false"/> here. Both share <see cref="ResolveRecognizedCredential"/>
 	/// with <see cref="ResolveCredential"/> so the two can never drift apart.
 	/// </remarks>
-	public bool IsAuthenticated => ResolveRecognisedCredential(out _) is { Kind: not HostingCredentialKind.None };
+	public bool IsAuthenticated => ResolveRecognizedCredential(out _) is { Kind: not HostingCredentialKind.None };
 
 	/// <summary>
 	/// Gets or initializes the transport this provider issues HTTP requests through, or
@@ -249,12 +249,12 @@ public abstract class GitProvider : IGitHostingProvider
 
 	/// <summary>
 	/// Resolves this provider's credential into the shape a subclass applies to its transport,
-	/// recognising every <see cref="Credential"/> subtype this library understands.
+	/// recognizing every <see cref="Credential"/> subtype this library understands.
 	/// </summary>
 	/// <remarks>
 	/// No credential at all, or a resolved <see cref="CredentialWithNothing"/>, both proceed
 	/// <see cref="HostingCredentialKind.None"/> — enumerating public repositories without
-	/// credentials is legitimate, and refusing it would break a real use. An unrecognised
+	/// credentials is legitimate, and refusing it would break a real use. An unrecognized
 	/// <see cref="Credential"/> subtype throws instead of doing the same: the caller configured
 	/// something this library does not understand, and proceeding as though nothing were
 	/// configured would hide that rather than surface it.
@@ -265,11 +265,11 @@ public abstract class GitProvider : IGitHostingProvider
 	/// </remarks>
 	/// <returns>The resolved credential.</returns>
 	/// <exception cref="InvalidOperationException">
-	/// A credential was resolved whose runtime type is not one this method recognises.
+	/// A credential was resolved whose runtime type is not one this method recognizes.
 	/// </exception>
 	internal HostingCredential ResolveCredential()
 	{
-		HostingCredential? resolved = ResolveRecognisedCredential(out Credential? credential);
+		HostingCredential? resolved = ResolveRecognizedCredential(out Credential? credential);
 		if (resolved is not null)
 		{
 			return resolved;
@@ -280,11 +280,11 @@ public abstract class GitProvider : IGitHostingProvider
 		// assigns the out parameter; a non-null one means the cache held a subtype not in the table.
 		throw new InvalidOperationException(credential is null
 			? $"Provider '{Name}' has a {nameof(CredentialSource)} that returned null. Return {nameof(HostingCredential)}.{nameof(HostingCredential.None)} to proceed unauthenticated."
-			: $"Provider '{Name}' resolved a credential of type '{credential.GetType()}', which this library does not recognise.");
+			: $"Provider '{Name}' resolved a credential of type '{credential.GetType()}', which this library does not recognize.");
 	}
 
 	/// <summary>
-	/// Resolves this provider's credential, reporting an unrecognised <see cref="Credential"/>
+	/// Resolves this provider's credential, reporting an unrecognized <see cref="Credential"/>
 	/// subtype as <see langword="null"/> rather than by throwing.
 	/// </summary>
 	/// <remarks>
@@ -298,8 +298,8 @@ public abstract class GitProvider : IGitHostingProvider
 	/// When this method returns, contains the raw credential the cache held, which is
 	/// non-<see langword="null"/> whenever this method returns <see langword="null"/>.
 	/// </param>
-	/// <returns>The resolved credential, or <see langword="null"/> for an unrecognised subtype.</returns>
-	private HostingCredential? ResolveRecognisedCredential(out Credential? credential)
+	/// <returns>The resolved credential, or <see langword="null"/> for an unrecognized subtype.</returns>
+	private HostingCredential? ResolveRecognizedCredential(out Credential? credential)
 	{
 		credential = null;
 
@@ -309,7 +309,7 @@ public abstract class GitProvider : IGitHostingProvider
 		if (CredentialSource is not null)
 		{
 			// A null return leaves `credential` null, which is what tells ResolveCredential to
-			// report this as a CredentialSource bug rather than an unrecognised cache subtype. It
+			// report this as a CredentialSource bug rather than an unrecognized cache subtype. It
 			// reaches IsAuthenticated as "no credential a request could carry", which is a property
 			// getter and so must not throw.
 			return CredentialSource();

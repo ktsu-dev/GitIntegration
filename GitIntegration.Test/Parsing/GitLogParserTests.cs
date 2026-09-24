@@ -90,7 +90,7 @@ public class GitLogParserTests
 	[TestMethod]
 	public void PreservesTheCommittedTimeZoneOffset()
 	{
-		// %aI is strict ISO-8601 with the offset the commit was made in. Normalising to UTC would
+		// %aI is strict ISO-8601 with the offset the commit was made in. Normalizing to UTC would
 		// throw away the local time, which is information a caller may want.
 		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(MergeCommit);
 

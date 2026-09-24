@@ -12,7 +12,7 @@ public sealed record GitProviderName : SemanticString<GitProviderName> { }
 
 /// <summary>
 /// A strongly-typed owner of repositories within a hosting provider: a GitHub user or
-/// organisation, or an Azure DevOps organisation.
+/// organization, or an Azure DevOps organization.
 /// </summary>
 [HasNonWhitespaceContent]
 public sealed record GitProviderOwner : SemanticString<GitProviderOwner> { }
@@ -45,7 +45,7 @@ public sealed record GitPullRequestTitle : SemanticString<GitPullRequestTitle> {
 /// <remarks>
 /// The hosts do not agree on what identifies a user: GitHub supplies a login, Azure DevOps a
 /// unique name that is usually an email address. This type carries whichever the host gave,
-/// unaltered, rather than normalising two different concepts into one that matches neither.
+/// unaltered, rather than normalizing two different concepts into one that matches neither.
 /// </remarks>
 [HasNonWhitespaceContent]
 public sealed record GitPullRequestAuthor : SemanticString<GitPullRequestAuthor> { }

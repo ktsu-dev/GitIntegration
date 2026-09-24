@@ -101,7 +101,7 @@ public sealed record GitHubDeviceCode
 /// GitHub's own published documentation shows the device flow using form-url-encoded requests.
 /// GitHub's actual service accepts the JSON form in practice, which is what let
 /// <see cref="RequestDeviceCodeAsync"/> avoid the scope-encoding problem above, but this is
-/// undocumented behaviour this library now depends on, and nothing in this library's test suite
+/// undocumented behavior this library now depends on, and nothing in this library's test suite
 /// verifies it against the real service, only against the fake transport.
 /// </para>
 /// </remarks>
@@ -166,7 +166,7 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// Defaults to <see cref="Task.Delay(TimeSpan, CancellationToken)"/>. Internal for the same
 	/// reason as <see cref="Handler"/>: this exists so a test can replace minutes of real waiting
 	/// with an instantaneous one while still exercising the interval, the widening, and the deadline
-	/// arithmetic that surround it, not so a caller can tune polling behaviour.
+	/// arithmetic that surround it, not so a caller can tune polling behavior.
 	/// </remarks>
 	internal Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = Task.Delay;
 
@@ -247,7 +247,7 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// <remarks>
 	/// <para>
 	/// Polls until the user authorises, the code expires, or <paramref name="cancellationToken"/> is
-	/// cancelled, so this may block for as long as <see cref="GitHubDeviceCode.ExpiresIn"/>. A
+	/// canceled, so this may block for as long as <see cref="GitHubDeviceCode.ExpiresIn"/>. A
 	/// <c>authorization_pending</c> answer waits <see cref="GitHubDeviceCode.Interval"/> and tries
 	/// again; a <c>slow_down</c> answer widens that wait by <see cref="SlowDownIncrement"/> first.
 	/// The deadline is enforced by this flow, not left to GitHub: a server that keeps answering
@@ -263,9 +263,9 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// <c>unsupported_grant_type</c>, and <c>device_flow_disabled</c> are a fact about the caller's own
 	/// configuration and become <see cref="GitHostingRequestException"/> instead: none of the three can
 	/// be fixed by the user trying again, so reporting them as an authentication failure would loop a
-	/// person through a sign-in that can never succeed. A code this method does not recognise is
+	/// person through a sign-in that can never succeed. A code this method does not recognize is
 	/// deliberately treated as a <see cref="GitHostingRequestException"/> as well, on the same
-	/// reasoning: an unrecognised code is either a GitHub error this library has not been taught yet or
+	/// reasoning: an unrecognized code is either a GitHub error this library has not been taught yet or
 	/// something upstream of GitHub answering instead, and in both cases a caller is better served
 	/// being told something is wrong with the request than being invited to retry a sign-in for a
 	/// reason nobody has verified sign-in can fix.
@@ -279,7 +279,7 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// <exception cref="GitHostingRequestException">
 	/// GitHub refused the request, could not be reached, reported a configuration fault
 	/// (<c>incorrect_client_credentials</c>, <c>unsupported_grant_type</c>, <c>device_flow_disabled</c>),
-	/// or reported an error code this method does not recognise.
+	/// or reported an error code this method does not recognize.
 	/// </exception>
 	public async Task<HostingCredential> WaitForTokenAsync(GitHubDeviceCode code, CancellationToken cancellationToken = default)
 	{
@@ -360,8 +360,8 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 					throw new GitHostingRequestException(
 						$"GitHub refused the device flow token request: {parsed.Error}. {parsed.ErrorDescription}".TrimEnd());
 
-				case string unrecognisedError:
-					// A code this library does not recognise is treated as a request fault rather
+				case string unrecognizedError:
+					// A code this library does not recognize is treated as a request fault rather
 					// than an authentication failure, deliberately: the two known authentication
 					// codes above are enumerated explicitly, so anything else reaching here is
 					// either a new GitHub error this library has not been taught yet, or a
@@ -369,7 +369,7 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 					// another sign-in attempt is more likely to be wrong than treating it as
 					// something the caller or its configuration needs to look at.
 					throw new GitHostingRequestException(
-						$"GitHub reported an unrecognised device flow error: {unrecognisedError}. {parsed.ErrorDescription}".TrimEnd());
+						$"GitHub reported an unrecognized device flow error: {unrecognizedError}. {parsed.ErrorDescription}".TrimEnd());
 
 				default:
 					// Every non-null error is handled above, so the error is null by the time control

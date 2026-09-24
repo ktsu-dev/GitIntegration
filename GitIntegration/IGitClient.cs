@@ -63,7 +63,7 @@ public interface IGitClient
 	/// Creates a repository at a path.
 	/// </summary>
 	/// <remarks>
-	/// Safe to run against a path that already holds a repository: git reinitialises it, and the
+	/// Safe to run against a path that already holds a repository: git reinitializes it, and the
 	/// result reports <see cref="GitInitResult.AlreadyExisted"/> so a caller can tell.
 	/// </remarks>
 	/// <param name="path">Where the repository should be.</param>

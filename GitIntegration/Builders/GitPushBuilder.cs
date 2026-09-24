@@ -78,7 +78,7 @@ public interface IGitPushBuilder : IGitCommandBuilder<GitPushResult>
 	/// submodules' working trees or refs". Here it means something else entirely: a superproject
 	/// commit referencing a submodule commit that no remote has is a commit nobody else can use, and
 	/// this governs whether git checks for, or pushes, those submodule commits to their own remotes
-	/// first. Putting one word on two unrelated behaviours would be the easiest possible thing for a
+	/// first. Putting one word on two unrelated behaviors would be the easiest possible thing for a
 	/// caller to get wrong, so the two carry different method names and different enums.
 	/// </para>
 	/// <para>
@@ -89,7 +89,7 @@ public interface IGitPushBuilder : IGitCommandBuilder<GitPushResult>
 	/// </remarks>
 	/// <param name="check">What to do about the submodules' commits.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
-	/// <exception cref="InvalidEnumArgumentException"><paramref name="check"/> is not a recognised value.</exception>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="check"/> is not a recognized value.</exception>
 	public IGitPushBuilder CheckingSubmodules(GitSubmodulePushCheck check);
 
 	/// <summary>Reports git's progress output as it arrives.</summary>

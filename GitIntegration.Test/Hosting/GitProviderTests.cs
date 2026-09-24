@@ -146,7 +146,7 @@ public sealed class GitProviderTests
 	{
 		// Returning null is a caller bug, not a way to say "unauthenticated" — HostingCredential.None
 		// says that explicitly. Treating null as None would hide the bug, which is the same reason an
-		// unrecognised Credential subtype throws rather than proceeding.
+		// unrecognized Credential subtype throws rather than proceeding.
 		TestProvider provider = new()
 		{
 			Owner = "octocat".As<GitProviderOwner>(),
@@ -181,14 +181,14 @@ public sealed class GitProviderTests
 	}
 
 	[TestMethod]
-	public void ThrowsForAnUnrecognisedCredentialSubtype()
+	public void ThrowsForAnUnrecognizedCredentialSubtype()
 	{
-		PersonaGUID persona = SeedCredential(new UnrecognisedCredential());
+		PersonaGUID persona = SeedCredential(new UnrecognizedCredential());
 		TestProvider provider = CreateProvider(persona);
 
 		InvalidOperationException exception = Assert.ThrowsExactly<InvalidOperationException>(() => _ = provider.CallResolveCredential());
 
-		StringAssert.Contains(exception.Message, nameof(UnrecognisedCredential));
+		StringAssert.Contains(exception.Message, nameof(UnrecognizedCredential));
 	}
 
 	[TestMethod]
@@ -237,12 +237,12 @@ public sealed class GitProviderTests
 	}
 
 	[TestMethod]
-	public void ReportsUnauthenticatedForAnUnrecognisedCredentialSubtype()
+	public void ReportsUnauthenticatedForAnUnrecognizedCredentialSubtype()
 	{
 		// A subtype ResolveCredential throws on can never be applied to a request, so reporting
 		// authenticated would be false. Reported rather than thrown: a property getter that throws
 		// would make a plain "if (provider.IsAuthenticated)" a hazard.
-		PersonaGUID persona = SeedCredential(new UnrecognisedCredential());
+		PersonaGUID persona = SeedCredential(new UnrecognizedCredential());
 		TestProvider provider = CreateProvider(persona);
 
 		Assert.IsFalse(provider.IsAuthenticated);
@@ -292,7 +292,7 @@ public sealed class GitProviderTests
 		}
 	}
 
-	private sealed class UnrecognisedCredential : Credential;
+	private sealed class UnrecognizedCredential : Credential;
 
 	// The minimal subclass a test needs to reach GitProvider's protected members. Its own three
 	// abstract overrides are never exercised here — this class exists only to expose

@@ -405,7 +405,7 @@ git add GitIntegration/Parsing/GitPatchParser.cs GitIntegration.Test/Parsing/Git
 git commit -m "[minor] Parse a unified diff into files, hunks and lines
 
 Each hunk keeps the bytes git emitted alongside the parsed lines. Combined
-format from an unmerged path is recognised and left unparsed rather than
+format from an unmerged path is recognized and left unparsed rather than
 turned into ordinary hunks, which would produce patches git rejects with
 nothing explaining why, and a rename that also changed content keeps its
 hunks."

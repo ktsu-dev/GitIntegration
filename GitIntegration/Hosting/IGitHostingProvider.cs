@@ -60,7 +60,7 @@ public interface IGitHostingProvider
 	/// to see, private ones included, and falls back to the owner's public repositories only where
 	/// the host publishes no owner-scoped route that a credential widens. That is the contract
 	/// callers may rely on, and it is stated here rather than left to each provider to describe its
-	/// own behaviour: a caller who has to read two providers' remarks and work out what they have in
+	/// own behavior: a caller who has to read two providers' remarks and work out what they have in
 	/// common is a caller who will get it wrong.
 	/// </para>
 	/// <para>
@@ -68,7 +68,7 @@ public interface IGitHostingProvider
 	/// <see cref="AzureDevOpsProvider"/> never takes it — its enumeration is entitlement-scoped
 	/// throughout. <see cref="GitHubProvider"/> takes it in exactly one case: an owner that is a
 	/// GitHub <b>user</b> other than the credential's own account, for which GitHub publishes no
-	/// authenticated owner-scoped route at all. An organisation owner, and the credential's own user
+	/// authenticated owner-scoped route at all. An organization owner, and the credential's own user
 	/// account, both reach the full entitled set. See
 	/// <see cref="GitHubProvider.GetRepositoriesAsync"/> for the routes that produces.
 	/// </para>
@@ -89,7 +89,7 @@ public interface IGitHostingProvider
 	/// <remarks>
 	/// Returns <b>open</b> pull requests only. Both hosts happen to default to open/active when
 	/// unfiltered, but relying on that default would make this method's contract a restatement of
-	/// two vendors' current behaviour, either of which could change without notice — so the filter
+	/// two vendors' current behavior, either of which could change without notice — so the filter
 	/// is requested explicitly of each host rather than left implicit. Listing merged or abandoned
 	/// pull requests is a filtering feature that can be added later without breaking this contract.
 	/// </remarks>

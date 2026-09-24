@@ -71,11 +71,11 @@ public class RunCommandGitProcessRunnerTests
 			Timeout = TimeSpan.FromMinutes(5),
 		});
 
-		using CancellationTokenSource alreadyCancelled = new();
-		await alreadyCancelled.CancelAsync().ConfigureAwait(false);
+		using CancellationTokenSource alreadyCanceled = new();
+		await alreadyCanceled.CancelAsync().ConfigureAwait(false);
 
 		OperationCanceledException exception = await Assert.ThrowsExactlyAsync<OperationCanceledException>(
-			async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, alreadyCancelled.Token).ConfigureAwait(false)).ConfigureAwait(false);
+			async () => await runner.RunAsync(new GitProcessRequest { Arguments = ["--version"] }, alreadyCanceled.Token).ConfigureAwait(false)).ConfigureAwait(false);
 
 		Assert.IsNotInstanceOfType<GitTimeoutException>(exception);
 	}
@@ -130,7 +130,7 @@ public class RunCommandGitProcessRunnerTests
 	[TestMethod]
 	public async Task CallerCancellationMidRunSurfacesAsOperationCanceledAsync()
 	{
-		// CallerCancellationSurfacesAsOperationCanceledAsync uses a pre-cancelled token, so
+		// CallerCancellationSurfacesAsOperationCanceledAsync uses a pre-canceled token, so
 		// ktsu.RunCommand throws at its own entry point and the post-return guard in RunAsync is
 		// never reached. This test cancels while the invocation is in flight, which is what can
 		// drive execution into that guard, where the caller's cancellation must be re-raised as a
@@ -239,7 +239,7 @@ public class RunCommandGitProcessRunnerTests
 	}
 
 	[TestMethod]
-	public async Task MutatingOptionsAfterConstructionDoesNotChangeBehaviourAsync()
+	public async Task MutatingOptionsAfterConstructionDoesNotChangeBehaviorAsync()
 	{
 		GitOptions options = new() { ExecutablePath = "dotnet" };
 		RunCommandGitProcessRunner runner = new(options);

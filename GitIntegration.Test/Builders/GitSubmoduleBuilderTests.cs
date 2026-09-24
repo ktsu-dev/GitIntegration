@@ -94,9 +94,9 @@ public class GitSubmoduleListBuilderTests
 	}
 
 	[TestMethod]
-	public async Task ReportsNoCheckedOutCommitForAnUninitialisedSubmoduleAsync()
+	public async Task ReportsNoCheckedOutCommitForAnUninitializedSubmoduleAsync()
 	{
-		// git prints the recorded gitlink again for an uninitialised submodule, which would make it
+		// git prints the recorded gitlink again for an uninitialized submodule, which would make it
 		// indistinguishable from a synchronised one if it were reported verbatim. Nothing is checked
 		// out there, so nothing is reported. Note there is no describe suffix either.
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
@@ -107,7 +107,7 @@ public class GitSubmoduleListBuilderTests
 		IReadOnlyList<GitSubmodule> submodules =
 			await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(GitSubmoduleState.Uninitialised, submodules[0].State);
+		Assert.AreEqual(GitSubmoduleState.Uninitialized, submodules[0].State);
 		Assert.IsNull(submodules[0].CheckedOutSha);
 		Assert.IsNull(submodules[0].Describe);
 	}
@@ -326,7 +326,7 @@ public class GitSubmoduleUpdateBuilderTests
 		RecordingGitProcessRunner runner = new();
 		GitSubmoduleUpdateBuilder builder = new(runner, TestPaths.Root);
 
-		_ = builder.Initialise().Recursive().FromRemote().Force().WithDepth(1);
+		_ = builder.Initialize().Recursive().FromRemote().Force().WithDepth(1);
 
 		string[] arguments = [.. builder.BuildArguments()];
 
@@ -363,7 +363,7 @@ public class GitSubmoduleUpdateBuilderTests
 		RecordingGitProcessRunner runner = new();
 		GitSubmoduleUpdateBuilder builder = new(runner, TestPaths.Root);
 
-		Assert.AreSame(builder, builder.Initialise().Recursive().FromRemote().Force().WithDepth(1));
+		Assert.AreSame(builder, builder.Initialize().Recursive().FromRemote().Force().WithDepth(1));
 	}
 }
 
@@ -434,7 +434,7 @@ public class GitSubmoduleRecursionOptionTests
 	}
 
 	[TestMethod]
-	public void RejectsAnUnrecognisedEnumValue()
+	public void RejectsAnUnrecognizedEnumValue()
 	{
 		RecordingGitProcessRunner runner = new();
 

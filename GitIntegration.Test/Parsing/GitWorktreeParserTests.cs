@@ -173,7 +173,7 @@ public sealed class GitWorktreeParserTests
 	}
 
 	[TestMethod]
-	public void IgnoresAnAttributeItDoesNotRecognise()
+	public void IgnoresAnAttributeItDoesNotRecognize()
 	{
 		// Git may add attributes. An unknown one must not fail a listing that is otherwise readable.
 		string output =

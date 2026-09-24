@@ -167,7 +167,7 @@ public sealed class GitHubDeviceFlowTests
 	}
 
 	[TestMethod]
-	public async Task ReportsAnUnrecognisedErrorCodeAsARequestFailureAsync()
+	public async Task ReportsAnUnrecognizedErrorCodeAsARequestFailureAsync()
 	{
 		using FakeHttpMessageHandler handler = new();
 		_ = handler.Respond(HttpStatusCode.OK, DeviceCodeBody, ("Content-Type", "application/json"));
@@ -180,7 +180,7 @@ public sealed class GitHubDeviceFlowTests
 		GitHubDeviceCode code = await flow.RequestDeviceCodeAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		// The deliberate default for a code this library was not taught: a request fault, not an
-		// authentication failure, so an unrecognised error never invites retrying a sign-in.
+		// authentication failure, so an unrecognized error never invites retrying a sign-in.
 		GitHostingRequestException exception =
 			await Assert.ThrowsExactlyAsync<GitHostingRequestException>(
 				async () => await flow.WaitForTokenAsync(code, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
@@ -413,7 +413,7 @@ public sealed class GitHubDeviceFlowTests
 		using CancellationTokenSource cts = new();
 		TaskCompletionSource waitStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		// Never completes on its own: it only resolves when the token passed to it is cancelled,
+		// Never completes on its own: it only resolves when the token passed to it is canceled,
 		// which is exactly the wait this test needs to cancel into rather than before.
 		GitHubDeviceFlow flow = CreateFlow(handler, delay: (_, cancellationToken) =>
 		{

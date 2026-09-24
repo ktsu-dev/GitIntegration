@@ -51,7 +51,7 @@ public sealed record GitSignature
 	/// </summary>
 	/// <remarks>
 	/// Parsed from git's strict ISO-8601 output, so the original offset is preserved rather than
-	/// normalised to UTC — the local time a commit was made in is information a caller may want.
+	/// normalized to UTC — the local time a commit was made in is information a caller may want.
 	/// </remarks>
 	public required DateTimeOffset Timestamp { get; init; }
 }

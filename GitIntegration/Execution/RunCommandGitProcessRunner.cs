@@ -20,7 +20,7 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 {
 	// Snapshotted at construction rather than read per invocation. GitOptions is registered as a
 	// mutable singleton, so any consumer that resolves it and sets a property would otherwise
-	// change the behaviour of every other consumer mid-flight. The properties cannot simply be
+	// change the behavior of every other consumer mid-flight. The properties cannot simply be
 	// made init-only: the Action<GitOptions> configure delegate receives an already-constructed
 	// instance, and init accessors are settable only during object initialization.
 	private readonly string _executablePath = Ensure.NotNull(options).ExecutablePath;
@@ -119,7 +119,7 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 		// RunCommand delivers cancellation two ways at once: a registration that kills the process, and
 		// WaitForExitAsync observing the token. When the kill wins that race the process exits before the
 		// await faults, so ExecuteAsync returns normally carrying a killed process's exit code (-1 on
-		// Windows) and a cancelled run is indistinguishable from an ordinary git failure. Classify it the
+		// Windows) and a canceled run is indistinguishable from an ordinary git failure. Classify it the
 		// same way the catch clause does, so both paths reach the caller with identical semantics.
 		//
 		// Gated on a non-zero exit code as well, because the token being signalled does not by

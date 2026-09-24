@@ -44,7 +44,7 @@ Every task's requirements implicitly include this section.
 - **`.ConfigureAwait(false)` on every await**, library and tests.
 - **Validate arguments before state.** A method that null-checks an argument and also requires object state checks the argument first.
 - **MSTest**, semantic assertions, async test methods end in `Async`, `TestContext.CancellationTokenSource.Token` for cancellation. Discard the result when asserting a value-returning call throws: `Assert.ThrowsExactly<T>(() => _ = x.M(null!))`.
-- **Commit tags:** `[minor]` for features. Recognised: `[major]`, `[minor]`, `[patch]`, `[pre]`. **`[fix]` is not recognised.** No `Co-Authored-By` lines.
+- **Commit tags:** `[minor]` for features. Recognized: `[major]`, `[minor]`, `[patch]`, `[pre]`. **`[fix]` is not recognized.** No `Co-Authored-By` lines.
 - **Do not edit** `VERSION.md`, `CHANGELOG.md`, `LATEST_CHANGELOG.md`, `LICENSE.md`.
 - **Build:** `dotnet build`. **Test:** `dotnet test`. **Never `dotnet test --nologo`** — it runs zero tests and exits 5.
 - **A library `PackageReference` added for analyzer KTSU0006 needs both `PrivateAssets="all"` and a `VersionOverride`** pinned to the lowest version any consumer could resolve. This phase should need no new package at all; if you think you do, stop and report it as a blocker.
@@ -168,7 +168,7 @@ Both are documented on the interface. This is deliberate and is the one place in
 | File | Responsibility |
 |---|---|
 | `Parsing/GitPushParserTests.cs`, `Parsing/GitFetchParserTests.cs` | fixtures captured above |
-| `Builders/GitPushBuilderTests.cs`, `Builders/GitFetchBuilderTests.cs`, `Builders/GitPullBuilderTests.cs` | argv and behaviour |
+| `Builders/GitPushBuilderTests.cs`, `Builders/GitFetchBuilderTests.cs`, `Builders/GitPullBuilderTests.cs` | argv and behavior |
 | `GitRepositoryRemoteVerbTests.cs` | the three factories |
 | `Integration/GitRemoteSyncTests.cs` | round trip against a local bare remote |
 
@@ -346,7 +346,7 @@ public enum GitRefUpdateKind
 	/// <summary>A tag was updated. Git's flag is <c>t</c>, and only fetch emits it.</summary>
 	TagUpdate,
 
-	/// <summary>Git used a flag this library does not recognise.</summary>
+	/// <summary>Git used a flag this library does not recognize.</summary>
 	Unknown,
 }
 
@@ -774,7 +774,7 @@ using System.Collections.Generic;
 /// Each record is <c>&lt;flag&gt;TAB&lt;local-ref&gt;:&lt;remote-ref&gt;TAB&lt;summary&gt;</c>.
 /// Records are surrounded by lines that are not records — a leading <c>To &lt;url&gt;</c>, a
 /// trailing <c>Done</c>, and a tracking notice when the push set an upstream — so the parser
-/// recognises records by shape rather than by position.
+/// recognizes records by shape rather than by position.
 /// </remarks>
 internal static class GitPushParser
 {
@@ -884,7 +884,7 @@ internal static class GitPushParser
 
 		// Deliberately tolerant, unlike the status parser: git's push flags are not a closed set
 		// this library can rely on never growing, and failing a whole push report over one
-		// unrecognised character would be worse than naming the reference with an unknown kind.
+		// unrecognized character would be worse than naming the reference with an unknown kind.
 		_ => GitRefUpdateKind.Unknown,
 	};
 }
@@ -2324,7 +2324,7 @@ public class GitPullBuilderTests
 	}
 
 	[TestMethod]
-	public async Task RecognisesARebaseConflictTooAsync()
+	public async Task RecognizesARebaseConflictTooAsync()
 	{
 		// A rebase reports its conflicts with different prose but the same "CONFLICT" marker, and
 		// leaves the repository mid-rebase rather than mid-merge. Both are conflicts to a caller.
@@ -2571,7 +2571,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		new() { Arguments = Ensure.NotNull(result).Arguments };
 
 	/// <summary>
-	/// Classifies a failed pull, recognising a conflict as its own outcome.
+	/// Classifies a failed pull, recognizing a conflict as its own outcome.
 	/// </summary>
 	/// <remarks>
 	/// Overridden because the base class inspects standard error while git announces a conflict on
@@ -2821,7 +2821,7 @@ using ktsu.Semantics.Strings;
 /// </summary>
 /// <remarks>
 /// The remote is a bare repository on the local filesystem, which git treats exactly like any other
-/// remote. That gives real push negotiation and real rejection behaviour with no network and no
+/// remote. That gives real push negotiation and real rejection behavior with no network and no
 /// credentials — the two things that would make these tests flaky or unrunnable in CI.
 /// </remarks>
 [TestClass]
@@ -2972,7 +2972,7 @@ public class GitRemoteSyncTests
 	[TestMethod]
 	public async Task ARejectedPushThrowsAndCarriesTheDetailAsync()
 	{
-		// The behaviour the whole push design exists for: git exits non-zero and still reports
+		// The behavior the whole push design exists for: git exits non-zero and still reports
 		// exactly which reference it refused and why.
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
@@ -3185,7 +3185,7 @@ The file needs `using System.Linq;` for `Any`.
 
 Run: `dotnet test --filter "TestCategory=Integration"`
 
-Expected: PASS, 18 tests — Phase 4's 10 plus these 8. If they report Inconclusive, git is not on PATH; that is the designed behaviour, not something to fix.
+Expected: PASS, 18 tests — Phase 4's 10 plus these 8. If they report Inconclusive, git is not on PATH; that is the designed behavior, not something to fix.
 
 - [ ] **Step 3: Run them with git treated as required**
 

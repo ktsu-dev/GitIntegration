@@ -10,7 +10,7 @@ public class GitStatusParserTests
 {
 	// Fixtures are inline rather than files on disk: git's porcelain v2 format embeds NUL, which
 	// makes a fixture file binary, unreviewable in a diff, and exempt from this repo's EOL
-	// normalisation. NUL is written as the six-character escape u0000 (backslash-u-0-0-0-0) rather
+	// normalization. NUL is written as the six-character escape u0000 (backslash-u-0-0-0-0) rather
 	// than backslash-zero, so it can never read as an octal escape when followed by a digit.
 	private const string Nul = "\u0000";
 
@@ -191,7 +191,7 @@ public class GitStatusParserTests
 	}
 
 	[TestMethod]
-	public void RejectsAnUnrecognisedRecordPrefix()
+	public void RejectsAnUnrecognizedRecordPrefix()
 	{
 		Assert.ThrowsExactly<GitParseException>(
 			() => GitStatusParser.Parse("x something" + Nul));
@@ -218,7 +218,7 @@ public class GitStatusParserTests
 	}
 
 	[TestMethod]
-	public void IgnoresAHeaderItDoesNotRecognise()
+	public void IgnoresAHeaderItDoesNotRecognize()
 	{
 		// Forward compatibility: a future git adding a header must not break every caller.
 		GitStatus status = GitStatusParser.Parse(

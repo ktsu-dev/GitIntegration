@@ -92,7 +92,7 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	/// contract, and both entry points set it immediately before delegating to the base.
 	/// </remarks>
 	/// <param name="result">The invocation outcome, which carries nothing this result needs.</param>
-	/// <returns>The initialised repository and whether it was already there.</returns>
+	/// <returns>The initialized repository and whether it was already there.</returns>
 	protected override GitInitResult ParseResult(GitProcessResult result)
 	{
 		Ensure.NotNull(result);

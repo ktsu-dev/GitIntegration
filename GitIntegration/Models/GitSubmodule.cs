@@ -41,9 +41,9 @@ public sealed record GitSubmodule
 	/// <remarks>
 	/// Equal to <see cref="Sha"/> when <see cref="State"/> is
 	/// <see cref="GitSubmoduleState.InSync"/>, and different when it is
-	/// <see cref="GitSubmoduleState.DifferentCommit"/>. <see langword="null"/> for an uninitialised
+	/// <see cref="GitSubmoduleState.DifferentCommit"/>. <see langword="null"/> for an uninitialized
 	/// submodule, whose working directory holds no checkout to report — git prints the recorded
-	/// gitlink again in that case, which would otherwise make an uninitialised submodule look
+	/// gitlink again in that case, which would otherwise make an uninitialized submodule look
 	/// indistinguishable from a synchronised one.
 	/// <para>
 	/// Also <see langword="null"/> for a <see cref="GitSubmoduleState.Conflicted"/> submodule, where
@@ -62,7 +62,7 @@ public sealed record GitSubmodule
 	/// </summary>
 	/// <remarks>
 	/// Git's own <c>git describe</c>-style suffix, purely descriptive. It is absent for an
-	/// uninitialised submodule, since there is nothing checked out to describe.
+	/// uninitialized submodule, since there is nothing checked out to describe.
 	/// </remarks>
 	public string? Describe { get; init; }
 }

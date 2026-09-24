@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using ktsu.Semantics.Paths;
 
 /// <summary>
-/// The shared behaviour of every git command builder: global argument injection, execution, and
+/// The shared behavior of every git command builder: global argument injection, execution, and
 /// failure translation.
 /// </summary>
 /// <typeparam name="TResult">
@@ -108,7 +108,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		}
 
 		// Git must never block on a pager, must not octal-escape non-ASCII paths, and must not
-		// emit ANSI colour codes, or the output stops being parseable.
+		// emit ANSI color codes, or the output stops being parseable.
 		arguments.Add("--no-pager");
 		arguments.Add("-c");
 		arguments.Add("core.quotepath=false");
@@ -178,7 +178,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	/// Classifies a failed invocation into an exception type.
 	/// </summary>
 	/// <remarks>
-	/// Virtual so a derived builder can recognise the failures specific to its own verb — a
+	/// Virtual so a derived builder can recognize the failures specific to its own verb — a
 	/// <c>rev-parse</c> builder seeing "unknown revision", for instance — and fall back to
 	/// <c>base.CreateException</c> for everything else.
 	/// </remarks>

@@ -12,7 +12,7 @@ using System.Collections.Generic;
 /// Each record is <c>&lt;flag&gt;TAB&lt;local-ref&gt;:&lt;remote-ref&gt;TAB&lt;summary&gt;</c>.
 /// Records are surrounded by lines that are not records — a leading <c>To &lt;url&gt;</c>, a
 /// trailing <c>Done</c>, and a tracking notice when the push set an upstream — so the parser
-/// recognises records by shape rather than by position.
+/// recognizes records by shape rather than by position.
 /// </remarks>
 internal static class GitPushParser
 {
@@ -140,7 +140,7 @@ internal static class GitPushParser
 
 		// Deliberately tolerant, unlike the status parser: git's push flags are not a closed set
 		// this library can rely on never growing, and failing a whole push report over one
-		// unrecognised character would be worse than naming the reference with an unknown kind.
+		// unrecognized character would be worse than naming the reference with an unknown kind.
 		_ => GitRefUpdateKind.Unknown,
 	};
 }

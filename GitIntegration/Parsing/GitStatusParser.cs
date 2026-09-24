@@ -81,7 +81,7 @@ internal static class GitStatusParser
 					break;
 
 				default:
-					throw new GitParseException($"Unrecognised status record: '{record}'.");
+					throw new GitParseException($"Unrecognized status record: '{record}'.");
 			}
 		}
 
@@ -244,6 +244,6 @@ internal static class GitStatusParser
 		'C' => GitFileState.Copied,
 		'T' => GitFileState.TypeChanged,
 		'U' => GitFileState.Unmerged,
-		_ => throw new GitParseException($"Unrecognised status code '{code}'."),
+		_ => throw new GitParseException($"Unrecognized status code '{code}'."),
 	};
 }

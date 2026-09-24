@@ -33,7 +33,7 @@ largest), PR comments and reviews, repository creation, and webhooks.
 
 This removes two public members, which normally forces a major bump. It ships as **`[minor]` —
 2.4.0** by explicit decision: the members never worked, so no consumer can depend on their
-behaviour, and the removal produces a compile error rather than a silent behavioural change. Burning
+behavior, and the removal produces a compile error rather than a silent behavioral change. Burning
 a major version on withdrawing a no-op is not worth the signal it sends.
 
 ## The abstraction
@@ -129,19 +129,19 @@ exists in `SemanticTypes/GitProviderTypes.cs` with nothing behind it.
 
 `ktsu.CredentialCache` resolves a credential by `PersonaGUID`. Handling, in full:
 
-| Credential | Behaviour |
+| Credential | Behavior |
 |---|---|
 | `CredentialWithToken` | Used. GitHub: token auth. Azure DevOps: Basic, empty username, token as password. |
 | `CredentialWithUsernamePassword` | Used as supplied. |
 | `CredentialWithNothing`, or none resolved | Proceed **unauthenticated**, documented. |
 | Any other subtype | Throw. |
 
-Today's `GitHubProvider` recognises only `CredentialWithUsernamePassword` and silently does nothing
+Today's `GitHubProvider` recognizes only `CredentialWithUsernamePassword` and silently does nothing
 for anything else, so a `CredentialWithToken` — the natural fit for a PAT on both hosts — is ignored
 without a word. That is the bug this table fixes.
 
 Proceeding unauthenticated is deliberate and is not the same bug: enumerating public repositories
-without credentials is legitimate, and refusing it would break a real use. An *unrecognised* subtype
+without credentials is legitimate, and refusing it would break a real use. An *unrecognized* subtype
 is different — it means the caller configured something we do not understand, and continuing as
 though nothing were configured would hide that.
 
@@ -186,9 +186,9 @@ The one place a faithful-looking mapping could quietly lie, so it is written dow
 | Azure DevOps | `status: completed` | `Merged` |
 | Azure DevOps | `status: abandoned` | `Closed` |
 
-### Two normalisations
+### Two normalizations
 
-- **Branch refs.** Azure DevOps returns `refs/heads/main`; GitHub returns `main`. Both normalise to a
+- **Branch refs.** Azure DevOps returns `refs/heads/main`; GitHub returns `main`. Both normalize to a
   bare `GitBranchName`, so callers never branch on host.
 - **Web URI.** Azure DevOps's `url` field is the **API** URL, not the browser one; the web link is at
   `_links.web.href`. Populating `WebURI` from `url` would put something plausible and wrong in a
