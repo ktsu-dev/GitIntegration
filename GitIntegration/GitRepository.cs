@@ -123,6 +123,35 @@ public class GitRepository
 	/// <returns>The builder.</returns>
 	public IGitPatchBuilder Patch() => new GitPatchBuilder(RequireRunner(), RequireLocalPath());
 
+	/// <summary>
+	/// Puts a patch into the index or the working tree. Staging one hunk of a file's patch is
+	/// <c>Apply(text).ToIndex()</c>; unstaging one already staged is the same call with
+	/// <c>Reversed()</c> added.
+	/// </summary>
+	/// <param name="patchText">
+	/// The patch text, typically <see cref="GitFilePatch.PatchFor"/> applied to a subset of a file's
+	/// hunks.
+	/// </param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentException">
+	/// <paramref name="patchText"/> is null, empty, or all whitespace. Git reports an empty patch as
+	/// a corrupt-patch error that explains nothing, so this is caught before the process is started.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitApplyBuilder Apply(string patchText)
+	{
+		// Argument validation before RequireRunner(), matching every other verb taking an operand.
+		if (string.IsNullOrWhiteSpace(patchText))
+		{
+			throw new ArgumentException(
+				"A patch needs at least some content. An empty patch reaches git as a corrupt-patch " +
+				"error that explains nothing.",
+				nameof(patchText));
+		}
+
+		return new GitApplyBuilder(RequireRunner(), RequireLocalPath(), patchText);
+	}
+
 	/// <summary>Resolves a revision to the object id it names.</summary>
 	/// <param name="revision">The revision to resolve.</param>
 	/// <returns>A fresh builder.</returns>
