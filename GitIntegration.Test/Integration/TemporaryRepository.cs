@@ -67,7 +67,7 @@ internal sealed class TemporaryRepository : IDisposable
 	/// <para>
 	/// Two defences rather than one, and the second is what makes the first unnecessary to trust.
 	/// <see cref="Path.Join(string, string)"/> is the API that means "append these segments" — it has
-	/// no discarding behaviour to guard against at all, so the escape is impossible by construction
+	/// no discarding behavior to guard against at all, so the escape is impossible by construction
 	/// rather than merely checked for. The explicit rejection is kept above it because a rooted path
 	/// reaching here is a mistake in the calling test worth naming, and silently nesting it under the
 	/// root would hide that.

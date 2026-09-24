@@ -91,7 +91,7 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// its submodules together rather than leaving the submodules stale until something else notices.
 	/// <para>
 	/// Overlaps with <c>UpdateSubmodules()</c> without replacing it: this flag updates submodules
-	/// that are already registered, while that verb's <c>Initialise()</c> also checks out a submodule
+	/// that are already registered, while that verb's <c>Initialize()</c> also checks out a submodule
 	/// added upstream since this working copy was cloned. Not to be confused with
 	/// <c>IGitPushBuilder.CheckingSubmodules</c>, which git spells with the same flag name but which
 	/// governs an unrelated question.
@@ -99,7 +99,7 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// </remarks>
 	/// <param name="recursion">Whether, and when, to recurse.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
-	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognised value.</exception>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognized value.</exception>
 	public IGitPullBuilder RecursingSubmodules(GitSubmoduleRecursion recursion);
 
 	/// <summary>Reports git's progress output as it arrives.</summary>
@@ -274,7 +274,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		new() { Arguments = Ensure.NotNull(result).Arguments };
 
 	/// <summary>
-	/// Classifies a failed pull, recognising a conflict as its own outcome.
+	/// Classifies a failed pull, recognizing a conflict as its own outcome.
 	/// </summary>
 	/// <remarks>
 	/// Overridden because the base class inspects standard error while git announces a conflict on
@@ -310,7 +310,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	/// case) must not gain a trailing blank line from an empty standard output.
 	/// <para>
 	/// Overriding the base class's seam rather than either entry point is what makes the two report
-	/// the same text. <see cref="CreateException"/> recognises only a conflict and hands everything
+	/// the same text. <see cref="CreateException"/> recognizes only a conflict and hands everything
 	/// else to the base implementation, whose message is built from this method — so a non-conflict
 	/// failure explained on standard output now reaches a caller of
 	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/> as well as one of

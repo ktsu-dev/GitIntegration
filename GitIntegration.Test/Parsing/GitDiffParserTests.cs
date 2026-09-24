@@ -93,7 +93,7 @@ public class GitDiffParserTests
 	}
 
 	[TestMethod]
-	public void ReportsAnUnrecognisedStatusLetterAsUnknownRatherThanThrowing()
+	public void ReportsAnUnrecognizedStatusLetterAsUnknownRatherThanThrowing()
 	{
 		// git emits 'B' for a broken pairing and 'X' for a state it calls a bug. Neither is worth
 		// failing an entire diff over, and unlike the status format the set is not closed, so an

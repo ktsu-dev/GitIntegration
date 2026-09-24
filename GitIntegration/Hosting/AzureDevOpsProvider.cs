@@ -94,7 +94,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <summary>
 	/// Gets or initializes the Azure DevOps project to scope repository enumeration to, or
 	/// <see langword="null"/> to enumerate every repository in <see cref="GitProvider.Owner"/>'s
-	/// organisation.
+	/// organization.
 	/// </summary>
 	/// <remarks>
 	/// Azure DevOps nests repositories under a project, which GitHub has no equivalent of — see
@@ -115,7 +115,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// Calls <c>GET https://dev.azure.com/{organization}/[{project}/]_apis/git/repositories</c> —
 	/// the project path segment appears only when <see cref="Project"/> is set. This endpoint
 	/// documents no pagination parameters at all: the response is the complete repository list for
-	/// the organisation or project on every call, so this method issues exactly one request. That is
+	/// the organization or project on every call, so this method issues exactly one request. That is
 	/// what makes it differ from <see cref="GetPullRequestsCoreAsync"/>, which must page.
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
@@ -124,7 +124,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 
 		// Both of these can throw — BuildRepositoriesUri is defensive rather than a real risk, but
 		// ResolveCredential genuinely can (InvalidOperationException for a credential subtype this
-		// library does not recognise). Both run before CreateHttpClient so a throw here never leaves
+		// library does not recognize). Both run before CreateHttpClient so a throw here never leaves
 		// a constructed HttpClient stranded with nothing left to dispose it.
 		Uri requestUri = BuildRepositoriesUri();
 		HostingCredential credential = ResolveCredential();
@@ -233,7 +233,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// Calls <c>POST .../repositories/{repositoryId}/pullrequests</c>.
 	/// <see cref="GitPullRequestSpecification.Source"/> and
 	/// <see cref="GitPullRequestSpecification.Target"/> are bare branch names — this library's own
-	/// normalisation, matching what a caller gets back from every read path — so they are qualified
+	/// normalization, matching what a caller gets back from every read path — so they are qualified
 	/// with <c>refs/heads/</c> here before being sent, the reverse of the stripping
 	/// <see cref="ToGitPullRequest(AzureDevOpsPullRequest, HttpStatusCode, string)"/> does on the way back in. The response is
 	/// the created pull request; Microsoft's own worked example reports <c>201</c> despite the
@@ -486,7 +486,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="AzureDevOpsPullRequest.SourceRefName"/> and <see cref="AzureDevOpsPullRequest.TargetRefName"/>
 	/// arrive fully qualified (e.g. <c>refs/heads/main</c>); <see cref="StripRefsHeadsPrefix"/> strips
 	/// the prefix so a caller never has to branch on host to get a bare branch name — see the spec's
-	/// "Two normalisations" section. <see cref="GitPullRequest.Author"/> is read from
+	/// "Two normalizations" section. <see cref="GitPullRequest.Author"/> is read from
 	/// <see cref="AzureDevOpsIdentityRef.UniqueName"/>, not <see cref="AzureDevOpsIdentityRef.DisplayName"/>:
 	/// <see cref="GitPullRequestAuthor"/>'s own remarks record that Azure DevOps's identifier is the
 	/// unique name, usually an email address, the same distinction GitHub's login draws on the other
@@ -549,7 +549,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <c>completed</c> → <see cref="GitPullRequestState.Merged"/>, <c>abandoned</c> →
 	/// <see cref="GitPullRequestState.Closed"/>. <c>notSet</c> and <c>all</c> are query-side-only
 	/// values a host never reports as a pull request's own status, so they fall through to a
-	/// <see cref="GitHostingRequestException"/> along with anything else unrecognised.
+	/// <see cref="GitHostingRequestException"/> along with anything else unrecognized.
 	/// </remarks>
 	/// <param name="status">The status Azure DevOps reported.</param>
 	/// <param name="statusCode">The status code Azure DevOps reported for the response carrying <paramref name="status"/>.</param>
@@ -561,7 +561,7 @@ public sealed class AzureDevOpsProvider : GitProvider
 		"completed" => GitPullRequestState.Merged,
 		"abandoned" => GitPullRequestState.Closed,
 		_ => throw new GitHostingRequestException(
-			$"Azure DevOps reported an unrecognised pull request status '{status}'.",
+			$"Azure DevOps reported an unrecognized pull request status '{status}'.",
 			Name,
 			statusCode,
 			responseBody),

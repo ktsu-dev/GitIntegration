@@ -33,7 +33,7 @@ public enum GitRefUpdateKind
 	/// <summary>A tag was updated. Git's flag is <c>t</c>, and only fetch emits it.</summary>
 	TagUpdate,
 
-	/// <summary>Git used a flag this library does not recognise.</summary>
+	/// <summary>Git used a flag this library does not recognize.</summary>
 	Unknown,
 }
 

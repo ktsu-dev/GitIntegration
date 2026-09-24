@@ -28,14 +28,14 @@ public class GitRoundTripTests
 	private static readonly GitAuthorEmail AuthorEmail = "fixture@example.com".As<GitAuthorEmail>();
 
 	/// <summary>
-	/// Initialises a repository with a deterministic identity and initial branch.
+	/// Initializes a repository with a deterministic identity and initial branch.
 	/// </summary>
 	/// <remarks>
 	/// The identity is written into the repository's own config rather than taken from the host,
 	/// so the tests neither depend on a configured user nor disturb one. The initial branch is
 	/// named explicitly for the same reason: <c>init.defaultBranch</c> varies by machine.
 	/// </remarks>
-	private static async Task<GitRepository> InitialiseAsync(
+	private static async Task<GitRepository> InitializeAsync(
 		TemporaryRepository temporary,
 		CancellationToken cancellationToken)
 	{
@@ -63,7 +63,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		Assert.IsTrue(await repository.IsClonedAsync(cancellationToken).ConfigureAwait(false));
 	}
@@ -75,7 +75,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		_ = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		_ = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		GitInitResult second = await IntegrationGitFixture.CreateClient()
 			.Init(temporary.Root)
@@ -91,7 +91,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -118,7 +118,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -138,7 +138,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -165,7 +165,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -202,7 +202,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -239,7 +239,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -288,14 +288,14 @@ public class GitRoundTripTests
 	public async Task CheckoutResolvesATagRatherThanAFileOfTheSameNameAsync()
 	{
 		// Checkout emits a trailing "--" rather than a leading --end-of-options, and this is the
-		// behaviour that choice buys beyond compatibility with git <= 2.43: the operand is read as a
+		// behavior that choice buys beyond compatibility with git <= 2.43: the operand is read as a
 		// revision, so a tag whose name also matches a path on disk resolves to the tag instead of
 		// silently restoring the file.
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -333,7 +333,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		// A NUL byte is what makes git classify a file as binary, and a binary file is the case the
 		// nullable counts exist for.
@@ -390,7 +390,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("before.txt", "one\ntwo\nthree\nfour\nfive\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -422,7 +422,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		GitRemoteName origin = "origin".As<GitRemoteName>();
 		GitRepositoryRemotePath first = "https://example.com/one.git".As<GitRepositoryRemotePath>();
@@ -455,7 +455,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository source = new();
-		GitRepository origin = await InitialiseAsync(source, cancellationToken).ConfigureAwait(false);
+		GitRepository origin = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
 
 		source.WriteFile("a.txt", "one\n");
 		_ = await origin.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -485,7 +485,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository source = new();
-		_ = await InitialiseAsync(source, cancellationToken).ConfigureAwait(false);
+		_ = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository occupied = new();
 		occupied.WriteFile("in-the-way.txt", "x");
@@ -504,7 +504,7 @@ public class GitRoundTripTests
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("before.txt", "line1\nline2\nline3\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);

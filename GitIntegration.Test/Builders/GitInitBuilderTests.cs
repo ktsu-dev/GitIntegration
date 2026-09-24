@@ -70,7 +70,7 @@ public class GitInitBuilderTests
 	}
 
 	[TestMethod]
-	public async Task ProbesBeforeInitialisingAndReportsAFreshRepositoryAsync()
+	public async Task ProbesBeforeInitializingAndReportsAFreshRepositoryAsync()
 	{
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
 			.Then(standardError: "fatal: not a git repository (or any of the parent directories): .git\n", exitCode: 128)

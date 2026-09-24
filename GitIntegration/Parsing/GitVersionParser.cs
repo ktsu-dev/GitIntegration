@@ -26,7 +26,7 @@ internal static class GitVersionParser
 
 		if (!trimmed.StartsWith(Prefix, StringComparison.Ordinal))
 		{
-			throw new GitParseException($"Unrecognised 'git --version' output: '{trimmed}'.");
+			throw new GitParseException($"Unrecognized 'git --version' output: '{trimmed}'.");
 		}
 
 		string raw = trimmed[Prefix.Length..];
@@ -37,7 +37,7 @@ internal static class GitVersionParser
 		// suffix such as ".windows.1" makes trailing components non-numeric by design.
 		if (!int.TryParse(components[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major))
 		{
-			throw new GitParseException($"Unrecognised git version number: '{raw}'.");
+			throw new GitParseException($"Unrecognized git version number: '{raw}'.");
 		}
 
 		return new GitVersion

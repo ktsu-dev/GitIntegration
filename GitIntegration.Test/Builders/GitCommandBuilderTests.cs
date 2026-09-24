@@ -10,7 +10,7 @@ using ktsu.Semantics.Paths;
 [TestClass]
 public class GitCommandBuilderTests
 {
-	/// <summary>A minimal concrete builder, exercising only the base class behaviour.</summary>
+	/// <summary>A minimal concrete builder, exercising only the base class behavior.</summary>
 	private sealed class EchoBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)
 		: GitCommandBuilder<string>(runner, repositoryPath)
 	{

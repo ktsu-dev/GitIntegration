@@ -165,7 +165,7 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
-	public async Task ReportsAnUninitialisedSubmoduleAndThenUpdatesItAsync()
+	public async Task ReportsAnUninitializedSubmoduleAndThenUpdatesItAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
@@ -200,7 +200,7 @@ public class GitSubmoduleTests
 			await clone.Submodules().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.AreEqual(1, before.Count);
-		Assert.AreEqual(GitSubmoduleState.Uninitialised, before[0].State);
+		Assert.AreEqual(GitSubmoduleState.Uninitialized, before[0].State);
 
 		// Nothing is checked out, so nothing is reported — even though git prints the recorded
 		// gitlink again on that line, which would otherwise make this look synchronised.
@@ -214,7 +214,7 @@ public class GitSubmoduleTests
 				[
 					"-C", cloneDirectory.RootPath,
 					"-c", "protocol.file.allow=always",
-					.. clone.UpdateSubmodules().Initialise().Recursive().BuildArguments(),
+					.. clone.UpdateSubmodules().Initialize().Recursive().BuildArguments(),
 				],
 			},
 			cancellationToken).ConfigureAwait(false);

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `git worktree` verbs, GitHub repository enumeration that can see an organisation's private repositories, and a GitHub OAuth device flow, so a desktop launcher can build a tree of every repository its user can reach and manage branches as one worktree each.
+**Goal:** Add `git worktree` verbs, GitHub repository enumeration that can see an organization's private repositories, and a GitHub OAuth device flow, so a desktop launcher can build a tree of every repository its user can reach and manage branches as one worktree each.
 
 **Architecture:** Three independent additions. The worktree verbs follow the library's existing builder-plus-parser pattern exactly: a `GitWorktree` record, a `GitWorktreeParser` over `git worktree list --porcelain`, four builders, and four factory methods on `GitRepository`. The GitHub change is an owner-kind property that routes `GetRepositoriesAsync` to whichever endpoint can answer for that kind of owner, defaulting to today's route. The device flow is a standalone type in `Hosting/` that obtains a `HostingCredential` and stores nothing.
 
@@ -12,12 +12,12 @@
 
 ## Global Constraints
 
-- **Version: `[minor]` — 3.2.0.** Additive only. No existing member changes shape or behaviour.
+- **Version: `[minor]` — 3.2.0.** Additive only. No existing member changes shape or behavior.
 - **Never run `dotnet test --nologo`.** Under Microsoft Testing Platform it silently runs zero tests and exits 5. Always plain `dotnet test`.
 - **Copyright header on every new file:** `// Copyright (c) 2023-2026 ktsu-dev contributors`
 - **Namespace:** `ktsu.GitIntegration` for library files, `ktsu.GitIntegration.Test` for test files. File-scoped, `using` directives inside the namespace, matching every existing file.
 - **Tabs, not spaces.** The repository indents with tabs.
-- **British spelling in prose and documentation comments** (`behaviour`, `organisation`, `normalise`), matching the existing codebase.
+- **British spelling in prose and documentation comments** (`behavior`, `organization`, `normalize`), matching the existing codebase.
 - **Every public member needs an XML doc comment.** The build treats missing documentation as an error.
 - **`Ensure.NotNull` in the library, `ArgumentNullException.ThrowIfNull` in tests.** The library takes Polyfill with `PrivateAssets="all"`, so `Ensure` is not visible to the test project.
 - **Caller-supplied operands go after `--end-of-options`,** via `GitCommandBuilder<T>.AppendOperands`.
@@ -272,7 +272,7 @@ public sealed class GitWorktreeParserTests
 	}
 
 	[TestMethod]
-	public void IgnoresAnAttributeItDoesNotRecognise()
+	public void IgnoresAnAttributeItDoesNotRecognize()
 	{
 		// Git may add attributes. An unknown one must not fail a listing that is otherwise readable.
 		string output =
@@ -1440,7 +1440,7 @@ git commit -m "feat: add the worktree removal and prune verbs"
 
 **Important:** an existing test, `GitHubProviderTests`, asserts `"/users/contoso/repos"` as the route. The default must keep that test passing untouched. If it fails, the default is wrong, not the test.
 
-- [ ] **Step 1: Create the organisation fixture**
+- [ ] **Step 1: Create the organization fixture**
 
 Copy `GitIntegration.Test/Fixtures/github-repositories.json` to `github-org-repositories.json`, then edit the copy so that it contains exactly two entries: the first with `"name": "org-public-repo"`, `"private": false`, and an owner block whose `"login"` is `"contoso"`; the second with `"name": "org-private-repo"`, `"private": true`, and the same owner login. Update each entry's `full_name`, `html_url`, and `clone_url` to match its name under `contoso`. Leave every other key exactly as captured.
 
@@ -1452,10 +1452,10 @@ Append to `GitIntegration.Test/Hosting/GitHubProviderTests.cs`, inside the class
 
 ```csharp
 	[TestMethod]
-	public async Task EnumeratesAnOrganisationThroughTheOrgsRoute()
+	public async Task EnumeratesAnOrganizationThroughTheOrgsRoute()
 	{
 		// The route is a documented part of this provider's contract, not an Octokit detail:
-		// GET /orgs/{org}/repos is the only one of the three that reports an organisation's private
+		// GET /orgs/{org}/repos is the only one of the three that reports an organization's private
 		// repositories to a token that can see them.
 		using FakeHttpMessageHandler handler = new();
 		_ = handler.Respond(HttpStatusCode.OK, Fixture("github-org-repositories.json"), ("Content-Type", "application/json"));
@@ -1575,14 +1575,14 @@ public enum GitHubOwnerKind
 	User,
 
 	/// <summary>
-	/// An organisation. Enumerates the organisation's repositories, including private ones the
+	/// An organization. Enumerates the organization's repositories, including private ones the
 	/// credential can see.
 	/// </summary>
 	Organization,
 
 	/// <summary>
 	/// The account the credential belongs to. Enumerates every repository that account owns or can
-	/// reach through an organisation membership, narrowed to
+	/// reach through an organization membership, narrowed to
 	/// <see cref="GitProvider.Owner"/>.
 	/// </summary>
 	AuthenticatedUser,
@@ -1599,7 +1599,7 @@ In `GitIntegration/GitHubProvider.cs`, add the property after `Name`:
 	/// </summary>
 	/// <remarks>
 	/// <see cref="GitHubOwnerKind.User"/> by default, which is the route and the coverage this
-	/// provider has always had. A caller needing an organisation's private repositories sets
+	/// provider has always had. A caller needing an organization's private repositories sets
 	/// <see cref="GitHubOwnerKind.Organization"/>; one needing its own sets
 	/// <see cref="GitHubOwnerKind.AuthenticatedUser"/>.
 	/// </remarks>
@@ -1633,7 +1633,7 @@ Replace the body of `GetRepositoriesAsync`, keeping its existing signature, and 
 	/// Without the filter, selecting that kind would silently ignore a configured owner, which is the
 	/// objection that kept this method on the user route in the first place. Filtering rather than
 	/// validating the token's login against <see cref="GitProvider.Owner"/> costs no extra request
-	/// and still serves an organisation the token is merely a member of.
+	/// and still serves an organization the token is merely a member of.
 	/// </para>
 	/// </remarks>
 	public override async Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken cancellationToken = default)
@@ -1724,7 +1724,7 @@ git commit -m "feat: route GitHub repository enumeration by owner kind"
 
 ### Background
 
-A token that is valid but not authorised for an organisation's SAML single sign-on gets `403` with an `X-GitHub-SSO` header. Its value looks like `required; url=https://github.com/orgs/contoso/sso?authorization_request=ABC123`. Without surfacing that URL, "bad token" and "good token one click from working" are the same exception with the same text.
+A token that is valid but not authorised for an organization's SAML single sign-on gets `403` with an `X-GitHub-SSO` header. Its value looks like `required; url=https://github.com/orgs/contoso/sso?authorization_request=ABC123`. Without surfacing that URL, "bad token" and "good token one click from working" are the same exception with the same text.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1833,14 +1833,14 @@ Add to `GitIntegration/GitHubProvider.cs`, next to `TryGetRetryAfterSeconds`:
 `Translate`'s arms each pass `exception.Message`, so the amended message is computed once before the switch and used by the two authentication arms only. Add below the existing `responseBody` line:
 
 ```csharp
-		// A token that is valid but unauthorised for an organisation's single sign-on arrives as a
+		// A token that is valid but unauthorised for an organization's single sign-on arrives as a
 		// plain 403, indistinguishable in status and body from a bad credential. The header is the
 		// only thing carrying the URL that resolves it, and that URL is the whole remedy — without
 		// it, the two failures a caller most needs to tell apart read identically.
 		string? singleSignOnUrl = TryGetSingleSignOnUrl(exception);
 		string authenticationMessage = singleSignOnUrl is null
 			? exception.Message
-			: $"{exception.Message} This organisation requires single sign-on authorisation for " +
+			: $"{exception.Message} This organization requires single sign-on authorisation for " +
 			  $"this credential. Authorise it at: {singleSignOnUrl}";
 ```
 
@@ -2211,7 +2211,7 @@ public sealed class GitHubDeviceFlow(GitHubOAuthClientId clientId, IReadOnlyList
 	/// </summary>
 	/// <remarks>
 	/// Polls until the user authorises, the code expires, or <paramref name="cancellationToken"/> is
-	/// cancelled, so this may block for as long as <see cref="GitHubDeviceCode.ExpiresIn"/>. Octokit
+	/// canceled, so this may block for as long as <see cref="GitHubDeviceCode.ExpiresIn"/>. Octokit
 	/// handles the <c>authorization_pending</c> and <c>slow_down</c> responses internally, at the
 	/// interval GitHub asked for.
 	/// </remarks>
@@ -2389,7 +2389,7 @@ CredentialCache.Instance.AddOrReplace(persona, new CredentialWithToken { Token =
 The two calls are split so the user code can stay on screen for the minutes the wait may take. The
 flow stores nothing: where the credential lives is the caller's decision.
 
-### Enumerating an Organisation's Private Repositories
+### Enumerating an Organization's Private Repositories
 
 ```csharp
 GitHubProvider provider = new()
@@ -2404,7 +2404,7 @@ IReadOnlyList<GitRepository> repositories = await provider.GetRepositoriesAsync(
 
 `OwnerKind` defaults to `GitHubOwnerKind.User`, which enumerates public repositories only — the route
 this provider has always used. `Organization` and `AuthenticatedUser` report private repositories the
-credential can see. A token that is valid but not authorised for an organisation's single sign-on
+credential can see. A token that is valid but not authorised for an organization's single sign-on
 raises `GitHostingAuthenticationException` carrying the URL to authorise it at.
 ````
 
@@ -2429,6 +2429,6 @@ git commit -m "docs: document worktree verbs, owner kinds, and device flow"
 
 ## Open item, carried out of this plan
 
-**The OAuth App does not exist yet.** Every test here runs against a fake transport, so no task is blocked. But nothing has been confirmed against GitHub itself, and it cannot be until someone with organisation ownership registers an OAuth App with device flow enabled and approves it for SAML single sign-on, scopes `repo` and `read:org`.
+**The OAuth App does not exist yet.** Every test here runs against a fake transport, so no task is blocked. But nothing has been confirmed against GitHub itself, and it cannot be until someone with organization ownership registers an OAuth App with device flow enabled and approves it for SAML single sign-on, scopes `repo` and `read:org`.
 
 Record this in the pull request description as an unchecked item rather than claiming the device flow is verified end to end.

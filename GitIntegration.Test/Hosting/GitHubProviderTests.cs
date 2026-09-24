@@ -27,7 +27,7 @@ public sealed class GitHubProviderTests
 
 	/// <summary>Reads a captured fixture's raw JSON text from the test output's Fixtures directory.</summary>
 	private static string Fixture(string name) =>
-		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+		File.ReadAllText(Path.Join(AppContext.BaseDirectory, "Fixtures", name));
 
 	/// <summary>
 	/// Wraps the single captured pull request fixture in a one-element array — the shape
@@ -76,7 +76,7 @@ public sealed class GitHubProviderTests
 	/// <summary>
 	/// Builds a single-repository response carrying only the fields <see cref="GitHubProvider"/>'s
 	/// mapping reads, with a caller-supplied <c>name</c> — used to drive
-	/// <see cref="GitRepository.LocalPath"/>'s containment behaviour without depending on the full
+	/// <see cref="GitRepository.LocalPath"/>'s containment behavior without depending on the full
 	/// captured fixture's real repository names.
 	/// </summary>
 	/// <param name="name">The value to send as the repository's <c>name</c> field.</param>
@@ -193,10 +193,10 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
-	public async Task EnumeratesAnOrganisationOnTheOrgRouteWhenAuthenticatedAsync()
+	public async Task EnumeratesAnOrganizationOnTheOrgRouteWhenAuthenticatedAsync()
 	{
 		// The case this whole route selection exists for. GET /users/{login}/repos is public-only even
-		// with a token, so an organisation's private repositories were invisible to a credential that
+		// with a token, so an organization's private repositories were invisible to a credential that
 		// could plainly see them — the divergence from AzureDevOpsProvider, which reports everything
 		// its token reaches, under one interface that promises the same coverage of both.
 		//
@@ -257,7 +257,7 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual("/user/repos", handler.Requests[2].Uri.AbsolutePath);
 
 		// Owner affiliation, not the unfiltered default: GET /user/repos with no affiliation also
-		// returns repositories the account merely collaborates on or reaches through an organisation,
+		// returns repositories the account merely collaborates on or reaches through an organization,
 		// which would report another owner's work under this owner's name.
 		Assert.AreEqual("?affiliation=owner", handler.Requests[2].Uri.Query);
 

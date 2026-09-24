@@ -15,7 +15,7 @@ using ktsu.Semantics.Strings;
 /// </summary>
 /// <remarks>
 /// The remote is a bare repository on the local filesystem, which git treats exactly like any other
-/// remote. That gives real push negotiation and real rejection behaviour with no network and no
+/// remote. That gives real push negotiation and real rejection behavior with no network and no
 /// credentials — the two things that would make these tests flaky or unrunnable in CI.
 /// </remarks>
 [TestClass]
@@ -301,7 +301,7 @@ public class GitRemoteSyncTests
 	[TestMethod]
 	public async Task ARejectedPushThrowsAndCarriesTheDetailAsync()
 	{
-		// The behaviour the whole push design exists for: git exits non-zero and still reports
+		// The behavior the whole push design exists for: git exits non-zero and still reports
 		// exactly which reference it refused and why.
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);

@@ -42,7 +42,7 @@ public sealed record GitRefName : SemanticString<GitRefName> { }
 /// <remarks>
 /// <para>
 /// Values are canonicalised to lowercase, because git emits lowercase but accepts either case as
-/// input, and callers should be able to compare two SHAs for equality without normalising first.
+/// input, and callers should be able to compare two SHAs for equality without normalizing first.
 /// </para>
 /// <para>
 /// The upper bound is 64, not 40: a repository created with <c>--object-format=sha256</c> emits

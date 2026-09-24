@@ -218,7 +218,7 @@ The `result is not null` clause is load-bearing — without it the compiler emit
 
 ## File Structure
 
-New folders `Models/` and `Parsing/` join the existing `Builders/`, `Execution/`, and `SemanticTypes/`. Namespace stays `ktsu.GitIntegration` everywhere; the folders are organisational only, matching how `Execution/` and `SemanticTypes/` already work.
+New folders `Models/` and `Parsing/` join the existing `Builders/`, `Execution/`, and `SemanticTypes/`. Namespace stays `ktsu.GitIntegration` everywhere; the folders are organizational only, matching how `Execution/` and `SemanticTypes/` already work.
 
 **Library — `GitIntegration/`**
 
@@ -275,10 +275,10 @@ Each verb's interface and builder share one file because they change together an
 | `Builders/GitRemoteListBuilderTests.cs` | argv assertions |
 | `Builders/GitRevParseBuilderTests.cs` | argv assertions |
 | `Builders/GitVersionBuilderTests.cs` | argv assertions |
-| `GitClientTests.cs` | client behaviour over the scripted runner |
+| `GitClientTests.cs` | client behavior over the scripted runner |
 | `GitRepositoryVerbTests.cs` | verb factories, `ProcessRunner` guard, `IsClonedAsync` |
 
-**Fixtures are inline `const string` fields, not files on disk.** Git's machine formats embed NUL and `0x1F`, which make a fixture file binary: the repo's `* text=auto eol=lf` would skip it for EOL normalisation, `git diff` would render it unreadable, and a reviewer could not see what changed. Inline literals using `\u0000` and `\u001f` are reviewable in a diff and impossible to mis-encode.
+**Fixtures are inline `const string` fields, not files on disk.** Git's machine formats embed NUL and `0x1F`, which make a fixture file binary: the repo's `* text=auto eol=lf` would skip it for EOL normalization, `git diff` would render it unreadable, and a reviewer could not see what changed. Inline literals using `\u0000` and `\u001f` are reviewable in a diff and impossible to mis-encode.
 
 **Write NUL as `\u0000`, never `\0`.** In a fixture like `"…renamed.txt\0a.txt"` the escape is unambiguous, but `"\0" + "1 A. N…"` written as `"\01 A. N…"` reads as an octal escape to anyone skimming it. `\u0000` never does.
 
@@ -547,7 +547,7 @@ public enum GitChangeKind
 	/// <summary>The path has conflicting changes from an unfinished merge.</summary>
 	Unmerged,
 
-	/// <summary>Git reported a status letter this library does not recognise.</summary>
+	/// <summary>Git reported a status letter this library does not recognize.</summary>
 	Unknown,
 }
 
@@ -696,7 +696,7 @@ public sealed record GitSignature
 	/// </summary>
 	/// <remarks>
 	/// Parsed from git's strict ISO-8601 output, so the original offset is preserved rather than
-	/// normalised to UTC — the local time a commit was made in is information a caller may want.
+	/// normalized to UTC — the local time a commit was made in is information a caller may want.
 	/// </remarks>
 	public required DateTimeOffset Timestamp { get; init; }
 }
@@ -1107,7 +1107,7 @@ internal static class GitVersionParser
 
 		if (!trimmed.StartsWith(Prefix, StringComparison.Ordinal))
 		{
-			throw new GitParseException($"Unrecognised 'git --version' output: '{trimmed}'.");
+			throw new GitParseException($"Unrecognized 'git --version' output: '{trimmed}'.");
 		}
 
 		string raw = trimmed[Prefix.Length..];
@@ -1119,7 +1119,7 @@ internal static class GitVersionParser
 		if (components.Length == 0 ||
 			!int.TryParse(components[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major))
 		{
-			throw new GitParseException($"Unrecognised git version number: '{raw}'.");
+			throw new GitParseException($"Unrecognized git version number: '{raw}'.");
 		}
 
 		return new GitVersion
@@ -1287,7 +1287,7 @@ public class GitStatusParserTests
 {
 	// Fixtures are inline rather than files on disk: git's porcelain v2 format embeds NUL, which
 	// makes a fixture file binary, unreviewable in a diff, and exempt from this repo's EOL
-	// normalisation. NUL is written as the six-character escape u0000 (backslash-u-0-0-0-0) rather
+	// normalization. NUL is written as the six-character escape u0000 (backslash-u-0-0-0-0) rather
 	// than backslash-zero, so it can never read as an octal escape when followed by a digit.
 	private const string Nul = "\u0000";
 
@@ -1468,7 +1468,7 @@ public class GitStatusParserTests
 	}
 
 	[TestMethod]
-	public void RejectsAnUnrecognisedRecordPrefix()
+	public void RejectsAnUnrecognizedRecordPrefix()
 	{
 		Assert.ThrowsExactly<GitParseException>(
 			() => GitStatusParser.Parse("x something" + Nul));
@@ -1492,7 +1492,7 @@ public class GitStatusParserTests
 	}
 
 	[TestMethod]
-	public void IgnoresAHeaderItDoesNotRecognise()
+	public void IgnoresAHeaderItDoesNotRecognize()
 	{
 		// Forward compatibility: a future git adding a header must not break every caller.
 		GitStatus status = GitStatusParser.Parse(
@@ -1597,7 +1597,7 @@ internal static class GitStatusParser
 					break;
 
 				default:
-					throw new GitParseException($"Unrecognised status record: '{record}'.");
+					throw new GitParseException($"Unrecognized status record: '{record}'.");
 			}
 		}
 
@@ -1760,7 +1760,7 @@ internal static class GitStatusParser
 		'C' => GitFileState.Copied,
 		'T' => GitFileState.TypeChanged,
 		'U' => GitFileState.Unmerged,
-		_ => throw new GitParseException($"Unrecognised status code '{code}'."),
+		_ => throw new GitParseException($"Unrecognized status code '{code}'."),
 	};
 }
 ```
@@ -1880,7 +1880,7 @@ public class GitStatusBuilderTests
 	}
 
 	[TestMethod]
-	public void RejectsAnUnrecognisedUntrackedFilesMode()
+	public void RejectsAnUnrecognizedUntrackedFilesMode()
 	{
 		RecordingGitProcessRunner runner = new();
 		GitStatusBuilder builder = new(runner, TestPaths.Root);
@@ -2144,7 +2144,7 @@ public class GitLogParserTests
 	[TestMethod]
 	public void PreservesTheCommittedTimeZoneOffset()
 	{
-		// %aI is strict ISO-8601 with the offset the commit was made in. Normalising to UTC would
+		// %aI is strict ISO-8601 with the offset the commit was made in. Normalizing to UTC would
 		// throw away the local time, which is information a caller may want.
 		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(MergeCommit);
 
@@ -2775,7 +2775,7 @@ public class GitDiffParserTests
 	}
 
 	[TestMethod]
-	public void ReportsAnUnrecognisedStatusLetterAsUnknownRatherThanThrowing()
+	public void ReportsAnUnrecognizedStatusLetterAsUnknownRatherThanThrowing()
 	{
 		// git emits 'B' for a broken pairing and 'X' for a state it calls a bug. Neither is worth
 		// failing an entire diff over, and unlike the status format the set is not closed, so an
@@ -3543,7 +3543,7 @@ public class GitBranchListBuilderTests
 	{
 		// Asserted literally rather than through GitOutputFormats. The leading %(refname) is what
 		// lets the parser tell a local branch from a remote-tracking one and drop the remote HEAD
-		// symbolic reference, so silently losing it would break both behaviours at once.
+		// symbolic reference, so silently losing it would break both behaviors at once.
 		RecordingGitProcessRunner runner = new();
 		GitBranchListBuilder builder = new(runner, TestPaths.Root);
 
@@ -5198,7 +5198,7 @@ The spec lists five. Two overlap this phase and are addressed; three do not.
 git add GitIntegration/Execution/GitProcessRequest.cs
 git commit -m "[patch] Document that the progress sink must be thread-safe"
 ```
-- [ ] **`RunCommandGitProcessRunner`'s cancellation doc.** `IGitCommandBuilder<TResult>` and the runner still promise `OperationCanceledException` whenever the caller's token is signalled, but the implementation deliberately returns the result when git exited 0 first — a zero exit code proves git finished on its own, and discarding a valid result would be wrong. The behaviour is right and the promise is stale. Correct the `<exception>` documentation to say that cancellation is reported only when git did not complete. Documentation only; commit on its own before Task 1:
+- [ ] **`RunCommandGitProcessRunner`'s cancellation doc.** `IGitCommandBuilder<TResult>` and the runner still promise `OperationCanceledException` whenever the caller's token is signalled, but the implementation deliberately returns the result when git exited 0 first — a zero exit code proves git finished on its own, and discarding a valid result would be wrong. The behavior is right and the promise is stale. Correct the `<exception>` documentation to say that cancellation is reported only when git did not complete. Documentation only; commit on its own before Task 1:
 
 ```bash
 git add GitIntegration/Execution/RunCommandGitProcessRunner.cs GitIntegration/Builders/IGitCommandBuilder.cs

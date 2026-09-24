@@ -18,7 +18,7 @@ using ktsu.Semantics.Paths;
 /// The split exists because neither command answers the whole question. <c>ls-files</c> is plumbing:
 /// it is NUL-terminated, so a path may contain anything at all, and its mode field states outright
 /// which entries are gitlinks. But it reports only what the superproject <em>records</em> — it
-/// cannot say whether a submodule is initialised, or whether a different commit is checked out.
+/// cannot say whether a submodule is initialized, or whether a different commit is checked out.
 /// <c>submodule status</c> answers exactly that, but it is a shell wrapper rather than plumbing, so
 /// its output carries no stability guarantee of the kind <c>for-each-ref</c> and
 /// <c>status --porcelain=v2</c> do, and — worse — it has <b>no <c>-z</c> form at all</b>.
@@ -273,7 +273,7 @@ internal static class GitSubmoduleParser
 	{
 		State = status.State,
 
-		// git prints the recorded gitlink again for an uninitialised submodule, which would make it
+		// git prints the recorded gitlink again for an uninitialized submodule, which would make it
 		// indistinguishable from a synchronised one. Nothing is checked out there, so nothing is
 		// reported.
 		//
@@ -281,7 +281,7 @@ internal static class GitSubmoduleParser
 		// unmerged submodule, where there is no single checked-out commit to name. It is a well-formed
 		// object id as far as the semantic type is concerned, so nothing downstream would catch it —
 		// it would simply read as a commit that happens to be all zeroes.
-		CheckedOutSha = status.State == GitSubmoduleState.Uninitialised || IsNullObjectId(status.ObjectId)
+		CheckedOutSha = status.State == GitSubmoduleState.Uninitialized || IsNullObjectId(status.ObjectId)
 			? null
 			: GitParseValues.ToSemantic<GitCommitSha>(status.ObjectId, "submodule checked-out object id"),
 		Describe = describe,
@@ -325,11 +325,11 @@ internal static class GitSubmoduleParser
 	{
 		' ' => GitSubmoduleState.InSync,
 		'+' => GitSubmoduleState.DifferentCommit,
-		'-' => GitSubmoduleState.Uninitialised,
+		'-' => GitSubmoduleState.Uninitialized,
 		'U' => GitSubmoduleState.Conflicted,
 
 		// Not a closed set the way the change-kind letters are: submodule status is a shell wrapper,
-		// and a marker it gains later should report the submodule with an unrecognised state rather
+		// and a marker it gains later should report the submodule with an unrecognized state rather
 		// than fail the whole listing.
 		_ => GitSubmoduleState.Unknown,
 	};

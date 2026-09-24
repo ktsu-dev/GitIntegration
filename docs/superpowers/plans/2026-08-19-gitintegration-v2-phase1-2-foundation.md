@@ -426,7 +426,7 @@ public sealed record GitRefName : SemanticString<GitRefName> { }
 /// </summary>
 /// <remarks>
 /// Values are canonicalised to lowercase, because git emits lowercase but accepts either case as
-/// input, and callers should be able to compare two SHAs for equality without normalising first.
+/// input, and callers should be able to compare two SHAs for equality without normalizing first.
 /// </remarks>
 [RegexMatch("^[0-9a-fA-F]{4,40}$")]
 public sealed record GitCommitSha : SemanticString<GitCommitSha>
@@ -492,7 +492,7 @@ public sealed record GitProviderName : SemanticString<GitProviderName> { }
 
 /// <summary>
 /// A strongly-typed owner of repositories within a hosting provider: a GitHub user or
-/// organisation, or an Azure DevOps organisation.
+/// organization, or an Azure DevOps organization.
 /// </summary>
 [HasNonWhitespaceContent]
 public sealed record GitProviderOwner : SemanticString<GitProviderOwner> { }
@@ -1373,7 +1373,7 @@ using ktsu.Semantics.Strings;
 [TestClass]
 public class GitCommandBuilderTests
 {
-	/// <summary>A minimal concrete builder, exercising only the base class behaviour.</summary>
+	/// <summary>A minimal concrete builder, exercising only the base class behavior.</summary>
 	private sealed class EchoBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath? repositoryPath)
 		: GitCommandBuilder<string>(runner, repositoryPath)
 	{
@@ -1548,7 +1548,7 @@ using System.Threading.Tasks;
 using ktsu.Semantics.Paths;
 
 /// <summary>
-/// The shared behaviour of every git command builder: global argument injection, execution, and
+/// The shared behavior of every git command builder: global argument injection, execution, and
 /// failure translation.
 /// </summary>
 /// <typeparam name="TResult">The parsed result type.</typeparam>
@@ -1594,7 +1594,7 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		}
 
 		// Git must never block on a pager, must not octal-escape non-ASCII paths, and must not
-		// emit ANSI colour codes, or the output stops being parseable.
+		// emit ANSI color codes, or the output stops being parseable.
 		arguments.Add("--no-pager");
 		arguments.Add("-c");
 		arguments.Add("core.quotepath=false");

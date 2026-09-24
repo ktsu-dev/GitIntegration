@@ -36,12 +36,12 @@ public sealed class AzureDevOpsProviderTests
 	/// like oversights and are not. The synthetic user <c>npaulk</c> is Microsoft's placeholder, kept
 	/// so a reader comparing a fixture against the published sample sees the same value rather than
 	/// wondering which fields this library altered; and <c>homepage</c> retains the real
-	/// <c>docs.microsoft.com</c> domain with only the organisation path segment swapped, for the same
+	/// <c>docs.microsoft.com</c> domain with only the organization path segment swapped, for the same
 	/// reason. Neither is a credential or an internal hostname, both are test-only assets that are
 	/// never packed, and no request is ever issued against either.
 	/// </remarks>
 	private static string Fixture(string name) =>
-		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+		File.ReadAllText(Path.Join(AppContext.BaseDirectory, "Fixtures", name));
 
 	/// <summary>
 	/// Wraps the single captured create-response fixture in the pull-request-list envelope
@@ -129,7 +129,7 @@ public sealed class AzureDevOpsProviderTests
 	/// <summary>
 	/// Builds a single-repository list response carrying only the fields
 	/// <see cref="AzureDevOpsProvider"/>'s mapping reads, with a caller-supplied <c>name</c> — used to
-	/// drive <see cref="GitRepository.LocalPath"/>'s containment behaviour without depending on the
+	/// drive <see cref="GitRepository.LocalPath"/>'s containment behavior without depending on the
 	/// full captured fixture's real repository names.
 	/// </summary>
 	/// <param name="name">The value to send as the repository's <c>name</c> field, or <see langword="null"/> to omit it.</param>
@@ -776,7 +776,7 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	[TestMethod]
-	public async Task TranslatesAnUnrecognisedPullRequestStatusToGitHostingRequestExceptionAsync()
+	public async Task TranslatesAnUnrecognizedPullRequestStatusToGitHostingRequestExceptionAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
 			.Respond(HttpStatusCode.OK, SinglePullRequestListResponse("notSet"), ("Content-Type", "application/json"));
@@ -792,7 +792,7 @@ public sealed class AzureDevOpsProviderTests
 			.ConfigureAwait(false);
 
 		Assert.AreEqual(HttpStatusCode.OK, exception.StatusCode);
-		StringAssert.Contains(exception.Message, "unrecognised pull request status");
+		StringAssert.Contains(exception.Message, "unrecognized pull request status");
 		StringAssert.Contains(exception.ResponseBody, "\"status\": \"notSet\"");
 	}
 

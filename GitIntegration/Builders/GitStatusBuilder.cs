@@ -23,7 +23,7 @@ public interface IGitStatusBuilder : IGitCommandBuilder<GitStatus>
 	/// </remarks>
 	/// <param name="mode">The reporting mode.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
-	/// <exception cref="InvalidEnumArgumentException"><paramref name="mode"/> is not a recognised value.</exception>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="mode"/> is not a recognized value.</exception>
 	public IGitStatusBuilder WithUntrackedFiles(GitUntrackedFilesMode mode);
 
 	/// <summary>

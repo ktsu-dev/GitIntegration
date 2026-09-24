@@ -31,7 +31,7 @@ Every task's requirements implicitly include this section.
 - **Every `await` in the library gets `.ConfigureAwait(false)`** (CA2007). Test code too.
 - **Tests use MSTest** with semantic assertions. Async test methods end in `Async` (MSTEST0032/0065). Classes needing a token declare `public TestContext TestContext { get; set; } = null!;`.
 - **When asserting that a value-returning call throws, discard the result** so the lambda binds to `Action`: `Assert.ThrowsExactly<T>(() => _ = thing.Method(null!));`
-- **Commit message tags:** `[minor]` on feature commits. Recognised tags are `[major]`, `[minor]`, `[patch]`, `[pre]` — **`[fix]` is not one of them** and silently fails to signal a version bump. Never add `Co-Authored-By` lines.
+- **Commit message tags:** `[minor]` on feature commits. Recognized tags are `[major]`, `[minor]`, `[patch]`, `[pre]` — **`[fix]` is not one of them** and silently fails to signal a version bump. Never add `Co-Authored-By` lines.
 - **Do not edit** `VERSION.md`, `CHANGELOG.md`, `LATEST_CHANGELOG.md`, `LICENSE.md` — generated.
 - **`ktsu.Sdk` regenerates `.gitignore` on every `dotnet build`.** Do not hand-edit or commit it.
 - **Build:** `dotnet build`. **Test:** `dotnet test` — **never `dotnet test --nologo`**, which silently runs zero tests under Microsoft.Testing.Platform and exits 5.
@@ -51,7 +51,7 @@ Every task's requirements implicitly include this section.
 
 ## Findings from probing the installed git
 
-Captured from `git version 2.50.1.windows.1` with `LC_ALL=C`. **These are the behaviours the tasks are built on — do not re-derive them.**
+Captured from `git version 2.50.1.windows.1` with `LC_ALL=C`. **These are the behaviors the tasks are built on — do not re-derive them.**
 
 ### Exit codes are not uniform, and that matters
 
@@ -190,7 +190,7 @@ The shipped package's dependency graph is unchanged, and the full suite passed w
 |---|---|
 | `Fakes/FakeFileSystemProvider.cs` | Wraps `MockFileSystem` as an `IFileSystemProvider` |
 | `Builders/GitAddBuilderTests.cs` … one per verb | argv assertions and result handling |
-| `GitClientMutatingTests.cs` | `Init` / `Clone` behaviour over the scripted runner and the fake filesystem |
+| `GitClientMutatingTests.cs` | `Init` / `Clone` behavior over the scripted runner and the fake filesystem |
 | `Integration/TemporaryRepository.cs` | Per-test temp repo helper with a Windows-safe recursive delete |
 | `Integration/GitRoundTripTests.cs` | Tier-3 tests against a real git binary, self-skipping when absent |
 
@@ -405,7 +405,7 @@ public sealed record GitCompleted
 namespace ktsu.GitIntegration;
 
 /// <summary>
-/// The outcome of initialising a repository.
+/// The outcome of initializing a repository.
 /// </summary>
 public sealed record GitInitResult
 {
@@ -416,7 +416,7 @@ public sealed record GitInitResult
 	/// Gets a value indicating whether a repository was already present at the target path.
 	/// </summary>
 	/// <remarks>
-	/// <c>git init</c> is idempotent: run against an existing repository it reinitialises and exits
+	/// <c>git init</c> is idempotent: run against an existing repository it reinitializes and exits
 	/// zero, announcing the difference only in prose that this library does not parse. It also
 	/// silently ignores <c>--initial-branch</c> on that path, so a caller that asked for a
 	/// particular initial branch and got <see langword="true"/> here did not get the branch it
@@ -2417,7 +2417,7 @@ internal sealed class GitCommitBuilder(
 	}
 
 	/// <summary>
-	/// Classifies a failed commit, recognising the one failure that is an ordinary program state.
+	/// Classifies a failed commit, recognizing the one failure that is an ordinary program state.
 	/// </summary>
 	/// <remarks>
 	/// Overridden because the base class inspects standard error and git reports "nothing to
@@ -2507,7 +2507,7 @@ The second two-invocation verb, and the first consumer of `IFileSystemProvider`.
 
 ### Why the probe comes first
 
-`git init` against an existing repository reinitialises it, exits 0, and says so only in prose — and **silently ignores `--initial-branch` on that path**. A caller who asked for `main` and got an existing repository on `master` has no way to tell from the exit code. So the builder runs `rev-parse --is-inside-work-tree` against the target first and reports the answer as `GitInitResult.AlreadyExisted`.
+`git init` against an existing repository reinitializes it, exits 0, and says so only in prose — and **silently ignores `--initial-branch` on that path**. A caller who asked for `main` and got an existing repository on `master` has no way to tell from the exit code. So the builder runs `rev-parse --is-inside-work-tree` against the target first and reports the answer as `GitInitResult.AlreadyExisted`.
 
 The probe is expected to fail when the directory is not a repository — or does not exist at all — so it uses `TryExecuteAsync` and treats any non-zero exit as "no repository here".
 
@@ -2590,7 +2590,7 @@ public class GitInitBuilderTests
 	}
 
 	[TestMethod]
-	public async Task ProbesBeforeInitialisingAndReportsAFreshRepositoryAsync()
+	public async Task ProbesBeforeInitializingAndReportsAFreshRepositoryAsync()
 	{
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
 			.Then(standardError: "fatal: not a git repository (or any of the parent directories): .git\n", exitCode: 128)
@@ -2775,7 +2775,7 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	/// contract, and both entry points set it immediately before delegating to the base.
 	/// </remarks>
 	/// <param name="result">The invocation outcome, which carries nothing this result needs.</param>
-	/// <returns>The initialised repository and whether it was already there.</returns>
+	/// <returns>The initialized repository and whether it was already there.</returns>
 	protected override GitInitResult ParseResult(GitProcessResult result)
 	{
 		Ensure.NotNull(result);
@@ -3678,7 +3678,7 @@ Append these members to the `IGitClient` interface in `GitIntegration/IGitClient
 	/// Creates a repository at a path.
 	/// </summary>
 	/// <remarks>
-	/// Safe to run against a path that already holds a repository: git reinitialises it, and the
+	/// Safe to run against a path that already holds a repository: git reinitializes it, and the
 	/// result reports <see cref="GitInitResult.AlreadyExisted"/> so a caller can tell.
 	/// </remarks>
 	/// <param name="path">Where the repository should be.</param>
@@ -3963,14 +3963,14 @@ public class GitRoundTripTests
 	}
 
 	/// <summary>
-	/// Initialises a repository with a deterministic identity and initial branch.
+	/// Initializes a repository with a deterministic identity and initial branch.
 	/// </summary>
 	/// <remarks>
 	/// The identity is written into the repository's own config rather than taken from the host,
 	/// so the tests neither depend on a configured user nor disturb one. The initial branch is
 	/// named explicitly for the same reason: <c>init.defaultBranch</c> varies by machine.
 	/// </remarks>
-	private static async Task<GitRepository> InitialiseAsync(
+	private static async Task<GitRepository> InitializeAsync(
 		TemporaryRepository temporary,
 		CancellationToken cancellationToken)
 	{
@@ -4003,7 +4003,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		Assert.IsTrue(await repository.IsClonedAsync(cancellationToken).ConfigureAwait(false));
 	}
@@ -4015,7 +4015,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		_ = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		_ = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		GitInitResult second = await CreateClient()
 			.Init(temporary.Root)
@@ -4031,7 +4031,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -4058,7 +4058,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -4078,7 +4078,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -4100,7 +4100,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("a.txt", "one\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -4133,7 +4133,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		GitRemoteName origin = "origin".As<GitRemoteName>();
 		GitRepositoryRemotePath first = "https://example.com/one.git".As<GitRepositoryRemotePath>();
@@ -4166,7 +4166,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository source = new();
-		GitRepository origin = await InitialiseAsync(source, cancellationToken).ConfigureAwait(false);
+		GitRepository origin = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
 
 		source.WriteFile("a.txt", "one\n");
 		_ = await origin.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -4196,7 +4196,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository source = new();
-		_ = await InitialiseAsync(source, cancellationToken).ConfigureAwait(false);
+		_ = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository occupied = new();
 		occupied.WriteFile("in-the-way.txt", "x");
@@ -4215,7 +4215,7 @@ public class GitRoundTripTests
 		await RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository temporary = new();
-		GitRepository repository = await InitialiseAsync(temporary, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 
 		temporary.WriteFile("before.txt", "line1\nline2\nline3\n");
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -4248,7 +4248,7 @@ public class GitRoundTripTests
 
 Run: `dotnet test --filter "TestCategory=Integration"`
 
-Expected: PASS, 10 tests. If git is not on PATH they report Inconclusive rather than failing — that is the intended behaviour, not a problem to fix.
+Expected: PASS, 10 tests. If git is not on PATH they report Inconclusive rather than failing — that is the intended behavior, not a problem to fix.
 
 - [ ] **Step 4: Confirm the whole suite is still green**
 

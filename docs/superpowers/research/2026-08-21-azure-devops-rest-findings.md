@@ -169,7 +169,7 @@ internally consistent).
 The response example is the **only** one of the three fetched pages that shows a populated `_links`
 object. Its keys, verbatim: `self`, `repository`, `workItems`, `sourceBranch`, `targetBranch`,
 `sourceCommit`, `targetCommit`, `createdBy`, `iterations`. **There is no `web` key.** See the
-contradiction section below — this directly bears on the spec's `WebURI` normalisation rule.
+contradiction section below — this directly bears on the spec's `WebURI` normalization rule.
 
 ## 5. Pagination
 
@@ -277,7 +277,7 @@ into them.
 
 1. **`_links.web.href` is settled as unconfirmed anywhere in official Microsoft sources — not merely
    "not found in the first pass," but actively checked and absent everywhere it could plausibly appear.**
-   The spec's "Two normalisations" section states "the web link is at `_links.web.href`." Four separate
+   The spec's "Two normalizations" section states "the web link is at `_links.web.href`." Four separate
    official sources were checked, at both REST 7.1 and 7.2 where applicable, and none of them show it:
    - The *only* example response across every page fetched (7.1 and 7.2, both List and Create) that
      shows a populated `_links` at all is the Create response, and its keys are `self`, `repository`,

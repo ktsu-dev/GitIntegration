@@ -101,7 +101,7 @@ public class GitStatusBuilderTests
 	}
 
 	[TestMethod]
-	public void RejectsAnUnrecognisedUntrackedFilesMode()
+	public void RejectsAnUnrecognizedUntrackedFilesMode()
 	{
 		RecordingGitProcessRunner runner = new();
 		GitStatusBuilder builder = new(runner, TestPaths.Root);

@@ -37,7 +37,7 @@ public class GitBranchListBuilderTests
 	{
 		// Asserted literally rather than through GitOutputFormats. The leading %(refname) is what
 		// lets the parser tell a local branch from a remote-tracking one and drop the remote HEAD
-		// symbolic reference, so silently losing it would break both behaviours at once.
+		// symbolic reference, so silently losing it would break both behaviors at once.
 		RecordingGitProcessRunner runner = new();
 		GitBranchListBuilder builder = new(runner, TestPaths.Root);
 

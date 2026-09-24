@@ -29,7 +29,7 @@
 - **Comments explain *why*, not what.** Never mention tasks, phases, or plans in shipped source.
 - **Build:** `dotnet build`. **Test:** plain `dotnet test`. **NEVER `dotnet test --nologo`** — under Microsoft Testing Platform it runs zero tests and exits 5, which looks like success.
 - **No new `PackageReference` is needed for this phase.** Octokit and `ktsu.CredentialCache` are already referenced; `System.Text.Json` is in-box on both target frameworks. If you believe a package is required, stop and report a blocker — a library `PackageReference` added to satisfy analyzer KTSU0006 needs **both** `PrivateAssets="all"` **and** a `VersionOverride` pinned to the lowest version a consumer could resolve, and getting that wrong shipped a `FileNotFoundException` to every consumer in Phase 4.
-- **Version tag:** the branch ships as `[minor]` → 2.4.0. Removing `RefreshRemoteRepositories()` and `Repositories` is a deliberate exception to semver, decided because neither ever worked. Recognised tags are `[major]`, `[minor]`, `[patch]`, `[pre]` — `[fix]` is not one and silently fails to signal a bump. Never add `Co-Authored-By` lines. Never edit `VERSION.md`, `CHANGELOG.md`, `LATEST_CHANGELOG.md`, `LICENSE.md`.
+- **Version tag:** the branch ships as `[minor]` → 2.4.0. Removing `RefreshRemoteRepositories()` and `Repositories` is a deliberate exception to semver, decided because neither ever worked. Recognized tags are `[major]`, `[minor]`, `[patch]`, `[pre]` — `[fix]` is not one and silently fails to signal a bump. Never add `Co-Authored-By` lines. Never edit `VERSION.md`, `CHANGELOG.md`, `LATEST_CHANGELOG.md`, `LICENSE.md`.
 - **The test project has `InternalsVisibleTo("ktsu.GitIntegration.Test")`**, so tests reach `internal` types directly.
 
 ## Known hazards, learned the expensive way
@@ -47,9 +47,9 @@
 
   Only newline (0x0A) and tab (0x09) may appear.
 
-- **Three tests across Phase 5a passed for the wrong reason** — twice a hand-built fixture made a parser read one character off while the test asserted only an unaffected field, and once a test asserted an invocation count for a behaviour the fake could not observe. Two rules follow, and they are binding:
+- **Three tests across Phase 5a passed for the wrong reason** — twice a hand-built fixture made a parser read one character off while the test asserted only an unaffected field, and once a test asserted an invocation count for a behavior the fake could not observe. Two rules follow, and they are binding:
   1. **Never hand-author an API response fixture.** Every JSON fixture comes from Task 1's captured files.
-  2. **A test whose name claims a forwarding or wiring behaviour must assert on the specific property it reads.** A count, or "it did not throw", is not an assertion about wiring.
+  2. **A test whose name claims a forwarding or wiring behavior must assert on the specific property it reads.** A count, or "it did not throw", is not an assertion about wiring.
 
 ## File Structure
 
@@ -274,7 +274,7 @@ public sealed record GitPullRequestTitle : SemanticString<GitPullRequestTitle> {
 /// <remarks>
 /// The hosts do not agree on what identifies a user: GitHub supplies a login, Azure DevOps a
 /// unique name that is usually an email address. This type carries whichever the host gave,
-/// unaltered, rather than normalising two different concepts into one that matches neither.
+/// unaltered, rather than normalizing two different concepts into one that matches neither.
 /// </remarks>
 public sealed record GitPullRequestAuthor : SemanticString<GitPullRequestAuthor> { }
 
@@ -521,7 +521,7 @@ This is the task the two provider pairs build on. It removes the two dead member
   - `public abstract class GitProvider : IGitHostingProvider` keeping `Name`, `Owner`, `PersonaGUID`, `IsAuthenticated`, `TryGetCredential`.
   - `internal HttpMessageHandler? Handler { get; init; }` — the transport seam. Null means "construct a real one".
   - `protected HttpClient CreateHttpClient()` — returns a client over `Handler` when set, a real one otherwise.
-  - `protected HostingCredential ResolveCredential()` — returns a discriminated result the providers apply; throws for an unrecognised credential subtype.
+  - `protected HostingCredential ResolveCredential()` — returns a discriminated result the providers apply; throws for an unrecognized credential subtype.
   - `public abstract Task<IReadOnlyList<GitRepository>> GetRepositoriesAsync(CancellationToken ct = default);`
   - `public abstract Task<IReadOnlyList<GitPullRequest>> GetPullRequestsAsync(GitRepositoryName repo, CancellationToken ct = default);`
   - `public interface IGitPullRequestCreateBuilder` — **declared here, not in Task 6**, exactly as the spec's **The create builder** section defines it. `IGitHostingProvider.CreatePullRequest` returns this type, so it must exist by the end of this task or the interface will not compile: a `<see cref="..."/>` or return type naming something a later task creates is CS1574, an error here. Task 6 supplies the implementation.
@@ -547,7 +547,7 @@ public void ProceedsUnauthenticatedWhenNoCredentialIsResolved() { /* assert the 
 public void ProceedsUnauthenticatedForCredentialWithNothing() { /* same */ }
 
 [TestMethod]
-public void ThrowsForAnUnrecognisedCredentialSubtype() { /* assert InvalidOperationException naming the type */ }
+public void ThrowsForAnUnrecognizedCredentialSubtype() { /* assert InvalidOperationException naming the type */ }
 ```
 
 Fill in each body against the real `ktsu.CredentialCache` API — read it first; do not assume the seeding method's name. If the cache cannot be seeded in-process, introduce a `protected virtual` credential-resolution hook on `GitProvider` that the test double overrides, and say so in your report; do **not** skip these tests.
@@ -951,7 +951,7 @@ public async Task ThrowsWhenAPullRequestIsCreatedWithoutAProjectAsync() { /* the
 public async Task StripsRefsHeadsFromTheBranchNamesAsync()
 {
     // The fixture carries refs/heads/... — assert SourceBranch and TargetBranch are bare.
-    // This is the normalisation that stops callers branching on host.
+    // This is the normalization that stops callers branching on host.
 }
 
 [TestMethod]
@@ -1078,7 +1078,7 @@ git commit -m "[minor] Register and document the hosting layer"
 
 ## Self-review notes
 
-Spec coverage was checked section by section. Every section maps to a task: the abstraction and removals to Task 5, credentials to Task 5, models and semantic types to Task 2, state mapping and both normalisations to Tasks 7 and 9, errors to Tasks 3 and 9, transport and the fake to Tasks 4-5, the research requirement to Task 1, the project-required decision to Task 9, and the documentation amendment to Task 10.
+Spec coverage was checked section by section. Every section maps to a task: the abstraction and removals to Task 5, credentials to Task 5, models and semantic types to Task 2, state mapping and both normalizations to Tasks 7 and 9, errors to Tasks 3 and 9, transport and the fake to Tasks 4-5, the research requirement to Task 1, the project-required decision to Task 9, and the documentation amendment to Task 10.
 
 Two spec statements are deliberately **not** tasks: that this phase adds no integration tier (an absence, recorded in Task 10's documentation step) and the versioning decision (recorded in Global Constraints).
 

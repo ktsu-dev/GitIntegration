@@ -214,7 +214,7 @@ internal sealed class GitCommitBuilder(
 			: result.StandardError;
 
 	/// <summary>
-	/// Classifies a failed commit, recognising the one failure that is an ordinary program state.
+	/// Classifies a failed commit, recognizing the one failure that is an ordinary program state.
 	/// </summary>
 	/// <remarks>
 	/// Overridden because the base class inspects standard error and git reports "nothing to

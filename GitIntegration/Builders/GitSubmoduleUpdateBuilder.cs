@@ -29,23 +29,23 @@ using ktsu.Semantics.Paths;
 /// </para>
 /// <para>
 /// Overlaps with <c>Pull().RecursingSubmodules(...)</c> without being equivalent to it. The flag
-/// updates submodules as part of a pull; this verb also <em>initialises</em> newly added ones
-/// through <see cref="Initialise"/>, which the flag does only for submodules already registered.
+/// updates submodules as part of a pull; this verb also <em>initializes</em> newly added ones
+/// through <see cref="Initialize"/>, which the flag does only for submodules already registered.
 /// Both are worth having.
 /// </para>
 /// </remarks>
 public interface IGitSubmoduleUpdateBuilder : IGitCommandBuilder<GitCompleted>
 {
 	/// <summary>
-	/// Initialises any submodule that is registered but has never been checked out.
+	/// Initializes any submodule that is registered but has never been checked out.
 	/// </summary>
 	/// <remarks>
 	/// Emits <c>--init</c>. Without it, a submodule added upstream since this working copy was
 	/// cloned is skipped silently rather than checked out, because <c>update</c> alone only touches
-	/// submodules that are already initialised.
+	/// submodules that are already initialized.
 	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
-	public IGitSubmoduleUpdateBuilder Initialise();
+	public IGitSubmoduleUpdateBuilder Initialize();
 
 	/// <summary>Updates submodules nested inside submodules, to any depth.</summary>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -97,16 +97,16 @@ public interface IGitSubmoduleUpdateBuilder : IGitCommandBuilder<GitCompleted>
 internal sealed class GitSubmoduleUpdateBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath repositoryPath)
 	: GitCommandBuilder<GitCompleted>(runner, repositoryPath), IGitSubmoduleUpdateBuilder
 {
-	private bool _initialise;
+	private bool _initialize;
 	private bool _recursive;
 	private bool _fromRemote;
 	private bool _force;
 	private int? _depth;
 
 	/// <inheritdoc />
-	public IGitSubmoduleUpdateBuilder Initialise()
+	public IGitSubmoduleUpdateBuilder Initialize()
 	{
-		_initialise = true;
+		_initialize = true;
 		return this;
 	}
 
@@ -154,7 +154,7 @@ internal sealed class GitSubmoduleUpdateBuilder(IGitProcessRunner runner, Absolu
 		arguments.Add("submodule");
 		arguments.Add("update");
 
-		if (_initialise)
+		if (_initialize)
 		{
 			arguments.Add("--init");
 		}

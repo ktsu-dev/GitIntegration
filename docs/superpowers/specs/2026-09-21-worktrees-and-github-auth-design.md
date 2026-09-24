@@ -15,18 +15,18 @@ Three things it needs do not exist here:
    creates, lists, or removes anything.
 2. **GitHub repositories it can actually see.** `GitHubProvider.GetRepositoriesAsync` calls
    `GET /users/{login}/repos`, which returns public repositories only. The launcher's repositories are
-   private and live under an organisation behind SAML single sign-on, so today it would enumerate an
+   private and live under an organization behind SAML single sign-on, so today it would enumerate an
    empty list and be right to.
 3. **A way to sign in.** Credentials resolve from `ktsu.CredentialCache` or from a `CredentialSource`
    callback. Both assume a credential already exists. Nothing in the library obtains one, and a
    desktop application cannot ask its user to run `gh auth login` first.
 
-Everything here is additive. No existing member changes shape, and no existing behaviour changes for
+Everything here is additive. No existing member changes shape, and no existing behavior changes for
 a caller that does not opt in.
 
 ## Versioning
 
-**`[minor]` — 3.2.0.** New types and new members only. The one existing method whose behaviour is
+**`[minor]` — 3.2.0.** New types and new members only. The one existing method whose behavior is
 touched, `GitHubProvider.GetRepositoriesAsync`, keeps its current route and its current documented
 coverage under the new property's default.
 
@@ -116,7 +116,7 @@ detached
 prunable gitdir file points to non-existent location
 ```
 
-`branch` arrives fully qualified and is stripped to a bare `refs/heads/` name, the same normalisation
+`branch` arrives fully qualified and is stripped to a bare `refs/heads/` name, the same normalization
 `AzureDevOpsProvider.StripRefsHeadsPrefix` already applies on the hosting side. A caller should not have
 to know which half of this library produced a branch name to know its shape.
 
@@ -197,18 +197,18 @@ English prose to tell a caller something it could have read structurally.
 ## GitHub owner kinds
 
 This capability was superseded before it shipped. While this branch was in flight, upstream merged
-PR #115, which reached the same goal — an organisation's private repositories becoming visible to a
+PR #115, which reached the same goal — an organization's private repositories becoming visible to a
 credential that can see them — by inferring the owner's account type from `GET /users/{login}` and
 routing automatically, rather than by taking an explicit `OwnerKind` from the caller. That approach
 also handles cases the design below did not: an unauthenticated provider skips the probe entirely, a
 GitHub App installation token whose `GET /user` answers `403` falls back to the public route instead
 of failing, and the routing decision is never inferred from a `404`, which an SSO-blocked
-organisation answers just as an absent one would. This branch ships upstream's version; the
+organization answers just as an absent one would. This branch ships upstream's version; the
 `GitHubOwnerKind` enum and `OwnerKind` property described below were not merged.
 
 ### The single sign-on failure
 
-A token that is valid but not authorised for an organisation's SAML single sign-on receives `403` with
+A token that is valid but not authorised for an organization's SAML single sign-on receives `403` with
 an `X-GitHub-SSO` header whose value carries the URL the user must visit to authorise it.
 
 `Translate` already routes `403` without rate-limit headers to `GitHostingAuthenticationException`,
@@ -311,7 +311,7 @@ No new exception family. Everything lands in the hosting hierarchy that already 
 | `access_denied` (user refused) | `GitHostingAuthenticationException` |
 | `expired_token` (code timed out) | `GitHostingAuthenticationException` |
 | `incorrect_client_credentials`, `unsupported_grant_type`, `device_flow_disabled` | `GitHostingRequestException` |
-| an error code this library does not recognise | `GitHostingRequestException` |
+| an error code this library does not recognize | `GitHostingRequestException` |
 | transport failure, unparsable body, a non-absolute `verification_uri` | `GitHostingRequestException` |
 
 Denial and expiry share an exception and are distinguished by message. They are the same fact to a
@@ -339,7 +339,7 @@ this library is not that party.
 ### The external prerequisite
 
 **Nothing in this section can be exercised against GitHub until an OAuth App exists.** Someone with
-organisation ownership must register one with device flow enabled and approve it for SAML single
+organization ownership must register one with device flow enabled and approve it for SAML single
 sign-on. Scopes: `repo` and `read:org`.
 
 Until then the implementation is written and tested entirely against a fake transport, which is how the

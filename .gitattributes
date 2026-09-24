@@ -24,6 +24,12 @@
 # them to avoid a spurious whole-file diff every time the solution is opened.
 *.sln text eol=crlf
 
+# Captured git diff output, kept exactly as git emitted it. A patch fixture mixes LF
+# structural lines with CRLF content lines by design, testing that the parser leaves
+# carriage returns alone, so eol normalization above would corrupt the very bytes the
+# test asserts on.
+GitIntegration.Test/Fixtures/patch-*.txt -text
+
 ###############################
 # Git Large File System (LFS) #
 ###############################

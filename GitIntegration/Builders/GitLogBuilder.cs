@@ -197,7 +197,7 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 			//
 			// git also requires --not to precede every non-option argument, so this cannot instead be
 			// deferred until after the operands: "git log --end-of-options HEAD --not --remotes" dies
-			// with "fatal: option '--not' must come before non-option arguments". Both behaviours
+			// with "fatal: option '--not' must come before non-option arguments". Both behaviors
 			// verified against git 2.43.
 			arguments.Add("--not");
 			arguments.Add("--remotes");

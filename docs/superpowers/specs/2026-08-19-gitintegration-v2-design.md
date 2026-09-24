@@ -44,9 +44,9 @@ the design and are not worked around silently.
 | No working-directory parameter | Cannot set the child process cwd | Scope every command with `git -C <path>` |
 | No environment-variable support | Cannot set `GIT_ASKPASS`, `GIT_TERMINAL_PROMPT`, `GIT_CONFIG_*` | Remote operations rely on ambient credential configuration; git may block on an auth prompt, bounded by `GitOptions.Timeout` and the caller's `CancellationToken` |
 | `RunCommand` is a static class | Cannot implement an interface | GitIntegration owns `IGitProcessRunner`; the shipped implementation delegates to the static API |
-| `RunCommand` can return normally from a cancelled run | A cancelled command is indistinguishable from an ordinary git failure | `RunCommandGitProcessRunner` checks the linked token after the call returns and classifies it explicitly |
+| `RunCommand` can return normally from a canceled run | A canceled command is indistinguishable from an ordinary git failure | `RunCommandGitProcessRunner` checks the linked token after the call returns and classifies it explicitly |
 
-That last row is a measured behaviour of the dependency, not a theoretical one. `RunCommand.RunAsync`
+That last row is a measured behavior of the dependency, not a theoretical one. `RunCommand.RunAsync`
 delivers cancellation two ways simultaneously — a `cancellationToken.Register(() => TryKill(process))`
 that kills the process, and `process.WaitForExitAsync(cancellationToken)` racing to observe the same
 token. When the kill wins, the process exits before the await faults, so `ExecuteAsync` returns
@@ -56,7 +56,7 @@ cancellation reaching `TryKill` can lose the race, including a caller cancelling
 `fetch`.
 
 Left undetected this would matter a great deal, because the verb builders translate any non-success
-`GitProcessResult` into `GitCommandException`: a cancelled fetch would reach the caller as
+`GitProcessResult` into `GitCommandException`: a canceled fetch would reach the caller as
 "`GitCommandException`, exit code -1, no output", indistinguishable from a genuine git failure. So
 the runner checks `linked.IsCancellationRequested` after the call returns and applies the same
 classification as its catch clause — caller cancellation first, then timeout.
@@ -140,7 +140,7 @@ public sealed class GitOptions
 `RunCommandGitProcessRunner` is the shipped implementation. It calls
 `RunCommand.ExecuteAsync(executablePath, arguments, outputHandler, cancellationToken)` — reading
 an executable path and timeout **snapshotted into readonly fields at construction**, so a consumer
-mutating the shared `GitOptions` singleton cannot change a runner's behaviour mid-flight —
+mutating the shared `GitOptions` singleton cannot change a runner's behavior mid-flight —
 accumulating stdout and stderr into separate `StringBuilder` instances through an `OutputHandler`.
 When `Timeout` is set it links a timeout token to the caller's token; `RunCommand` kills the
 process tree on cancellation.
@@ -328,7 +328,7 @@ code and returns a `GitResult<T>`; it still propagates cancellation and programm
 
 `GitResult<T>` is a sealed record *class* with a private constructor, not a struct, and `Success`
 is derived from `Error` rather than stored. Both choices close the same hole: a struct has a
-reachable `default` — from an uninitialised field, an array allocation, or a failed
+reachable `default` — from an uninitialized field, an array allocation, or a failed
 `TryGetValue` — and with three independently stored members that default reads as "failed, but
 with no error", so a consumer writing `result.Error!.ExitCode` on the failure branch gets a
 `NullReferenceException`. Deriving `Success` alone would only move the trap to "succeeded with a
@@ -659,7 +659,7 @@ hosting work and could proceed in parallel if desired.
 |---|---|
 | git output format drift between versions | Parse only documented machine formats; pin with fixtures; assert a minimum git version |
 | `fetch --porcelain` requires git ≥ 2.41 | Detect version once via `GetVersionAsync`; fall back to stderr parsing below that |
-| Remote operations block on an auth prompt | `GitOptions.Timeout` plus caller `CancellationToken`; RunCommand kills the process tree. The timeout surfaces as `GitTimeoutException`, never as a bare `OperationCanceledException`, so a caller can tell "git hung" (retryable) from "I cancelled" (not) |
+| Remote operations block on an auth prompt | `GitOptions.Timeout` plus caller `CancellationToken`; RunCommand kills the process tree. The timeout surfaces as `GitTimeoutException`, never as a bare `OperationCanceledException`, so a caller can tell "git hung" (retryable) from "I canceled" (not) |
 | Azure DevOps client packages are large and `netstandard2.0` | Acceptable; the same pair is already used by `ktsu.BuildMonitor` |
 | Merged `GitRepository` mixes local and hosting concerns | Metadata is nullable rather than blank; `RemotePath` back-filled from `origin`; verbs fail with a specific exception type |
 
@@ -671,7 +671,7 @@ Every RunCommand limitation this design originally worked around was filed again
 
 | Issue | Gap | Fix | Status here |
 |---|---|---|---|
-| #38 | A cancelled run could return normally with a killed process's exit code | `ThrowIfCancellationRequested()` after the await | Adopted; our own guard kept as defence in depth |
+| #38 | A canceled run could return normally with a killed process's exit code | `ThrowIfCancellationRequested()` after the await | Adopted; our own guard kept as defence in depth |
 | #39 | No working-directory support | `CommandOptions.WorkingDirectory` | Available; `git -C` retained deliberately |
 | #40 | No environment-variable support | `CommandOptions.EnvironmentVariables` | **Adopted** — see below |
 | #41 | `Execute(string)` split on the first space | String overloads obsoleted | Not applicable; only the argv overload is used |

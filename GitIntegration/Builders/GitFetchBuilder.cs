@@ -62,7 +62,7 @@ public interface IGitFetchBuilder : IGitCommandBuilder<GitFetchResult>
 	/// </remarks>
 	/// <param name="recursion">Whether, and when, to recurse.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
-	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognised value.</exception>
+	/// <exception cref="InvalidEnumArgumentException"><paramref name="recursion"/> is not a recognized value.</exception>
 	public IGitFetchBuilder RecursingSubmodules(GitSubmoduleRecursion recursion);
 
 	/// <summary>Reports git's progress output as it arrives.</summary>
