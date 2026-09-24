@@ -152,6 +152,12 @@ public class GitRepository
 		return new GitApplyBuilder(RequireRunner(), RequireLocalPath(), patchText);
 	}
 
+	/// <summary>Removes a path's staged changes, leaving the working tree alone.</summary>
+	/// <param name="path">The path, relative to the repository root.</param>
+	/// <returns>The builder.</returns>
+	public IGitRestoreBuilder Unstage(RelativeFilePath path) =>
+		new GitRestoreBuilder(RequireRunner(), RequireLocalPath(), Ensure.NotNull(path));
+
 	/// <summary>Resolves a revision to the object id it names.</summary>
 	/// <param name="revision">The revision to resolve.</param>
 	/// <returns>A fresh builder.</returns>
