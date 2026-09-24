@@ -76,6 +76,28 @@ public class GitPatchTests
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = FileWithTwoHunks.PatchFor(null!));
 
 	[TestMethod]
+	public void PatchForAHunkFromAnotherFileRefuses()
+	{
+		GitHunk foreign = HunkOne with { Text = "@@ -1,3 +1,3 @@\n x\n-y\n+Y\n z\n" };
+
+		ArgumentException thrown = Assert.ThrowsExactly<ArgumentException>(
+			() => _ = FileWithTwoHunks.PatchFor([foreign]),
+			"Filtering silently would return a header with no body, which reaches git as the corrupt-patch error the empty check exists to prevent.");
+
+		StringAssert.Contains(thrown.Message, "f.txt", StringComparison.Ordinal);
+	}
+
+	[TestMethod]
+	public void PatchForAMixOfOwnAndForeignHunksRefuses()
+	{
+		GitHunk foreign = HunkOne with { Text = "@@ -1,3 +1,3 @@\n x\n-y\n+Y\n z\n" };
+
+		_ = Assert.ThrowsExactly<ArgumentException>(
+			() => _ = FileWithTwoHunks.PatchFor([HunkOne, foreign]),
+			"A multi-file selection that staged some hunks and dropped the rest without a word is the worse half of this failure.");
+	}
+
+	[TestMethod]
 	public void PatchPreservesAHunkVerbatimIncludingTheNoNewlineMarker()
 	{
 		GitHunk hunk = new()

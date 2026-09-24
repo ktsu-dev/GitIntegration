@@ -48,6 +48,19 @@ public class GitApplyBuilderTests
 	}
 
 	[TestMethod]
+	public void RefusesPatchTextCarryingTheReplacementCharacter()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitRepository repository = new() { LocalPath = TestPaths.Root, ProcessRunner = runner };
+
+		ArgumentException thrown = Assert.ThrowsExactly<ArgumentException>(
+			() => _ = repository.Apply("@@ -1 +1 @@\n-caf\uFFFD\n+cafe\n"),
+			"Bytes that are not valid UTF-8 decode to U+FFFD, and with ASCII context around them the patch applies and stages the replacement character while the working tree keeps the original bytes.");
+
+		StringAssert.Contains(thrown.Message, "U+FFFD", StringComparison.Ordinal);
+	}
+
+	[TestMethod]
 	public async Task DeletesTheTemporaryFileEvenWhenGitFailsAsync()
 	{
 		RecordingGitProcessRunner runner = new() { ExitCode = 1, StandardError = "error: corrupt patch" };

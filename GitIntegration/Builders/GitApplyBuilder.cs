@@ -34,7 +34,7 @@ public interface IGitApplyBuilder : IGitCommandBuilder<GitCompleted>
 /// <remarks>
 /// Git reads a patch from standard input or from a file, and <see cref="GitProcessRequest"/> carries
 /// no standard input, so the patch text goes to a temporary file whose path is computed once, in the
-/// constructor. <c>AppendVerbArguments</c> only names that path as an operand; nothing is written
+/// constructor. <c>AppendVerbArguments</c> only names that path as an operand. Nothing is written
 /// to disk until <see cref="ExecuteAsync"/> or <see cref="TryExecuteAsync"/> actually runs git, and
 /// the file is always removed afterwards, in a <c>finally</c>, whether git succeeded or failed.
 /// </remarks>
@@ -108,30 +108,30 @@ internal sealed class GitApplyBuilder(IGitProcessRunner runner, AbsoluteDirector
 	/// <inheritdoc />
 	public override async Task<GitCompleted> ExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		WritePatchFile();
-
 		try
 		{
+			WritePatchFile();
+
 			return await base.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
-			File.Delete(_temporaryPath);
+			DeletePatchFile();
 		}
 	}
 
 	/// <inheritdoc />
 	public override async Task<GitResult<GitCompleted>> TryExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		WritePatchFile();
-
 		try
 		{
+			WritePatchFile();
+
 			return await base.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
-			File.Delete(_temporaryPath);
+			DeletePatchFile();
 		}
 	}
 
@@ -141,8 +141,31 @@ internal sealed class GitApplyBuilder(IGitProcessRunner runner, AbsoluteDirector
 	/// </summary>
 	/// <remarks>
 	/// A rewritten line ending, or a byte order mark git reads as part of the first line, makes the
-	/// patch unapplyable.
+	/// patch unapplyable. Called inside the <c>try</c> whose <c>finally</c> deletes the file, so a
+	/// write that fails partway through still gets cleaned up.
 	/// </remarks>
 	private void WritePatchFile() =>
 		File.WriteAllText(_temporaryPath, _patchText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+	/// <summary>
+	/// Removes the temporary patch file, and says nothing when it cannot.
+	/// </summary>
+	/// <remarks>
+	/// A delete that throws from inside a <c>finally</c> replaces whatever git reported with an I/O
+	/// error about a file the caller never knew existed. Git has already applied or refused the
+	/// patch by this point, so its own outcome is the one the caller needs, and a file left in the
+	/// temporary directory is the smaller cost. Deleting a path that was never written is already a
+	/// no-op.
+	/// </remarks>
+	private void DeletePatchFile()
+	{
+		try
+		{
+			File.Delete(_temporaryPath);
+		}
+		catch (IOException)
+		{
+			// Nothing useful can be done here, and the caller is owed git's result rather than this.
+		}
+	}
 }

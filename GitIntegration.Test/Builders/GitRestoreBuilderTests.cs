@@ -26,6 +26,23 @@ public class GitRestoreBuilderTests
 	}
 
 	[TestMethod]
+	public void SeparatesThePathWithABareDoubleDash()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitRestoreBuilder builder = new(runner, TestPaths.Root, "f.txt".As<RelativeFilePath>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		Assert.AreSequenceEqual(
+			["restore", "--staged", "--", "f.txt"],
+			arguments[^4..],
+			"--end-of-options arrived in git 2.24, one release after restore, so the very versions this builder's reset fallback serves would read it as a pathspec and fail.");
+		Assert.IsFalse(
+			arguments.Contains("--end-of-options"),
+			"--end-of-options arrived in git 2.24, one release after restore, so the very versions this builder's reset fallback serves would read it as a pathspec and fail.");
+	}
+
+	[TestMethod]
 	public void RefusesANullPath()
 	{
 		RecordingGitProcessRunner runner = new();
@@ -47,7 +64,7 @@ public class GitRestoreBuilderTests
 		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		string[] arguments = [.. runner.Invocations[1]];
-		Assert.AreSequenceEqual(["reset", "HEAD", "--end-of-options", "f.txt"], arguments[^4..]);
+		Assert.AreSequenceEqual(["reset", "HEAD", "--", "f.txt"], arguments[^4..]);
 	}
 
 	[TestMethod]
@@ -63,7 +80,7 @@ public class GitRestoreBuilderTests
 		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		string[] arguments = [.. runner.Invocations[1]];
-		Assert.AreSequenceEqual(["restore", "--staged", "--end-of-options", "f.txt"], arguments[^4..]);
+		Assert.AreSequenceEqual(["restore", "--staged", "--", "f.txt"], arguments[^4..]);
 	}
 
 	public TestContext TestContext { get; set; } = null!;

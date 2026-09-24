@@ -2,7 +2,9 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -101,9 +103,14 @@ public class GitPatchRoundTripTests
 
 		Assert.IsFalse(result.Success, "A caller's refusal depends on this reporting failure rather than throwing.");
 
-		IReadOnlyList<GitDiffEntry> staged = await opened.Diff().Staged().ExecuteAsync().ConfigureAwait(false);
+		string workingTree = await File.ReadAllTextAsync(
+			Path.Combine(repository.RootPath, "f.txt"),
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		Assert.AreEqual(0, staged.Count, "--check must change nothing.");
+		Assert.AreEqual(
+			"something else entirely\n",
+			workingTree,
+			"--check must change nothing: the working tree is what it reads, so it is what --check could have disturbed.");
 	}
 
 	[TestMethod]
@@ -151,6 +158,127 @@ public class GitPatchRoundTripTests
 			"one\nDIFFERENT\nthree",
 			indexContent,
 			"--check must change nothing: the index should still hold what was staged, not the patch's content.");
+	}
+
+	[TestMethod]
+	public async Task CarriesCarriageReturnsThroughTheRealRunnerAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		GitRepository seeded = await SeedAsync(
+			client,
+			repository,
+			[("core.autocrlf", "false"), ("core.eol", "lf")]).ConfigureAwait(false);
+
+		repository.WriteFile("f.txt", "one\r\ntwo\r\nthree\r\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		repository.WriteFile("f.txt", "one\r\nTWO\r\nthree\r\n");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+		GitFilePatch file = (await opened.Patch().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+
+		StringAssert.Contains(
+			file.Hunks.Single().Text,
+			"\r",
+			StringComparison.Ordinal,
+			"The fixture tier proves the parser keeps carriage returns. Only the real runner proves the process boundary does.");
+
+		_ = await opened.Apply(file.PatchFor(file.Hunks)).ToIndex().ExecuteAsync().ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> unstaged = await opened.Diff().ExecuteAsync().ConfigureAwait(false);
+
+		Assert.AreEqual(
+			0,
+			unstaged.Count,
+			"The index now matches the working tree byte for byte. A carriage return lost anywhere between reading the patch and staging it would leave a difference here.");
+	}
+
+	[TestMethod]
+	public async Task RoundTripsUnderHostileDiffConfigurationAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		// Each of these three rewrites the diff into a shape a reader that trusts git's defaults
+		// cannot handle: two change the a/ and b/ path prefixes the header is found by, and the
+		// third prints an empty context line as a bare newline that ends the hunk body early.
+		GitRepository seeded = await SeedAsync(
+			client,
+			repository,
+			[
+				("diff.noprefix", "true"),
+				("diff.mnemonicPrefix", "true"),
+				("diff.suppressBlankEmpty", "true"),
+			]).ConfigureAwait(false);
+
+		repository.WriteFile("f.txt", "one\n\ntwo\nthree\nfour\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		repository.WriteFile("f.txt", "one\n\ntwo\nthree\nFOUR\n");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+		GitFilePatch file = (await opened.Patch().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+
+		Assert.AreEqual("f.txt", file.Path.WeakString);
+		StringAssert.Contains(
+			file.Hunks.Single().Text,
+			"FOUR",
+			StringComparison.Ordinal,
+			"A hunk truncated at the blank context line would stop before the change itself.");
+
+		_ = await opened.Apply(file.PatchFor(file.Hunks)).ToIndex().ExecuteAsync().ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> unstaged = await opened.Diff().ExecuteAsync().ConfigureAwait(false);
+
+		Assert.AreEqual(
+			0,
+			unstaged.Count,
+			"The patch read under this configuration has to apply back cleanly, or the verbs work only for users whose git is configured the way the tests assume.");
+	}
+
+	/// <summary>
+	/// Creates an empty repository with the fixture identity and any extra configuration a test
+	/// needs, before anything is committed.
+	/// </summary>
+	/// <param name="client">The client to initialize through.</param>
+	/// <param name="repository">The throwaway directory to initialize in.</param>
+	/// <param name="configuration">Extra config keys and values to pin locally.</param>
+	/// <returns>The initialized repository.</returns>
+	private async Task<GitRepository> SeedAsync(
+		GitClient client,
+		TemporaryRepository repository,
+		IEnumerable<(string Key, string Value)> configuration)
+	{
+		GitInitResult init = await client.Init(repository.Root)
+			.WithInitialBranch("main".As<GitBranchName>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		await IntegrationGitFixture.ConfigureIdentityAsync(
+			init.Repository, AuthorName, AuthorEmail, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		foreach ((string key, string value) in configuration)
+		{
+			_ = await new GitTextBuilder(init.Repository.ProcessRunner!, init.Repository.LocalPath, "config", key, value)
+				.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		}
+
+		return init.Repository;
+	}
+
+	/// <summary>Stages everything in the working tree and commits it.</summary>
+	/// <param name="repository">The repository to commit in.</param>
+	private async Task CommitAllAsync(GitRepository repository)
+	{
+		_ = await repository.Add().All()
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		_ = await repository.Commit("seed".As<GitCommitMessage>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 	}
 
 	public TestContext TestContext { get; set; } = null!;

@@ -17,6 +17,12 @@ using ktsu.Semantics.Paths;
 public class GitRepository
 {
 	/// <summary>
+	/// What a byte sequence that is not valid UTF-8 decodes to, and so the marker that a patch has
+	/// already lost bytes before <see cref="Apply"/> ever sees it.
+	/// </summary>
+	private const string ReplacementCharacter = "\uFFFD";
+
+	/// <summary>
 	/// Gets the local filesystem path where the repository is, or is intended to be, cloned, or
 	/// <see langword="null"/> when it is not known.
 	/// </summary>
@@ -121,11 +127,12 @@ public class GitRepository
 
 	/// <summary>Reads a patch, with the hunks and lines a caller needs to show or stage a change.</summary>
 	/// <returns>The builder.</returns>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitPatchBuilder Patch() => new GitPatchBuilder(RequireRunner(), RequireLocalPath());
 
 	/// <summary>
 	/// Puts a patch into the index or the working tree. Staging one hunk of a file's patch is
-	/// <c>Apply(text).ToIndex()</c>; unstaging one already staged is the same call with
+	/// <c>Apply(text).ToIndex()</c>, and unstaging one already staged is the same call with
 	/// <c>Reversed()</c> added.
 	/// </summary>
 	/// <param name="patchText">
@@ -134,8 +141,9 @@ public class GitRepository
 	/// </param>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="ArgumentException">
-	/// <paramref name="patchText"/> is null, empty, or all whitespace. Git reports an empty patch as
-	/// a corrupt-patch error that explains nothing, so this is caught before the process is started.
+	/// <paramref name="patchText"/> is null, empty, or all whitespace, or it carries the Unicode
+	/// replacement character. Git reports an empty patch as a corrupt-patch error that explains
+	/// nothing, so this is caught before the process is started.
 	/// </exception>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitApplyBuilder Apply(string patchText)
@@ -149,14 +157,39 @@ public class GitRepository
 				nameof(patchText));
 		}
 
+		// Git's output is read as UTF-8, so bytes that are not valid UTF-8 arrive as U+FFFD and
+		// would be written back as its encoding. With ASCII context around them git accepts the
+		// patch and stages the replacement characters while the working tree keeps the original
+		// bytes, which is silent corruption through a verb whose whole job is fidelity.
+		if (patchText.Contains(ReplacementCharacter, StringComparison.Ordinal))
+		{
+			throw new ArgumentException(
+				"This patch carries the Unicode replacement character U+FFFD, which is what a byte "
+				+ "git emitted that is not valid UTF-8 decodes to. Applying it would stage that "
+				+ "character in place of the original bytes. A file that genuinely contains U+FFFD "
+				+ "is refused here too, because nothing in the decoded text tells the two apart, and "
+				+ "refusing a patch that would have worked is the lesser harm next to silently "
+				+ "corrupting one that would not.",
+				nameof(patchText));
+		}
+
 		return new GitApplyBuilder(RequireRunner(), RequireLocalPath(), patchText);
 	}
 
 	/// <summary>Removes a path's staged changes, leaving the working tree alone.</summary>
 	/// <param name="path">The path, relative to the repository root.</param>
 	/// <returns>The builder.</returns>
-	public IGitRestoreBuilder Unstage(RelativeFilePath path) =>
-		new GitRestoreBuilder(RequireRunner(), RequireLocalPath(), Ensure.NotNull(path));
+	/// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
+	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
+	public IGitRestoreBuilder Unstage(RelativeFilePath path)
+	{
+		// Argument validation before RequireRunner(): left-to-right evaluation would otherwise
+		// report the missing runner for a null path on a metadata-only repository, which is the
+		// wrong diagnostic for what the caller got wrong.
+		Ensure.NotNull(path);
+
+		return new GitRestoreBuilder(RequireRunner(), RequireLocalPath(), path);
+	}
 
 	/// <summary>Resolves a revision to the object id it names.</summary>
 	/// <param name="revision">The revision to resolve.</param>

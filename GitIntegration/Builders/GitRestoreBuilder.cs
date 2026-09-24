@@ -52,7 +52,21 @@ internal sealed class GitRestoreBuilder(IGitProcessRunner runner, AbsoluteDirect
 	/// </remarks>
 	private bool RestoreSupportedByVersion { get; set; } = true;
 
-	/// <inheritdoc />
+	/// <summary>
+	/// Appends the verb and the path, separating the two with a bare <c>--</c> rather than through
+	/// <c>AppendOperands</c>.
+	/// </summary>
+	/// <remarks>
+	/// The one builder in this library that does not use <c>AppendOperands</c>, and deliberately so.
+	/// <c>AppendOperands</c> writes <c>--end-of-options</c>, which git gained in 2.24, one release
+	/// after <c>restore</c> itself. This builder exists to serve a git older than 2.23, and on those
+	/// versions <c>--end-of-options</c> is not an option at all: git reads it as a pathspec and the
+	/// command fails, which would make the fallback unreachable and break the restore path on 2.23
+	/// exactly. A bare <c>--</c> has separated options from pathspecs for git's whole history and is
+	/// what both <c>restore</c> and <c>reset</c> want here, so it gives the same protection against
+	/// a dash-leading path on every version this builder can run against.
+	/// </remarks>
+	/// <param name="arguments">The vector being assembled.</param>
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
@@ -68,7 +82,8 @@ internal sealed class GitRestoreBuilder(IGitProcessRunner runner, AbsoluteDirect
 			arguments.Add("HEAD");
 		}
 
-		AppendOperands(arguments, _path.WeakString);
+		arguments.Add("--");
+		arguments.Add(_path.WeakString);
 	}
 
 	/// <inheritdoc />
