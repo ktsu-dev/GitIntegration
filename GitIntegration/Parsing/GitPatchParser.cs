@@ -180,7 +180,7 @@ internal static class GitPatchParser
 	/// </summary>
 	/// <param name="line">The <c>diff --git</c> or <c>diff --cc</c> line that starts the file.</param>
 	/// <returns>The path found on that line.</returns>
-	/// <exception cref="GitParseException">The line does not carry a recognisable path.</exception>
+	/// <exception cref="GitParseException">The line does not carry a recognizable path.</exception>
 	private static string ReadPathFromFileStart(string line)
 	{
 		if (line.StartsWith(CombinedHeaderPrefix, StringComparison.Ordinal))
@@ -195,7 +195,7 @@ internal static class GitPatchParser
 		int split = remainder.LastIndexOf(BSidePathMarker, StringComparison.Ordinal);
 
 		return split < 0
-			? throw new GitParseException($"A diff header has no recognisable new-side path: '{line}'.")
+			? throw new GitParseException($"A diff header has no recognizable new-side path: '{line}'.")
 			: remainder[(split + BSidePathMarker.Length)..];
 	}
 
