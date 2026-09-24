@@ -104,7 +104,7 @@ public class GitPatchRoundTripTests
 		Assert.IsFalse(result.Success, "A caller's refusal depends on this reporting failure rather than throwing.");
 
 		string workingTree = await File.ReadAllTextAsync(
-			Path.Combine(repository.RootPath, "f.txt"),
+			Path.Join(repository.RootPath, "f.txt"),
 			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
 		Assert.AreEqual(

@@ -41,7 +41,7 @@ public sealed class AzureDevOpsProviderTests
 	/// never packed, and no request is ever issued against either.
 	/// </remarks>
 	private static string Fixture(string name) =>
-		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+		File.ReadAllText(Path.Join(AppContext.BaseDirectory, "Fixtures", name));
 
 	/// <summary>
 	/// Wraps the single captured create-response fixture in the pull-request-list envelope

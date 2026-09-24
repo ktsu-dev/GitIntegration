@@ -45,7 +45,7 @@ internal sealed class GitApplyBuilder(IGitProcessRunner runner, AbsoluteDirector
 	: GitCommandBuilder<GitCompleted>(runner, repositoryPath), IGitApplyBuilder
 {
 	private readonly string _patchText = Ensure.NotNull(patchText);
-	private readonly string _temporaryPath = Path.Combine(Path.GetTempPath(), $"ktsu-git-apply-{Path.GetRandomFileName()}.patch");
+	private readonly string _temporaryPath = Path.Join(Path.GetTempPath(), $"ktsu-git-apply-{Path.GetRandomFileName()}.patch");
 
 	private bool _toIndex;
 	private bool _reversed;

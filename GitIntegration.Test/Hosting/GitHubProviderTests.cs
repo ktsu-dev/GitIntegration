@@ -27,7 +27,7 @@ public sealed class GitHubProviderTests
 
 	/// <summary>Reads a captured fixture's raw JSON text from the test output's Fixtures directory.</summary>
 	private static string Fixture(string name) =>
-		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+		File.ReadAllText(Path.Join(AppContext.BaseDirectory, "Fixtures", name));
 
 	/// <summary>
 	/// Wraps the single captured pull request fixture in a one-element array — the shape

@@ -16,7 +16,7 @@ public class GitPatchParserTests
 
 	/// <summary>Reads a captured fixture's raw text from the test output's Fixtures directory.</summary>
 	private static string Fixture(string name) =>
-		File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
+		File.ReadAllText(Path.Join(AppContext.BaseDirectory, "Fixtures", name));
 
 	[TestMethod]
 	public void ParsesTwoHunksWithTheirLineNumbers()
