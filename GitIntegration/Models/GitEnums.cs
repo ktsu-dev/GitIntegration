@@ -68,6 +68,19 @@ public enum GitChangeKind
 	Unknown,
 }
 
+/// <summary>What one line of a patch does.</summary>
+public enum GitPatchLineKind
+{
+	/// <summary>Present on both sides, shown for context.</summary>
+	Context,
+
+	/// <summary>Present only after the change.</summary>
+	Added,
+
+	/// <summary>Present only before the change.</summary>
+	Removed,
+}
+
 /// <summary>
 /// How much untracked detail <c>status</c> should report.
 /// </summary>
