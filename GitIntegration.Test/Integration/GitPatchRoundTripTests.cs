@@ -106,5 +106,52 @@ public class GitPatchRoundTripTests
 		Assert.AreEqual(0, staged.Count, "--check must change nothing.");
 	}
 
+	[TestMethod]
+	public async Task CheckedReportsFailureWhenTheIndexMovedAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		// Seed and commit a file, then change it without staging the change.
+		GitInitResult init = await client.Init(repository.Root)
+			.WithInitialBranch("main".As<GitBranchName>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		await IntegrationGitFixture.ConfigureIdentityAsync(
+			init.Repository, AuthorName, AuthorEmail, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		repository.WriteFile("f.txt", "one\ntwo\nthree\n");
+		_ = await init.Repository.Add().All()
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		_ = await init.Repository.Commit("seed".As<GitCommitMessage>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		repository.WriteFile("f.txt", "one\nCHANGED\nthree\n");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+		GitFilePatch file = (await opened.Patch().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+		string text = file.PatchFor(file.Hunks);
+
+		// Stage a different edit to the same line, so the index no longer holds the content the
+		// patch's preimage expects. --cached never reads the working tree, so only moving the
+		// index this way can make ToIndex().Checked() refuse.
+		repository.WriteFile("f.txt", "one\nDIFFERENT\nthree\n");
+		_ = await opened.Add().All().ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		GitResult<GitCompleted> result = await opened.Apply(text).ToIndex().Checked()
+			.TryExecuteAsync().ConfigureAwait(false);
+
+		Assert.IsFalse(result.Success, "A caller's refusal depends on this reporting failure rather than throwing.");
+
+		string indexContent = await new GitTextBuilder(opened.ProcessRunner!, opened.LocalPath, "show", ":f.txt")
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(
+			"one\nDIFFERENT\nthree",
+			indexContent,
+			"--check must change nothing: the index should still hold what was staged, not the patch's content.");
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }
