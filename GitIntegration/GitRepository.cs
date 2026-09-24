@@ -119,6 +119,10 @@ public class GitRepository
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public IGitDiffBuilder Diff() => new GitDiffBuilder(RequireRunner(), RequireLocalPath());
 
+	/// <summary>Reads a patch, with the hunks and lines a caller needs to show or stage a change.</summary>
+	/// <returns>The builder.</returns>
+	public IGitPatchBuilder Patch() => new GitPatchBuilder(RequireRunner(), RequireLocalPath());
+
 	/// <summary>Resolves a revision to the object id it names.</summary>
 	/// <param name="revision">The revision to resolve.</param>
 	/// <returns>A fresh builder.</returns>
