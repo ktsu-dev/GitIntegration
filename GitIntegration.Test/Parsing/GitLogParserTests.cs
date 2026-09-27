@@ -88,6 +88,45 @@ public class GitLogParserTests
 	}
 
 	[TestMethod]
+	public void ReadsAnEmptySignatureEmailAsNull()
+	{
+		// A commit made with an empty user.email records "<>", which %ae prints as nothing. One such
+		// commit must not make the whole history unreadable.
+		string record =
+			FirstSha + Us + FirstTree + Us + Us +
+			"Fixture Author" + Us + Us + "2026-08-20T00:05:20+10:00" + Us +
+			"Other Committer" + Us + Us + "2026-08-21T09:00:00-04:00" + Us +
+			"Imported commit" + Us + Nul;
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		Assert.AreEqual(1, commits.Count);
+		Assert.AreEqual("Fixture Author".As<GitAuthorName>(), commits[0].Author.Name);
+		Assert.IsNull(commits[0].Author.Email);
+		Assert.AreEqual("Other Committer".As<GitAuthorName>(), commits[0].Committer.Name);
+		Assert.IsNull(commits[0].Committer.Email);
+	}
+
+	[TestMethod]
+	public void ReadsAnEmptySignatureNameAsNull()
+	{
+		// git commit refuses an empty name, but commit-tree and fast-import will still write one.
+		string record =
+			FirstSha + Us + FirstTree + Us + Us +
+			Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
+			Us + "other@example.com" + Us + "2026-08-21T09:00:00-04:00" + Us +
+			"Imported commit" + Us + Nul;
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		Assert.AreEqual(1, commits.Count);
+		Assert.IsNull(commits[0].Author.Name);
+		Assert.AreEqual("fixture@example.com".As<GitAuthorEmail>(), commits[0].Author.Email);
+		Assert.IsNull(commits[0].Committer.Name);
+		Assert.AreEqual("other@example.com".As<GitAuthorEmail>(), commits[0].Committer.Email);
+	}
+
+	[TestMethod]
 	public void PreservesTheCommittedTimeZoneOffset()
 	{
 		// %aI is strict ISO-8601 with the offset the commit was made in. Normalizing to UTC would
