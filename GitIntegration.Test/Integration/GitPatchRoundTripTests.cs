@@ -242,6 +242,69 @@ public class GitPatchRoundTripTests
 			"The patch read under this configuration has to apply back cleanly, or the verbs work only for users whose git is configured the way the tests assume.");
 	}
 
+	[TestMethod]
+	public async Task RoundTripsUnderZeroContextConfigurationAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		// diff.context=0 makes a plain git diff emit zero-context hunks, which git apply refuses
+		// without --unidiff-zero.
+		GitRepository seeded = await SeedAsync(client, repository, [("diff.context", "0")]).ConfigureAwait(false);
+
+		string[] lines = [.. Enumerable.Range(1, 50).Select(number => $"line {number}")];
+		repository.WriteFile("f.txt", string.Join('\n', lines) + "\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		lines[24] = "line 25 changed";
+		repository.WriteFile("f.txt", string.Join('\n', lines) + "\n");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+		GitFilePatch file = (await opened.Patch().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+
+		_ = await opened.Apply(file.PatchFor(file.Hunks)).ToIndex().ExecuteAsync().ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> unstaged = await opened.Diff().ExecuteAsync().ConfigureAwait(false);
+
+		Assert.AreEqual(
+			0,
+			unstaged.Count,
+			"A patch read with no WithContext call must still apply, whatever diff.context the host sets.");
+	}
+
+	[TestMethod]
+	public async Task ReportsAStagedRenameAsDeleteAndAddUnlessRequestedAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		GitRepository seeded = await SeedAsync(client, repository, [("diff.renames", "copies")]).ConfigureAwait(false);
+
+		repository.WriteFile("old.txt", "one\ntwo\nthree\nfour\nfive\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		repository.DeleteFile("old.txt");
+		repository.WriteFile("new.txt", "one\ntwo\nthree\nfour\nfive\n");
+		_ = await seeded.Add().All().ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+
+		GitPatch plain = await opened.Patch().Staged().ExecuteAsync().ConfigureAwait(false);
+
+		Assert.AreEqual(2, plain.Files.Count, "Without DetectRenames the rename is a delete and an add.");
+		Assert.IsFalse(plain.Files.Any(file => file.Kind == GitChangeKind.Renamed));
+
+		GitPatch detected = await opened.Patch().Staged().DetectRenames().ExecuteAsync().ConfigureAwait(false);
+		GitFilePatch renamed = detected.Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Renamed, renamed.Kind);
+		Assert.AreEqual("old.txt", renamed.OriginalPath?.WeakString);
+	}
+
 	/// <summary>
 	/// Creates an empty repository with the fixture identity and any extra configuration a test
 	/// needs, before anything is committed.

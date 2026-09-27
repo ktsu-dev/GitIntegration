@@ -1,4 +1,6 @@
-## v4.0.0
+## v4.0.1 (patch)
 
-No significant changes detected since v4.0.0.
+Changes since v4.0.0:
+
+- [patch] Pin context lines and rename detection in Patch() ([@Claude](https://github.com/Claude))
 
