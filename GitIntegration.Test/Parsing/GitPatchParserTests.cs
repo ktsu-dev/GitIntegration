@@ -64,6 +64,60 @@ public class GitPatchParserTests
 	}
 
 	[TestMethod]
+	public void ReadsAPathThatContainsTheNewSidePrefix()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-b-slash-in-path.txt")).Files.Single();
+
+		Assert.AreEqual(
+			"Plan b/notes.txt",
+			file.Path.WeakString,
+			"The last ' b/' in 'a/Plan b/notes.txt b/Plan b/notes.txt' is inside the path itself.");
+		Assert.AreEqual(GitChangeKind.Modified, file.Kind);
+		Assert.AreEqual(1, file.Hunks.Count);
+	}
+
+	[TestMethod]
+	public void DecodesAPathGitQuoted()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-quoted-path.txt")).Files.Single();
+
+		Assert.AreEqual("say \"hi\".txt", file.Path.WeakString);
+		Assert.AreEqual(1, file.Hunks.Count);
+	}
+
+	[TestMethod]
+	public void DecodesQuotedRenamePaths()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-quoted-rename.txt")).Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Renamed, file.Kind);
+		Assert.AreEqual("old \"x\".txt", file.OriginalPath?.WeakString);
+		Assert.AreEqual("new \"y\".txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void DecodesOctalEscapesAsUtf8Bytes()
+	{
+		const string output = "diff --git \"a/caf\\303\\251\\\"q\\\".txt\" \"b/caf\\303\\251\\\"q\\\".txt\"\n"
+			+ "index 814f4a4..879de50 100644\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual("caf\u00e9\"q\".txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void OneQuotedPathDoesNotBreakTheOtherFiles()
+	{
+		string output = Fixture("patch-quoted-path.txt") + Fixture("patch-two-hunks.txt");
+
+		GitPatch patch = GitPatchParser.Parse(output);
+
+		Assert.AreEqual(2, patch.Files.Count);
+		Assert.AreEqual("f.txt", patch.Files[1].Path.WeakString);
+	}
+
+	[TestMethod]
 	public void FlagsABinaryFileAndGivesItNoHunks()
 	{
 		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-binary.txt")).Files.Single();

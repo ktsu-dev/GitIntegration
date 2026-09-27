@@ -1,0 +1,4 @@
+diff --git "a/old \"x\".txt" "b/new \"y\".txt"
+similarity index 100%
+rename from "old \"x\".txt"
+rename to "new \"y\".txt"
