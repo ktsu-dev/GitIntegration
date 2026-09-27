@@ -6,6 +6,9 @@ using System;
 using System.IO;
 using System.Linq;
 
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
+
 [TestClass]
 public class GitPatchParserTests
 {
@@ -69,7 +72,7 @@ public class GitPatchParserTests
 		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-b-slash-in-path.txt")).Files.Single();
 
 		Assert.AreEqual(
-			"Plan b/notes.txt",
+			"Plan b/notes.txt".As<RelativeFilePath>().WeakString,
 			file.Path.WeakString,
 			"The last ' b/' in 'a/Plan b/notes.txt b/Plan b/notes.txt' is inside the path itself.");
 		Assert.AreEqual(GitChangeKind.Modified, file.Kind);
