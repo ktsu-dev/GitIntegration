@@ -37,8 +37,8 @@ public interface IGitPatchBuilder : IGitCommandBuilder<GitPatch>
 	/// rather than the setting that caused it.
 	/// </remarks>
 	/// <param name="lines">
-	/// The number of context lines, at least one. Git's own default applies when this is never
-	/// called.
+	/// The number of context lines, at least one. Three, git's stock default, applies when this is
+	/// never called, whatever <c>diff.context</c> the host has configured.
 	/// </param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentOutOfRangeException"><paramref name="lines"/> is less than one.</exception>
@@ -70,6 +70,9 @@ public interface IGitPatchBuilder : IGitCommandBuilder<GitPatch>
 	public IGitPatchBuilder Between(GitRefName fromRevision, GitRefName toRevision);
 
 	/// <summary>Reports a delete and an add of similar content as a rename.</summary>
+	/// <remarks>
+	/// Detection is off until this is called, whatever <c>diff.renames</c> the host has configured.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPatchBuilder DetectRenames();
 }
@@ -88,6 +91,9 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	// One slot, so Against and Between cannot combine into a three-revision vector git would reject.
 	private string[] _revisions = [];
 	private bool _staged;
+	// Git's stock default, pinned so diff.context in a config file cannot change the hunk shape.
+	private const int DefaultContextLines = 3;
+
 	private int? _contextLines;
 	private bool _detectRenames;
 
@@ -177,15 +183,13 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 			arguments.Add("--cached");
 		}
 
-		if (_contextLines is int contextLines)
-		{
-			arguments.Add($"-U{contextLines}");
-		}
+		// Always emitted. diff.context=0 would otherwise give a zero-context patch, which is the
+		// shape WithContext refuses because Apply can never stage it.
+		arguments.Add($"-U{_contextLines ?? DefaultContextLines}");
 
-		if (_detectRenames)
-		{
-			arguments.Add("--find-renames");
-		}
+		// Git detects renames by default, and diff.renames=copies adds copy headers this parser
+		// does not read, so the host's setting is overridden in both directions.
+		arguments.Add(_detectRenames ? "--find-renames" : "--no-renames");
 
 		if (_revisions.Length > 0)
 		{
