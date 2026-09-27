@@ -278,7 +278,7 @@ internal static class GitPatchParser
 	/// <param name="line">The header line, for the error message.</param>
 	/// <returns>The path as it is named on disk.</returns>
 	/// <exception cref="GitParseException">The quoting is malformed.</exception>
-	private static string UnquotePath(string value, string line)
+	internal static string UnquotePath(string value, string line)
 	{
 		if (!value.StartsWith('"'))
 		{

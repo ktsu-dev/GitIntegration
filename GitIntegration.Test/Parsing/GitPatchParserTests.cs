@@ -110,6 +110,72 @@ public class GitPatchParserTests
 	}
 
 	[TestMethod]
+	public void DecodesEveryNamedEscape()
+	{
+		Assert.AreEqual(
+			"\a\b\t\n\v\f\r\"\\",
+			GitPatchParser.UnquotePath("\"\\a\\b\\t\\n\\v\\f\\r\\\"\\\\\"", "line"));
+	}
+
+	[TestMethod]
+	public void LeavesAnUnquotedPathAlone()
+	{
+		Assert.AreEqual("plain.txt", GitPatchParser.UnquotePath("plain.txt", "line"));
+	}
+
+	[TestMethod]
+	public void KeepsCharactersOutsideTheBasicPlane()
+	{
+		Assert.AreEqual("a\U0001F600b.txt", GitPatchParser.UnquotePath("\"a\U0001F600b.txt\"", "line"));
+	}
+
+	[TestMethod]
+	public void RefusesMalformedQuoting()
+	{
+		_ = Assert.ThrowsExactly<GitParseException>(() => GitPatchParser.UnquotePath("\"a\\qb\"", "line"));
+		_ = Assert.ThrowsExactly<GitParseException>(() => GitPatchParser.UnquotePath("\"never closed", "line"));
+		_ = Assert.ThrowsExactly<GitParseException>(() => GitPatchParser.UnquotePath("\"a\" trailing", "line"));
+	}
+
+	[TestMethod]
+	public void ReadsAQuotedNewSideAfterAnUnquotedOldSide()
+	{
+		const string output = "diff --git a/plain.txt \"b/new \\\"y\\\".txt\"\n"
+			+ "similarity index 100%\n"
+			+ "rename from plain.txt\n"
+			+ "rename to \"new \\\"y\\\".txt\"\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Renamed, file.Kind);
+		Assert.AreEqual("plain.txt", file.OriginalPath?.WeakString);
+		Assert.AreEqual("new \"y\".txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void ReadsAnUnquotedNewSideAfterAQuotedOldSide()
+	{
+		const string output = "diff --git \"a/old \\\"x\\\".txt\" b/plain.txt\n"
+			+ "similarity index 100%\n"
+			+ "rename from \"old \\\"x\\\".txt\"\n"
+			+ "rename to plain.txt\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual("old \"x\".txt", file.OriginalPath?.WeakString);
+		Assert.AreEqual("plain.txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void RefusesAQuotedHeaderWithNoNewSidePath()
+	{
+		_ = Assert.ThrowsExactly<GitParseException>(
+			() => GitPatchParser.Parse("diff --git \"a/x.txt\" \"c/x.txt\"\n"));
+		_ = Assert.ThrowsExactly<GitParseException>(
+			() => GitPatchParser.Parse("diff --git a/x.txt \"c/x.txt\"\n"));
+	}
+
+	[TestMethod]
 	public void OneQuotedPathDoesNotBreakTheOtherFiles()
 	{
 		string output = Fixture("patch-quoted-path.txt") + Fixture("patch-two-hunks.txt");
