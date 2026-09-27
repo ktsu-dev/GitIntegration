@@ -28,9 +28,43 @@ public class GitPatchBuilderTests
 			"--no-color",
 			"--src-prefix=a/",
 			"--dst-prefix=b/",
+			"-U3",
+			"--no-renames",
 		];
 
 		Assert.AreSequenceEqual(expectedArguments, builder.BuildArguments());
+	}
+
+	[TestMethod]
+	public void PinsContextAndRenameDetectionWhenNeitherIsRequested()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		IReadOnlyList<string> arguments = builder.BuildArguments();
+
+		Assert.IsTrue(
+			arguments.Contains("-U3"),
+			"Left out, diff.context=0 in the host's config yields zero-context hunks, which Apply can never stage.");
+		Assert.IsTrue(
+			arguments.Contains("--no-renames"),
+			"Left out, git's default rename detection and diff.renames=copies decide the patch shape instead of DetectRenames.");
+		Assert.IsFalse(arguments.Contains("--find-renames"));
+	}
+
+	[TestMethod]
+	public void ExplicitContextAndRenamesReplaceThePinnedDefaults()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+		_ = builder.WithContext(7).DetectRenames();
+
+		IReadOnlyList<string> arguments = builder.BuildArguments();
+
+		Assert.AreEqual(1, arguments.Count(argument => argument.StartsWith("-U", StringComparison.Ordinal)));
+		Assert.IsTrue(arguments.Contains("-U7"));
+		Assert.IsTrue(arguments.Contains("--find-renames"));
+		Assert.IsFalse(arguments.Contains("--no-renames"));
 	}
 
 	[TestMethod]
