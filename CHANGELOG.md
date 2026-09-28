@@ -1,3 +1,7 @@
+## v4.1.0
+
+No significant changes detected since v4.1.0.
+
 ## v4.1.0 (minor)
 
 Changes since v4.0.0:
@@ -34,12 +38,15 @@ Changes since v3.0.0:
 - [patch] Plan the patch verbs implementation ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Design the patch verbs: reading hunks, applying them, unstaging ([@matt-edmondson](https://github.com/matt-edmondson))
 - refactor: address the code quality findings on the pull request ([@matt-edmondson](https://github.com/matt-edmondson))
+- Merge origin/main into feat/worktrees-and-github-auth ([@matt-edmondson](https://github.com/matt-edmondson))
 - fix: guard the verification URI and align error taxonomy with the spec ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: cover worktree and device-flow types in the API reference ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: document worktree verbs, owner kinds, and device flow [minor] ([@matt-edmondson](https://github.com/matt-edmondson))
 - fix: enforce the device flow's expiry deadline and poll interval floor ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: obtain a GitHub credential through the OAuth device flow ([@matt-edmondson](https://github.com/matt-edmondson))
 - chore: map hostname-derived author addresses ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: report the single sign-on authorisation url on a forbidden response ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: route GitHub repository enumeration by owner kind ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add the worktree removal and prune verbs ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add the worktree creation verb ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add the worktree listing verb ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -48,6 +55,8 @@ Changes since v3.0.0:
 - fix: reject a null success value in GitResult.FromValue [minor] ([@Claude](https://github.com/Claude))
 - test: use the MSTest count assertion the analyzer points at [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - fix: enumerate repositories on the route the credential entitles [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- docs: plan worktree verbs, GitHub owner kinds, and device flow ([@matt-edmondson](https://github.com/matt-edmondson))
+- docs: design worktree verbs, GitHub owner kinds, and device flow ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: state credential rationale without narrating history ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add bearer credentials and a credential injection seam ([@matt-edmondson](https://github.com/matt-edmondson))
 - Gate Dependabot auto-merge on CI actually being green ([@Claude](https://github.com/Claude))
@@ -56,6 +65,7 @@ Changes since v3.0.0:
 - fix: collapse an unmerged submodule's merge stages into one entry [patch] ([@Claude](https://github.com/Claude))
 - fix: route pull-request mapping through ToHostValue [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: record the per-provider repository addressing split [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- fix: address a GitHub repository by name, and an id on GitHub's id route [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - test: let the fake handler 404 an unexpected path [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - ci: adopt the consolidated .NET workflow [patch] ([@Claude](https://github.com/Claude))
 - test: assert the platform-correct outcome for a tab-named path [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -66,17 +76,22 @@ Changes since v3.0.0:
 Changes since v3.2.0:
 
 - refactor: address the code quality findings on the pull request ([@matt-edmondson](https://github.com/matt-edmondson))
+- Merge origin/main into feat/worktrees-and-github-auth ([@matt-edmondson](https://github.com/matt-edmondson))
 - fix: guard the verification URI and align error taxonomy with the spec ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: cover worktree and device-flow types in the API reference ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: document worktree verbs, owner kinds, and device flow [minor] ([@matt-edmondson](https://github.com/matt-edmondson))
 - fix: enforce the device flow's expiry deadline and poll interval floor ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: obtain a GitHub credential through the OAuth device flow ([@matt-edmondson](https://github.com/matt-edmondson))
 - chore: map hostname-derived author addresses ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: report the single sign-on authorisation url on a forbidden response ([@matt-edmondson](https://github.com/matt-edmondson))
+- feat: route GitHub repository enumeration by owner kind ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add the worktree removal and prune verbs ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add the worktree creation verb ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: add the worktree listing verb ([@matt-edmondson](https://github.com/matt-edmondson))
 - chore: stop ignoring .worktrees in a file ktsu.Sdk regenerates ([@matt-edmondson](https://github.com/matt-edmondson))
 - feat: read git worktree list --porcelain into a typed model ([@matt-edmondson](https://github.com/matt-edmondson))
+- docs: plan worktree verbs, GitHub owner kinds, and device flow ([@matt-edmondson](https://github.com/matt-edmondson))
+- docs: design worktree verbs, GitHub owner kinds, and device flow ([@matt-edmondson](https://github.com/matt-edmondson))
 
 ## v3.2.0 (minor)
 
@@ -105,6 +120,7 @@ Changes since v3.0.0:
 - fix: collapse an unmerged submodule's merge stages into one entry [patch] ([@Claude](https://github.com/Claude))
 - fix: route pull-request mapping through ToHostValue [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - docs: record the per-provider repository addressing split [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- fix: address a GitHub repository by name, and an id on GitHub's id route [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - test: let the fake handler 404 an unexpected path [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - ci: adopt the consolidated .NET workflow [patch] ([@Claude](https://github.com/Claude))
 - test: assert the platform-correct outcome for a tab-named path [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -130,6 +146,7 @@ Changes since v3.0.2:
 Changes since v3.0.1:
 
 - docs: record the per-provider repository addressing split [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- fix: address a GitHub repository by name, and an id on GitHub's id route [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - test: let the fake handler 404 an unexpected path [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 - ci: adopt the consolidated .NET workflow [patch] ([@Claude](https://github.com/Claude))
 
@@ -146,6 +163,7 @@ Changes since v2.0.0:
 
 - fix: resolve the first matching status line without a one-iteration loop [patch] ([@Claude](https://github.com/Claude))
 - style: join rather than combine inside the fixture's path guard [patch] ([@Claude](https://github.com/Claude))
+- style: apply the remaining github-code-quality findings [patch] ([@Claude](https://github.com/Claude))
 - fix: match submodule paths using git's own spelling [patch] ([@Claude](https://github.com/Claude))
 - docs: reconcile the documented scope and record the new verbs [patch] ([@Claude](https://github.com/Claude))
 - feat: add submodule listing, update, and the recursion flags [minor] ([@Claude](https://github.com/Claude))
@@ -161,6 +179,7 @@ Changes since v2.0.0:
 - [patch] Fold local path containment into a single helper ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Contain hosting repository local paths and clean up transport disposal ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Correct two stale documentation claims on the transport ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Map GitHub's 429 to GitHostingRateLimitException ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Fix the final review findings on the hosting layer ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Fix a false CreateHttpClient claim in CLAUDE.md and README.md ([@matt-edmondson](https://github.com/matt-edmondson))
 - [minor] Register and document the hosting layer ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -168,6 +187,8 @@ Changes since v2.0.0:
 - [minor] Add Azure DevOps pull requests and hosting error mapping ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Pin System.Text.Json to a net9.0-safe assembly version ([@matt-edmondson](https://github.com/matt-edmondson))
 - [minor] Add the Azure DevOps provider with repository enumeration ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Fix GitHubProvider transport leak and test isolation race ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Implement the GitHub provider over Octokit ([@matt-edmondson](https://github.com/matt-edmondson))
 - [minor] Add the pull request create builder ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Document that GitProvider cannot be subclassed outside this assembly ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Configure the credential test cache once, not once per test ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -267,6 +288,7 @@ Changes since v2.4.0:
 - [patch] Fold local path containment into a single helper ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Contain hosting repository local paths and clean up transport disposal ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Correct two stale documentation claims on the transport ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Map GitHub's 429 to GitHostingRateLimitException ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Fix the final review findings on the hosting layer ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Fix a false CreateHttpClient claim in CLAUDE.md and README.md ([@matt-edmondson](https://github.com/matt-edmondson))
 - [minor] Register and document the hosting layer ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -274,6 +296,8 @@ Changes since v2.4.0:
 - [minor] Add Azure DevOps pull requests and hosting error mapping ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Pin System.Text.Json to a net9.0-safe assembly version ([@matt-edmondson](https://github.com/matt-edmondson))
 - [minor] Add the Azure DevOps provider with repository enumeration ([@matt-edmondson](https://github.com/matt-edmondson))
+- [patch] Fix GitHubProvider transport leak and test isolation race ([@matt-edmondson](https://github.com/matt-edmondson))
+- [minor] Implement the GitHub provider over Octokit ([@matt-edmondson](https://github.com/matt-edmondson))
 - [minor] Add the pull request create builder ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Document that GitProvider cannot be subclassed outside this assembly ([@matt-edmondson](https://github.com/matt-edmondson))
 - [patch] Configure the credential test cache once, not once per test ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -433,8 +457,10 @@ Changes since v1.1.7:
 Changes since v1.1.6:
 
 - Add PrivateAssets="all" to Polyfill package reference to fix KTSU0007 [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- Sync .github\workflows\dotnet.yml ([@KtsuTools](https://github.com/KtsuTools))
 - Sync .editorconfig ([@KtsuTools](https://github.com/KtsuTools))
 - Sync global.json ([@KtsuTools](https://github.com/KtsuTools))
+- Sync .github\workflows\dotnet.yml ([@KtsuTools](https://github.com/KtsuTools))
 
 ## v1.1.6 (patch)
 
@@ -474,7 +500,9 @@ Changes since v1.1.1:
 - fix: clarify credential nullability in Git provider ([@matt-edmondson](https://github.com/matt-edmondson))
 - refactor: trim package refs and multi-target GitIntegration ([@matt-edmondson](https://github.com/matt-edmondson))
 - Add TAGS.md with NuGet package tags ([@matt-edmondson](https://github.com/matt-edmondson))
+- Sync .github\workflows\dotnet.yml ([@KtsuTools](https://github.com/KtsuTools))
 - Remove legacy build scripts ([@matt-edmondson](https://github.com/matt-edmondson))
+- Remove .github\workflows\project.yml ([@matt-edmondson](https://github.com/matt-edmondson))
 - Update project configuration and scripts, including new SDK management, enhanced CI/CD workflows, and updated copyright information. ([@matt-edmondson](https://github.com/matt-edmondson))
 - Update configuration files and scripts for improved build and test processes ([@matt-edmondson](https://github.com/matt-edmondson))
 - Update ktsu.AppDataStorage package version to 1.15.5 ([@matt-edmondson](https://github.com/matt-edmondson))
@@ -568,7 +596,9 @@ No significant changes detected since v1.1.2-pre.1.
 
 ## v1.1.2-pre.1 (prerelease)
 
-No significant changes detected since v1.1.2.
+Changes since v1.1.1:
+
+- Sync scripts\PSBuild.psm1 ([@ktsu[bot]](https://github.com/ktsu[bot]))
 
 ## v1.1.1 (patch)
 
@@ -617,7 +647,9 @@ Changes since v1.1.1-pre.1:
 
 ## v1.1.1-pre.1 (prerelease)
 
-No significant changes detected since v1.1.1.
+Changes since v1.1.0:
+
+- Bump the ktsu group with 3 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
 ## v1.1.0 (minor)
 
