@@ -1,0 +1,8 @@
+diff --git "a/say \"hi\".txt" "b/say \"hi\".txt"
+index 814f4a4..879de50 100644
+--- "a/say \"hi\".txt"	
++++ "b/say \"hi\".txt"	
+@@ -1,2 +1,2 @@
+ one
+-two
++TWO

@@ -6,6 +6,9 @@ using System;
 using System.IO;
 using System.Linq;
 
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
+
 [TestClass]
 public class GitPatchParserTests
 {
@@ -61,6 +64,126 @@ public class GitPatchParserTests
 		Assert.IsTrue(
 			file.Hunks.Count > 0,
 			"A rename can carry content changes too, and treating rename as hunkless drops them.");
+	}
+
+	[TestMethod]
+	public void ReadsAPathThatContainsTheNewSidePrefix()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-b-slash-in-path.txt")).Files.Single();
+
+		Assert.AreEqual(
+			"Plan b/notes.txt".As<RelativeFilePath>().WeakString,
+			file.Path.WeakString,
+			"The last ' b/' in 'a/Plan b/notes.txt b/Plan b/notes.txt' is inside the path itself.");
+		Assert.AreEqual(GitChangeKind.Modified, file.Kind);
+		Assert.AreEqual(1, file.Hunks.Count);
+	}
+
+	[TestMethod]
+	public void DecodesAPathGitQuoted()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-quoted-path.txt")).Files.Single();
+
+		Assert.AreEqual("say \"hi\".txt", file.Path.WeakString);
+		Assert.AreEqual(1, file.Hunks.Count);
+	}
+
+	[TestMethod]
+	public void DecodesQuotedRenamePaths()
+	{
+		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-quoted-rename.txt")).Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Renamed, file.Kind);
+		Assert.AreEqual("old \"x\".txt", file.OriginalPath?.WeakString);
+		Assert.AreEqual("new \"y\".txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void DecodesOctalEscapesAsUtf8Bytes()
+	{
+		const string output = "diff --git \"a/caf\\303\\251\\\"q\\\".txt\" \"b/caf\\303\\251\\\"q\\\".txt\"\n"
+			+ "index 814f4a4..879de50 100644\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual("caf\u00e9\"q\".txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void DecodesEveryNamedEscape()
+	{
+		Assert.AreEqual(
+			"\a\b\t\n\v\f\r\"\\",
+			GitPatchParser.UnquotePath("\"\\a\\b\\t\\n\\v\\f\\r\\\"\\\\\"", "line"));
+	}
+
+	[TestMethod]
+	public void LeavesAnUnquotedPathAlone()
+	{
+		Assert.AreEqual("plain.txt", GitPatchParser.UnquotePath("plain.txt", "line"));
+	}
+
+	[TestMethod]
+	public void KeepsCharactersOutsideTheBasicPlane()
+	{
+		Assert.AreEqual("a\U0001F600b.txt", GitPatchParser.UnquotePath("\"a\U0001F600b.txt\"", "line"));
+	}
+
+	[TestMethod]
+	public void RefusesMalformedQuoting()
+	{
+		_ = Assert.ThrowsExactly<GitParseException>(() => GitPatchParser.UnquotePath("\"a\\qb\"", "line"));
+		_ = Assert.ThrowsExactly<GitParseException>(() => GitPatchParser.UnquotePath("\"never closed", "line"));
+		_ = Assert.ThrowsExactly<GitParseException>(() => GitPatchParser.UnquotePath("\"a\" trailing", "line"));
+	}
+
+	[TestMethod]
+	public void ReadsAQuotedNewSideAfterAnUnquotedOldSide()
+	{
+		const string output = "diff --git a/plain.txt \"b/new \\\"y\\\".txt\"\n"
+			+ "similarity index 100%\n"
+			+ "rename from plain.txt\n"
+			+ "rename to \"new \\\"y\\\".txt\"\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual(GitChangeKind.Renamed, file.Kind);
+		Assert.AreEqual("plain.txt", file.OriginalPath?.WeakString);
+		Assert.AreEqual("new \"y\".txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void ReadsAnUnquotedNewSideAfterAQuotedOldSide()
+	{
+		const string output = "diff --git \"a/old \\\"x\\\".txt\" b/plain.txt\n"
+			+ "similarity index 100%\n"
+			+ "rename from \"old \\\"x\\\".txt\"\n"
+			+ "rename to plain.txt\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual("old \"x\".txt", file.OriginalPath?.WeakString);
+		Assert.AreEqual("plain.txt", file.Path.WeakString);
+	}
+
+	[TestMethod]
+	public void RefusesAQuotedHeaderWithNoNewSidePath()
+	{
+		_ = Assert.ThrowsExactly<GitParseException>(
+			() => GitPatchParser.Parse("diff --git \"a/x.txt\" \"c/x.txt\"\n"));
+		_ = Assert.ThrowsExactly<GitParseException>(
+			() => GitPatchParser.Parse("diff --git a/x.txt \"c/x.txt\"\n"));
+	}
+
+	[TestMethod]
+	public void OneQuotedPathDoesNotBreakTheOtherFiles()
+	{
+		string output = Fixture("patch-quoted-path.txt") + Fixture("patch-two-hunks.txt");
+
+		GitPatch patch = GitPatchParser.Parse(output);
+
+		Assert.AreEqual(2, patch.Files.Count);
+		Assert.AreEqual("f.txt", patch.Files[1].Path.WeakString);
 	}
 
 	[TestMethod]

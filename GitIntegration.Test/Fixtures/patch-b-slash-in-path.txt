@@ -1,0 +1,8 @@
+diff --git a/Plan b/notes.txt b/Plan b/notes.txt
+index 814f4a4..879de50 100644
+--- a/Plan b/notes.txt	
++++ b/Plan b/notes.txt	
+@@ -1,2 +1,2 @@
+ one
+-two
++TWO

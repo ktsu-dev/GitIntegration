@@ -5,6 +5,7 @@ namespace ktsu.GitIntegration;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 using ktsu.Semantics.Paths;
 
@@ -185,6 +186,12 @@ internal static class GitPatchParser
 	/// Reads the path to use until a more specific header line overrides it: the combined format's
 	/// single path, or the ordinary format's new-side path.
 	/// </summary>
+	/// <remarks>
+	/// Without a rename or copy, both sides of <c>a/P b/P</c> name the same path, so the header is
+	/// split at its midpoint, as git's own <c>git_header_name</c> does. Searching for <c>" b/"</c>
+	/// cannot work there, because the path itself may contain that text. A rename's header is
+	/// ambiguous in the same way, and its <c>rename to</c> line replaces the guess made here.
+	/// </remarks>
 	/// <param name="line">The <c>diff --git</c> or <c>diff --cc</c> line that starts the file.</param>
 	/// <returns>The path found on that line.</returns>
 	/// <exception cref="GitParseException">The line does not carry a recognizable path.</exception>
@@ -192,18 +199,147 @@ internal static class GitPatchParser
 	{
 		if (line.StartsWith(CombinedHeaderPrefix, StringComparison.Ordinal))
 		{
-			return line[CombinedHeaderPrefix.Length..];
+			return UnquotePath(line[CombinedHeaderPrefix.Length..], line);
 		}
 
 		string remainder = line[GitHeaderPrefix.Length..];
 
-		// Searched from the end rather than the first match, because the old-side path can itself
-		// contain the literal text " b/" as part of a directory or file name.
+		// A path git had to C-quote puts the whole operand, prefix included, inside the quotes.
+		if (remainder.StartsWith('"'))
+		{
+			int end = QuotedOperandEnd(remainder, 0, line);
+			return StripNewSidePrefix(UnquotePath(remainder[(end + 1)..].TrimStart(' '), line), line);
+		}
+
+		if (remainder.EndsWith('"'))
+		{
+			int start = remainder.LastIndexOf(" \"b/", StringComparison.Ordinal);
+
+			return start < 0
+				? throw new GitParseException($"A diff header has no recognizable new-side path: '{line}'.")
+				: StripNewSidePrefix(UnquotePath(remainder[(start + 1)..], line), line);
+		}
+
+		if (remainder.Length % 2 == 1)
+		{
+			int middle = remainder.Length / 2;
+			string oldSide = remainder[..middle];
+			string newSide = remainder[(middle + 1)..];
+
+			if (remainder[middle] == ' ' &&
+				oldSide.StartsWith("a/", StringComparison.Ordinal) &&
+				newSide.StartsWith("b/", StringComparison.Ordinal) &&
+				oldSide.AsSpan(2).SequenceEqual(newSide.AsSpan(2)))
+			{
+				return newSide[2..];
+			}
+		}
+
+		// The two sides differ, so this is a rename or copy whose own header line names the
+		// new path. The guess only has to be a valid path until that line replaces it.
 		int split = remainder.LastIndexOf(BSidePathMarker, StringComparison.Ordinal);
 
 		return split < 0
 			? throw new GitParseException($"A diff header has no recognizable new-side path: '{line}'.")
 			: remainder[(split + BSidePathMarker.Length)..];
+	}
+
+	private static string StripNewSidePrefix(string operand, string line) =>
+		operand.StartsWith("b/", StringComparison.Ordinal)
+			? operand[2..]
+			: throw new GitParseException($"A diff header has no recognizable new-side path: '{line}'.");
+
+	/// <summary>
+	/// Finds the closing quote of a C-quoted operand that opens at <paramref name="start"/>.
+	/// </summary>
+	private static int QuotedOperandEnd(string text, int start, string line)
+	{
+		for (int position = start + 1; position < text.Length; position++)
+		{
+			if (text[position] == '\\')
+			{
+				position++;
+			}
+			else if (text[position] == '"')
+			{
+				return position;
+			}
+		}
+
+		throw new GitParseException($"A quoted path in a diff header is not closed: '{line}'.");
+	}
+
+	/// <summary>
+	/// Decodes a path git printed with C-style quoting, or returns it unchanged when it is not
+	/// quoted. <c>core.quotepath=false</c> stops git quoting non-ASCII bytes, but a name holding a
+	/// double quote, a backslash, a tab or another control character is quoted regardless.
+	/// </summary>
+	/// <param name="value">The path as git printed it.</param>
+	/// <param name="line">The header line, for the error message.</param>
+	/// <returns>The path as it is named on disk.</returns>
+	/// <exception cref="GitParseException">The quoting is malformed.</exception>
+	internal static string UnquotePath(string value, string line)
+	{
+		if (!value.StartsWith('"'))
+		{
+			return value;
+		}
+
+		if (QuotedOperandEnd(value, 0, line) != value.Length - 1)
+		{
+			throw new GitParseException($"A quoted path in a diff header has trailing text: '{line}'.");
+		}
+
+		// Octal escapes carry raw bytes, so the name is rebuilt as UTF-8 and decoded once at the end.
+		List<byte> bytes = [];
+		Span<byte> encoded = stackalloc byte[4];
+
+		for (int position = 1; position < value.Length - 1; position++)
+		{
+			char character = value[position];
+
+			if (character != '\\')
+			{
+				int length = char.IsHighSurrogate(character) && position + 1 < value.Length - 1
+					? Encoding.UTF8.GetBytes(value.AsSpan(position++, 2), encoded)
+					: Encoding.UTF8.GetBytes(value.AsSpan(position, 1), encoded);
+
+				for (int offset = 0; offset < length; offset++)
+				{
+					bytes.Add(encoded[offset]);
+				}
+
+				continue;
+			}
+
+			char escape = value[++position];
+
+			if (escape is >= '0' and <= '3' &&
+				position + 2 < value.Length - 1 &&
+				value[position + 1] is >= '0' and <= '7' &&
+				value[position + 2] is >= '0' and <= '7')
+			{
+				bytes.Add((byte)(((escape - '0') << 6) | ((value[position + 1] - '0') << 3) | (value[position + 2] - '0')));
+				position += 2;
+				continue;
+			}
+
+			bytes.Add(escape switch
+			{
+				'a' => (byte)'\a',
+				'b' => (byte)'\b',
+				't' => (byte)'\t',
+				'n' => (byte)'\n',
+				'v' => (byte)'\v',
+				'f' => (byte)'\f',
+				'r' => (byte)'\r',
+				'"' => (byte)'"',
+				'\\' => (byte)'\\',
+				_ => throw new GitParseException($"A quoted path in a diff header has an unknown escape '\\{escape}': '{line}'."),
+			});
+		}
+
+		return Encoding.UTF8.GetString([.. bytes]);
 	}
 
 	private static void ApplyHeaderLine(
@@ -215,12 +351,12 @@ internal static class GitPatchParser
 	{
 		if (line.StartsWith(RenameFromPrefix, StringComparison.Ordinal))
 		{
-			originalPath = GitParseValues.ToRelativeFilePath(line[RenameFromPrefix.Length..]);
+			originalPath = GitParseValues.ToRelativeFilePath(UnquotePath(line[RenameFromPrefix.Length..], line));
 			kind = GitChangeKind.Renamed;
 		}
 		else if (line.StartsWith(RenameToPrefix, StringComparison.Ordinal))
 		{
-			path = GitParseValues.ToRelativeFilePath(line[RenameToPrefix.Length..]);
+			path = GitParseValues.ToRelativeFilePath(UnquotePath(line[RenameToPrefix.Length..], line));
 			kind = GitChangeKind.Renamed;
 		}
 		else if (line.StartsWith(NewFileModePrefix, StringComparison.Ordinal))
