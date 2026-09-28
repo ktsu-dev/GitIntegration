@@ -1,0 +1,8 @@
+# Captured git diff output, kept exactly as git emitted it. A patch fixture mixes LF
+# structural lines with CRLF content lines by design, testing that the parser leaves
+# carriage returns alone, so the repository's eol normalization would corrupt the very
+# bytes the test asserts on.
+#
+# This lives here rather than in the root .gitattributes because ktsu.Sdk regenerates the
+# root file on every build, which would silently drop the rule.
+patch-*.txt -text
