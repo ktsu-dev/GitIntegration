@@ -40,6 +40,27 @@ internal static class GitParseValues
 	}
 
 	/// <summary>
+	/// Converts a raw field that git may legitimately leave blank into a semantic string, or
+	/// <see langword="null"/> when it is blank.
+	/// </summary>
+	/// <remarks>
+	/// For the fields where blank is a value git records rather than a malformed record: a commit
+	/// made with an empty <c>user.email</c>, or imported by <c>fast-import</c> or
+	/// <c>commit-tree</c>, carries an empty signature email or name. Throwing on that would make
+	/// every history containing one such commit unreadable.
+	/// </remarks>
+	/// <typeparam name="TSemantic">The semantic string type to produce.</typeparam>
+	/// <param name="value">The raw field as git printed it.</param>
+	/// <param name="description">What the field is, used in the failure message.</param>
+	/// <returns>The converted value, or <see langword="null"/> when the field is blank.</returns>
+	/// <exception cref="GitParseException">
+	/// <paramref name="value"/> is not blank and fails the type's validation.
+	/// </exception>
+	internal static TSemantic? ToOptionalSemantic<TSemantic>(string value, string description)
+		where TSemantic : SemanticString<TSemantic>, new() =>
+		string.IsNullOrWhiteSpace(value) ? null : ToSemantic<TSemantic>(value, description);
+
+	/// <summary>
 	/// Converts a raw path field into a repository-relative path.
 	/// </summary>
 	/// <remarks>

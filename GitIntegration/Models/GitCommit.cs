@@ -40,11 +40,21 @@ public sealed record GitCommit
 /// </summary>
 public sealed record GitSignature
 {
-	/// <summary>Gets the recorded name.</summary>
-	public required GitAuthorName Name { get; init; }
+	/// <summary>Gets the recorded name, or <see langword="null"/> when git recorded an empty one.</summary>
+	/// <remarks>
+	/// Git refuses an empty name for a new commit, but <c>commit-tree</c> and <c>fast-import</c>
+	/// can still write one, and a commit already in history must remain readable.
+	/// </remarks>
+	public required GitAuthorName? Name { get; init; }
 
-	/// <summary>Gets the recorded email address.</summary>
-	public required GitAuthorEmail Email { get; init; }
+	/// <summary>
+	/// Gets the recorded email address, or <see langword="null"/> when git recorded an empty one.
+	/// </summary>
+	/// <remarks>
+	/// An empty address (<c>&lt;&gt;</c>) is what git records for a commit made with an empty
+	/// <c>user.email</c>, and it is common in imported and bot-made history.
+	/// </remarks>
+	public required GitAuthorEmail? Email { get; init; }
 
 	/// <summary>
 	/// Gets the recorded time, with the offset the commit was made in.

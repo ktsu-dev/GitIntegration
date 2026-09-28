@@ -59,14 +59,14 @@ internal static class GitLogParser
 			ParentShas = ReadParents(fields[2]),
 			Author = new GitSignature
 			{
-				Name = GitParseValues.ToSemantic<GitAuthorName>(fields[3], "author name"),
-				Email = GitParseValues.ToSemantic<GitAuthorEmail>(fields[4], "author email"),
+				Name = GitParseValues.ToOptionalSemantic<GitAuthorName>(fields[3], "author name"),
+				Email = GitParseValues.ToOptionalSemantic<GitAuthorEmail>(fields[4], "author email"),
 				Timestamp = ReadTimestamp(fields[5]),
 			},
 			Committer = new GitSignature
 			{
-				Name = GitParseValues.ToSemantic<GitAuthorName>(fields[6], "committer name"),
-				Email = GitParseValues.ToSemantic<GitAuthorEmail>(fields[7], "committer email"),
+				Name = GitParseValues.ToOptionalSemantic<GitAuthorName>(fields[6], "committer name"),
+				Email = GitParseValues.ToOptionalSemantic<GitAuthorEmail>(fields[7], "committer email"),
 				Timestamp = ReadTimestamp(fields[8]),
 			},
 			Subject = fields[9],
