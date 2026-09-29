@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -162,6 +163,53 @@ public class GitSubmoduleTests
 		// The checkout is the new commit, and it is not the gitlink.
 		Assert.AreEqual(moved.Sha, after[0].CheckedOutSha);
 		Assert.AreNotEqual(after[0].Sha, after[0].CheckedOutSha);
+	}
+
+	[TestMethod]
+	[DataRow("log")]
+	[DataRow("diff")]
+	public async Task PatchReportsAMovedSubmoduleAsItsGitlinkWhateverDiffSubmoduleSaysAsync(string format)
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		// Move the submodule's checkout on by a commit, so the superproject sees its gitlink change.
+		GitRepository checkout = new()
+		{
+			LocalPath = System.IO.Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
+			ProcessRunner = super.ProcessRunner,
+		};
+
+		await IntegrationGitFixture.ConfigureIdentityAsync(checkout, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+
+		superDirectory.WriteFile("libs/sub/s.txt", "two\n");
+		_ = await checkout.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await checkout.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Written into the superproject's own config, which is the nearest scope git reads it from.
+		_ = await new GitTextBuilder(super.ProcessRunner!, super.LocalPath, "config", "diff.submodule", format)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitPatch patch = await super.Patch().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// "log" left the change out entirely, and "diff" reported libs/sub/s.txt in its place
+		// (ktsu-dev/GitIntegration#124).
+		GitFilePatch file = patch.Files.Single();
+		Assert.AreEqual("libs/sub", file.Path.WeakString);
+
+		_ = await super.Apply(file.PatchFor(file.Hunks)).ToIndex().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitPatch staged = await super.Patch().Staged().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual("libs/sub", staged.Files.Single().Path.WeakString);
 	}
 
 	[TestMethod]

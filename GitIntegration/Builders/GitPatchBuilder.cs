@@ -178,6 +178,12 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		arguments.Add("--src-prefix=a/");
 		arguments.Add("--dst-prefix=b/");
 
+		// diff.submodule=log prints a moved submodule as a "Submodule sub a..b:" summary with no
+		// diff --git block, so the change is missing from the patch, and =diff prints the
+		// submodule's own files as if they were the superproject's, which apply then refuses.
+		// Only the short form is a gitlink patch that stages (ktsu-dev/GitIntegration#124).
+		arguments.Add("--submodule=short");
+
 		if (_staged)
 		{
 			arguments.Add("--cached");
