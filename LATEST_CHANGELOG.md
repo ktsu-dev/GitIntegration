@@ -1,4 +1,6 @@
-## v4.1.0
+## v4.1.1 (patch)
 
-No significant changes detected since v4.1.0.
+Changes since v4.1.0:
+
+- [patch] Unstage with reset so it works before the first commit ([@Claude](https://github.com/Claude))
 
