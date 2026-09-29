@@ -37,6 +37,9 @@ internal sealed class GitRestoreBuilder(IGitProcessRunner runner, AbsoluteDirect
 {
 	private readonly RelativeFilePath _path = Ensure.NotNull(path);
 
+	/// <inheritdoc />
+	protected override bool PassesPathsLiterally => true;
+
 	/// <summary>
 	/// Appends the verb and the path, separating the two with a bare <c>--</c> rather than through
 	/// <c>AppendOperands</c>.

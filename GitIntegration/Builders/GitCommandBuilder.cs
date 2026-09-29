@@ -69,6 +69,16 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	protected abstract TResult ParseResult(GitProcessResult result);
 
 	/// <summary>
+	/// Gets a value indicating whether the command passes caller-supplied file paths, which git
+	/// must then match literally rather than as pathspec patterns.
+	/// </summary>
+	/// <remarks>
+	/// Only builders that emit paths turn this on. git exports the setting to the processes it
+	/// starts, so setting it on every command would also change how hooks read their pathspecs.
+	/// </remarks>
+	protected virtual bool PassesPathsLiterally => false;
+
+	/// <summary>
 	/// Appends caller-supplied operands after an end-of-options marker, so a value beginning with a
 	/// dash cannot be reinterpreted by git as an option.
 	/// </summary>
@@ -114,6 +124,15 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		arguments.Add("core.quotepath=false");
 		arguments.Add("-c");
 		arguments.Add("color.ui=false");
+
+		// Caller paths are RelativeFilePath values naming one file each, so git must not read
+		// glob characters or a leading colon in them as pathspec syntax, or "file[1].txt" also
+		// matches file1.txt (ktsu-dev/GitIntegration#125). This is a global option, so it has to
+		// come before the verb.
+		if (PassesPathsLiterally)
+		{
+			arguments.Add("--literal-pathspecs");
+		}
 
 		AppendVerbArguments(arguments);
 
