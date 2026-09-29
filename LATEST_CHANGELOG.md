@@ -1,6 +1,6 @@
-## v4.1.1 (patch)
+## v4.1.2 (patch)
 
-Changes since v4.1.0:
+Changes since v4.1.1:
 
-- [patch] Unstage with reset so it works before the first commit ([@Claude](https://github.com/Claude))
+- Move CI onto the shared ci-shared.yml pipeline ([@Claude](https://github.com/Claude))
 
