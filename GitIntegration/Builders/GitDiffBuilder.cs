@@ -142,6 +142,9 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	}
 
 	/// <inheritdoc />
+	protected override bool PassesPathsLiterally => _paths.Count > 0;
+
+	/// <inheritdoc />
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
