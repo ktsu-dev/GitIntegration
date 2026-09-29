@@ -204,12 +204,12 @@ public class GitSubmoduleTests
 		// "log" left the change out entirely, and "diff" reported libs/sub/s.txt in its place
 		// (ktsu-dev/GitIntegration#124).
 		GitFilePatch file = patch.Files.Single();
-		Assert.AreEqual("libs/sub", file.Path.WeakString);
+		Assert.AreEqual("libs/sub".As<RelativeFilePath>(), file.Path);
 
 		_ = await super.Apply(file.PatchFor(file.Hunks)).ToIndex().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		GitPatch staged = await super.Patch().Staged().ExecuteAsync(cancellationToken).ConfigureAwait(false);
-		Assert.AreEqual("libs/sub", staged.Files.Single().Path.WeakString);
+		Assert.AreEqual("libs/sub".As<RelativeFilePath>(), staged.Files.Single().Path);
 	}
 
 	[TestMethod]
