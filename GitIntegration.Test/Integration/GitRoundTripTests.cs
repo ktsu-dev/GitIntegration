@@ -154,6 +154,52 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task UnstageBeforeTheFirstCommitLeavesTheFileUntrackedAsync()
+	{
+		// A freshly initialised repository has no HEAD to restore the index from, which is exactly
+		// when a user is most likely to have staged too much.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("f.txt", "x\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Unstage("f.txt".As<RelativeFilePath>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitStatusEntry entry = status.Entries.Single();
+		Assert.AreEqual(GitFileState.Untracked, entry.IndexState);
+		Assert.AreEqual(GitFileState.Untracked, entry.WorkTreeState);
+	}
+
+	[TestMethod]
+	public async Task UnstageAfterACommitRestoresTheIndexAndKeepsTheWorkingTreeAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("f.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("f.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Unstage("f.txt".As<RelativeFilePath>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitStatusEntry entry = status.Entries.Single();
+		Assert.AreEqual(GitFileState.Unmodified, entry.IndexState, "The staged change should be gone from the index.");
+		Assert.AreEqual(GitFileState.Modified, entry.WorkTreeState, "The change itself should still be in the working tree.");
+	}
+
+	[TestMethod]
 	public async Task StatusReportsUntrackedWorkEvenWhereTheHostHidesItAsync()
 	{
 		// status.showUntrackedFiles is a host setting — a CI image or a developer's ~/.gitconfig can set

@@ -3,8 +3,6 @@
 namespace ktsu.GitIntegration;
 
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
 
@@ -21,15 +19,15 @@ public interface IGitRestoreBuilder : IGitCommandBuilder<GitCompleted>
 }
 
 /// <summary>
-/// Builds <c>git restore --staged</c>, with a fallback to <c>git reset HEAD</c> on a git older than
-/// the one that introduced <c>restore</c>.
+/// Builds <c>git reset -q -- &lt;path&gt;</c>, which unstages the path.
 /// </summary>
 /// <remarks>
-/// <c>git restore</c> arrived in git 2.23. Below that, unstaging a path goes through <c>git reset
-/// HEAD -- &lt;path&gt;</c> instead, which every supported git understands. The choice follows the
-/// same shape as <see cref="GitFetchBuilder"/>: a version probe runs in <see cref="ExecuteAsync"/>
-/// and <see cref="TryExecuteAsync"/> before the vector is built, because <c>BuildArguments</c> is
-/// documented as a pure computation with no I/O and so cannot probe for itself.
+/// <c>git restore --staged</c> would read as the modern spelling, but with no <c>--source</c> it
+/// restores the index from <c>HEAD</c>, and in a repository with no commits yet it dies with "could
+/// not resolve HEAD". That is exactly when a user is most likely to have staged too much.
+/// <c>git reset -- &lt;path&gt;</c> copies the path's entry from <c>HEAD</c> into the index, and
+/// on an unborn branch it removes the entry, leaving the file untracked. It behaves that way on
+/// every supported git, so there is no version to probe for.
 /// </remarks>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">The repository to scope the command to.</param>
@@ -37,51 +35,25 @@ public interface IGitRestoreBuilder : IGitCommandBuilder<GitCompleted>
 internal sealed class GitRestoreBuilder(IGitProcessRunner runner, AbsoluteDirectoryPath repositoryPath, RelativeFilePath path)
 	: GitCommandBuilder<GitCompleted>(runner, repositoryPath), IGitRestoreBuilder
 {
-	/// <summary>The first git release whose <c>restore</c> command exists.</summary>
-	private const int RestoreMajor = 2;
-	private const int RestoreMinor = 23;
-
 	private readonly RelativeFilePath _path = Ensure.NotNull(path);
-
-	/// <summary>
-	/// Gets or sets a value indicating whether the installed git is new enough for <c>restore</c>.
-	/// </summary>
-	/// <remarks>
-	/// Defaults true so <c>BuildArguments</c> emits the modern form until an execution path tells it
-	/// otherwise, matching <see cref="GitFetchBuilder"/>'s own default.
-	/// </remarks>
-	private bool RestoreSupportedByVersion { get; set; } = true;
 
 	/// <summary>
 	/// Appends the verb and the path, separating the two with a bare <c>--</c> rather than through
 	/// <c>AppendOperands</c>.
 	/// </summary>
 	/// <remarks>
-	/// The one builder in this library that does not use <c>AppendOperands</c>, and deliberately so.
-	/// <c>AppendOperands</c> writes <c>--end-of-options</c>, which git gained in 2.24, one release
-	/// after <c>restore</c> itself. This builder exists to serve a git older than 2.23, and on those
-	/// versions <c>--end-of-options</c> is not an option at all: git reads it as a pathspec and the
-	/// command fails, which would make the fallback unreachable and break the restore path on 2.23
-	/// exactly. A bare <c>--</c> has separated options from pathspecs for git's whole history and is
-	/// what both <c>restore</c> and <c>reset</c> want here, so it gives the same protection against
-	/// a dash-leading path on every version this builder can run against.
+	/// A bare <c>--</c> has separated options from pathspecs for git's whole history, so it gives
+	/// the same protection against a dash-leading path as the <c>--end-of-options</c> that
+	/// <c>AppendOperands</c> writes, without needing git 2.24. <c>-q</c> suppresses the list of
+	/// paths that still have unstaged changes, which <c>reset</c> otherwise prints.
 	/// </remarks>
 	/// <param name="arguments">The vector being assembled.</param>
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
 
-		if (RestoreSupportedByVersion)
-		{
-			arguments.Add("restore");
-			arguments.Add("--staged");
-		}
-		else
-		{
-			arguments.Add("reset");
-			arguments.Add("HEAD");
-		}
-
+		arguments.Add("reset");
+		arguments.Add("-q");
 		arguments.Add("--");
 		arguments.Add(_path.WeakString);
 	}
@@ -89,40 +61,4 @@ internal sealed class GitRestoreBuilder(IGitProcessRunner runner, AbsoluteDirect
 	/// <inheritdoc />
 	protected override GitCompleted ParseResult(GitProcessResult result) =>
 		new() { Arguments = Ensure.NotNull(result).Arguments };
-
-	/// <inheritdoc />
-	public override async Task<GitCompleted> ExecuteAsync(CancellationToken cancellationToken = default)
-	{
-		await ProbeVersionAsync(cancellationToken).ConfigureAwait(false);
-
-		return await base.ExecuteAsync(cancellationToken).ConfigureAwait(false);
-	}
-
-	/// <inheritdoc />
-	public override async Task<GitResult<GitCompleted>> TryExecuteAsync(CancellationToken cancellationToken = default)
-	{
-		await ProbeVersionAsync(cancellationToken).ConfigureAwait(false);
-
-		return await base.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
-	}
-
-	/// <summary>
-	/// Asks the installed git what version it is, so the vector can be built to suit.
-	/// </summary>
-	/// <remarks>
-	/// Goes through <see cref="IGitCommandBuilder{TResult}.TryExecuteAsync"/> rather than
-	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/>, and the same way regardless of which
-	/// of this builder's own two entry points is running: a failed probe means the version genuinely
-	/// could not be established, and falling back to <c>reset</c>, which every supported git
-	/// understands, is the safer default. Mirroring each caller's own strictness would make
-	/// <see cref="ExecuteAsync"/> throw a version exception for what is really a restore problem.
-	/// </remarks>
-	/// <param name="cancellationToken">A token to observe while probing.</param>
-	private async Task ProbeVersionAsync(CancellationToken cancellationToken)
-	{
-		GitResult<GitVersion> probe = await new GitVersionBuilder(Runner)
-			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
-
-		RestoreSupportedByVersion = probe.Success && probe.Value!.AtLeast(RestoreMajor, RestoreMinor);
-	}
 }

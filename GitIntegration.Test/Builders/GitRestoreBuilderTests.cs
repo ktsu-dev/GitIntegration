@@ -3,7 +3,6 @@
 namespace ktsu.GitIntegration.Test;
 
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
@@ -13,16 +12,17 @@ using ktsu.Semantics.Strings;
 public class GitRestoreBuilderTests
 {
 	[TestMethod]
-	public void BuildsTheRestoreVectorOnAModernGit()
+	public void BuildsTheResetVector()
 	{
+		// reset rather than restore --staged: restore reads the index back from HEAD and dies with
+		// "could not resolve HEAD" before the first commit, where reset leaves the file untracked.
 		RecordingGitProcessRunner runner = new();
 		GitRestoreBuilder builder = new(runner, TestPaths.Root, "f.txt".As<RelativeFilePath>());
 
-		IReadOnlyList<string> arguments = builder.BuildArguments();
+		string[] arguments = [.. builder.BuildArguments()];
 
-		Assert.IsTrue(arguments.Contains("restore"));
-		Assert.IsTrue(arguments.Contains("--staged"));
-		Assert.IsTrue(arguments.Contains("f.txt"));
+		Assert.AreSequenceEqual(["reset", "-q", "--", "f.txt"], arguments[^4..]);
+		Assert.IsFalse(arguments.Contains("restore"));
 	}
 
 	[TestMethod]
@@ -33,13 +33,10 @@ public class GitRestoreBuilderTests
 
 		string[] arguments = [.. builder.BuildArguments()];
 
-		Assert.AreSequenceEqual(
-			["restore", "--staged", "--", "f.txt"],
-			arguments[^4..],
-			"--end-of-options arrived in git 2.24, one release after restore, so the very versions this builder's reset fallback serves would read it as a pathspec and fail.");
+		Assert.AreEqual("--", arguments[^2]);
 		Assert.IsFalse(
 			arguments.Contains("--end-of-options"),
-			"--end-of-options arrived in git 2.24, one release after restore, so the very versions this builder's reset fallback serves would read it as a pathspec and fail.");
+			"A bare -- protects a dash-leading path on every git, while --end-of-options needs 2.24.");
 	}
 
 	[TestMethod]
@@ -52,35 +49,18 @@ public class GitRestoreBuilderTests
 	}
 
 	[TestMethod]
-	public async Task FallsBackToResetOnAGitOlderThanRestoreAsync()
+	public async Task RunsOneCommandWithNoVersionProbeAsync()
 	{
-		// git restore arrived in 2.23. Below that, unstaging goes through reset HEAD instead, which
-		// every supported git understands.
+		// reset behaves the same on every supported git, so nothing needs to ask which one is
+		// installed first.
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
-			.Then(standardOutput: "git version 2.22.0\n")
 			.Then(standardOutput: string.Empty);
 		GitRestoreBuilder builder = new(runner, TestPaths.Root, "f.txt".As<RelativeFilePath>());
 
 		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
 
-		string[] arguments = [.. runner.Invocations[1]];
-		Assert.AreSequenceEqual(["reset", "HEAD", "--", "f.txt"], arguments[^4..]);
-	}
-
-	[TestMethod]
-	public async Task TreatsExactlyTwoTwentyThreeAsSupportedAsync()
-	{
-		// The documented floor, asserted exactly: an off-by-one here silently falls back to reset
-		// for every user on the first version that supports restore.
-		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
-			.Then(standardOutput: "git version 2.23.0\n")
-			.Then(standardOutput: string.Empty);
-		GitRestoreBuilder builder = new(runner, TestPaths.Root, "f.txt".As<RelativeFilePath>());
-
-		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
-
-		string[] arguments = [.. runner.Invocations[1]];
-		Assert.AreSequenceEqual(["restore", "--staged", "--", "f.txt"], arguments[^4..]);
+		string[] invocation = [.. Assert.ContainsSingle(runner.Invocations)];
+		Assert.AreSequenceEqual(["reset", "-q", "--", "f.txt"], invocation[^4..]);
 	}
 
 	public TestContext TestContext { get; set; } = null!;
