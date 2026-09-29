@@ -28,6 +28,7 @@ public class GitPatchBuilderTests
 			"--no-color",
 			"--src-prefix=a/",
 			"--dst-prefix=b/",
+			"--submodule=short",
 			"-U3",
 			"--no-renames",
 		];
