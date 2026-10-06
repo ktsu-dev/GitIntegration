@@ -29,6 +29,7 @@ public class GitLogBuilderTests
 			"-c", "core.quotepath=false",
 			"-c", "color.ui=false",
 			"log",
+			"--no-show-signature",
 			"-z",
 			ExpectedFormat,
 		];

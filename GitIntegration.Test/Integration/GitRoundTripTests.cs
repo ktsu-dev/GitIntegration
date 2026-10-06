@@ -112,6 +112,58 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task LogAndCommitIgnoreTheHostsShowSignatureSettingAsync()
+	{
+		// log.showSignature is common among people who sign commits, and with it git prints each signed
+		// commit's verification ahead of the record, custom --format or not. The signature here is
+		// forged rather than made, so the test needs no key: git still hands it to gpg and prints what
+		// gpg says about it, which is all it takes to put text where the parser expects a commit id.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IGitProcessRunner runner = repository.ProcessRunner!;
+		string unsigned = await new GitTextBuilder(runner, repository.LocalPath, "cat-file", "commit", "HEAD")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// The header block ends at the first blank line; gpgsig goes last in it, as git writes it.
+		int headerEnd = unsigned.IndexOf("\n\n", StringComparison.Ordinal);
+		string signed = unsigned[..headerEnd] +
+			"\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEAAAAAAAAAAAAAAAAAAAAAAAAAAAFAmYAAAAACgkQAAAAAAAAAAAA\n" +
+			" =AAAA\n -----END PGP SIGNATURE-----" +
+			unsigned[headerEnd..] + "\n";
+
+		// Written inside .git so the forged object never shows up as working-tree content.
+		temporary.WriteFile(".git/forged-commit", signed);
+		string forgedSha = await new GitTextBuilder(
+			runner, repository.LocalPath, "hash-object", "-t", "commit", "-w", ".git/forged-commit")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "update-ref", "HEAD", forgedSha)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "config", "log.showSignature", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> history = await repository.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, history.Count);
+		Assert.AreEqual(forgedSha, history[0].Sha.WeakString);
+
+		temporary.WriteFile("b.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit second = await repository.Commit("c2".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual("c2", second.Subject);
+		Assert.AreEqual(forgedSha, second.ParentShas.Single().WeakString);
+	}
+
+	[TestMethod]
 	public async Task CommittingWithNothingStagedThrowsTheDedicatedExceptionAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

@@ -159,6 +159,11 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 		Ensure.NotNull(arguments);
 
 		arguments.Add("log");
+
+		// log.showSignature makes git print each commit's signature check to standard output ahead of
+		// the record, custom --format or not, which the parser would read as part of the commit id.
+		// Commit() reuses this vector for its read-back, so the same flag keeps it working too.
+		arguments.Add("--no-show-signature");
 		arguments.Add("-z");
 		arguments.Add("--format=" + GitOutputFormats.LogFormat);
 
