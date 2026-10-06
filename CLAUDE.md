@@ -357,6 +357,12 @@ Non-obvious, load-bearing design points:
     leaving a host-configurable default unspecified. `WithUntrackedFiles(...)` replaces the default
     rather than joining it, so the vector never carries two `--untracked-files` values.
 
+15. **`Log()` passes `--no-show-signature`.** With `log.showSignature=true`, which is common among
+    people who sign commits, git prints each signed commit's verification to standard output ahead
+    of the record even under a custom `--format`, and the parser reads it as part of the commit id.
+    `Commit()` reuses the `Log()` vector for its read-back, so without the flag a signed commit that
+    git did make is reported to the caller as a failure, and a retry makes a duplicate.
+
 **Hosting layer.** `GitProvider` is an abstract base with two implementations: `GitHubProvider` over
 Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
 library uses (see the dependency note below). Both go through the same shape: every request-issuing

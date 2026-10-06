@@ -154,6 +154,21 @@ public class GitCommitBuilderTests
 	}
 
 	[TestMethod]
+	public async Task TheReadBackSuppressesSignatureOutputAsync()
+	{
+		// With log.showSignature=true git prints the new commit's signature check ahead of the record,
+		// so a signed commit that git made would be reported to the caller as a failure.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "[main 9429d20] subject here\n")
+			.Then(standardOutput: ReadBack);
+		GitCommitBuilder builder = new(runner, TestPaths.Root, Message);
+
+		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		CollectionAssert.Contains(runner.Invocations[1].ToArray(), "--no-show-signature");
+	}
+
+	[TestMethod]
 	public async Task ThrowsNothingToCommitWhenTheTreeIsCleanAsync()
 	{
 		// Captured from git 2.50: the message is on STANDARD OUTPUT with stderr empty, and the exit
