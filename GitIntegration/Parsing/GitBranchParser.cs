@@ -62,7 +62,7 @@ internal static class GitBranchParser
 				Name = GitParseValues.ToSemantic<GitBranchName>(fields[1], "branch name"),
 				Sha = GitParseValues.ToSemantic<GitCommitSha>(fields[2], "branch object id"),
 
-				// %(upstream:short) is empty when the branch tracks nothing.
+				// %(upstream:lstrip=2) is empty when the branch tracks nothing.
 				Upstream = fields[3].Length == 0
 					? null
 					: GitParseValues.ToSemantic<GitBranchName>(fields[3], "upstream branch name"),

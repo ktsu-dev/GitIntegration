@@ -35,8 +35,8 @@ internal static class GitOutputFormats
 	internal const string LogFormat = "%H%x1f%T%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%s%x1f%b";
 
 	/// <summary>
-	/// The <c>for-each-ref</c> format: full reference name, short name, object id, upstream, and
-	/// the current-branch marker.
+	/// The <c>for-each-ref</c> format: full reference name, name, object id, upstream, and the
+	/// current-branch marker.
 	/// </summary>
 	/// <remarks>
 	/// The full reference name leads, and is the reason this format differs from the one sketched
@@ -46,12 +46,19 @@ internal static class GitOutputFormats
 	/// and would otherwise be reported as a branch called <c>origin</c>. <c>%1f</c> is
 	/// <c>for-each-ref</c>'s own hex escape, which differs in spelling from <c>log</c>'s
 	/// <c>%x1f</c> but means the same byte.
+	/// <para>
+	/// Names come from <c>:lstrip=2</c>, never <c>:short</c>. <c>:short</c> keeps part of the prefix
+	/// whenever the shortest name would be ambiguous, so a branch and a tag both called <c>v1</c>
+	/// come back as <c>heads/v1</c> and <c>tags/v1</c>, names git itself then refuses. Stripping
+	/// <c>refs/heads/</c>, <c>refs/remotes/</c> or <c>refs/tags/</c> outright always yields the name
+	/// the reference was created with.
+	/// </para>
 	/// </remarks>
 	internal const string ForEachRefFormat =
-		"%(refname)%1f%(refname:short)%1f%(objectname)%1f%(upstream:short)%1f%(HEAD)";
+		"%(refname)%1f%(refname:lstrip=2)%1f%(objectname)%1f%(upstream:lstrip=2)%1f%(HEAD)";
 
 	/// <summary>
-	/// The <c>for-each-ref</c> format for tags: short name, the reference's own object id, the
+	/// The <c>for-each-ref</c> format for tags: name, the reference's own object id, the
 	/// object type, the dereferenced object id, and the message subject.
 	/// </summary>
 	/// <remarks>
@@ -76,7 +83,11 @@ internal static class GitOutputFormats
 	/// tagger's words. <see cref="GitTagParser"/> gates it on the object type for that reason.
 	/// Verified against git 2.43.
 	/// </para>
+	/// <para>
+	/// The name is <c>:lstrip=2</c> rather than <c>:short</c> for the reason
+	/// <see cref="ForEachRefFormat"/> gives.
+	/// </para>
 	/// </remarks>
 	internal const string ForEachTagFormat =
-		"%(refname:short)%1f%(objectname)%1f%(objecttype)%1f%(*objectname)%1f%(contents:subject)";
+		"%(refname:lstrip=2)%1f%(objectname)%1f%(objecttype)%1f%(*objectname)%1f%(contents:subject)";
 }

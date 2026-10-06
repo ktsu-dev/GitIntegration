@@ -8,7 +8,7 @@ using System.Collections.Generic;
 public class GitBranchListBuilderTests
 {
 	private const string ExpectedFormat =
-		"--format=%(refname)%1f%(refname:short)%1f%(objectname)%1f%(upstream:short)%1f%(HEAD)";
+		"--format=%(refname)%1f%(refname:lstrip=2)%1f%(objectname)%1f%(upstream:lstrip=2)%1f%(HEAD)";
 
 	[TestMethod]
 	public void BuildsTheDefaultBranchListVector()
