@@ -98,12 +98,12 @@ public class GitRoundTripTests
 		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
 		IGitProcessRunner runner = repository.ProcessRunner!;
 
-		string gitDir = Path.Combine(separateGitDir.Root.WeakString, "sg");
+		string gitDir = Path.Join(separateGitDir.RootPath, "sg");
 		_ = await new GitTextBuilder(runner, temporary.Root, "init", "--separate-git-dir", gitDir, "s")
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		GitInitResult init = await IntegrationGitFixture.CreateClient()
-			.Init(Path.Combine(temporary.Root.WeakString, "s").As<AbsoluteDirectoryPath>())
+			.Init(Path.Join(temporary.RootPath, "s").As<AbsoluteDirectoryPath>())
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.IsTrue(init.AlreadyExisted);
@@ -123,7 +123,7 @@ public class GitRoundTripTests
 		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		string worktree = Path.Combine(worktreeParent.Root.WeakString, "wt");
+		string worktree = Path.Join(worktreeParent.RootPath, "wt");
 		_ = await new GitTextBuilder(repository.ProcessRunner!, repository.LocalPath, "worktree", "add", worktree)
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
@@ -146,7 +146,7 @@ public class GitRoundTripTests
 		temporary.WriteFile("sub/a.txt", "one\n");
 
 		GitInitResult init = await IntegrationGitFixture.CreateClient()
-			.Init(Path.Combine(temporary.Root.WeakString, "sub").As<AbsoluteDirectoryPath>())
+			.Init(Path.Join(temporary.RootPath, "sub").As<AbsoluteDirectoryPath>())
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.IsFalse(init.AlreadyExisted);
