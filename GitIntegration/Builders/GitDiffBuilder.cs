@@ -36,10 +36,18 @@ public interface IGitDiffBuilder : IGitCommandBuilder<IReadOnlyList<GitDiffEntry
 	public IGitDiffBuilder Between(GitRefName fromRevision, GitRefName toRevision);
 
 	/// <summary>Reports a delete and an add of similar content as a rename.</summary>
+	/// <remarks>
+	/// Detection is off until this or <see cref="DetectCopies"/> is called, whatever
+	/// <c>diff.renames</c> the host has configured.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitDiffBuilder DetectRenames();
 
 	/// <summary>Reports an add whose content came from an existing file as a copy.</summary>
+	/// <remarks>
+	/// Copies are not reported until this is called, whatever <c>diff.renames</c> the host has
+	/// configured.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitDiffBuilder DetectCopies();
 
@@ -172,6 +180,9 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			arguments.Add("--cached");
 		}
 
+		// Git has defaulted diff.renames to true since 2.9, so leaving detection unspecified hands the
+		// choice to the host's config: DetectRenames() becomes a no-op, diff.renames=copies reports
+		// copies nobody asked for, and Diff() disagrees with Patch(), which pins this the same way.
 		if (_detectRenames)
 		{
 			arguments.Add("--find-renames");
@@ -180,6 +191,11 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		if (_detectCopies)
 		{
 			arguments.Add("--find-copies");
+		}
+
+		if (!_detectRenames && !_detectCopies)
+		{
+			arguments.Add("--no-renames");
 		}
 
 		if (_revisions.Length > 0)

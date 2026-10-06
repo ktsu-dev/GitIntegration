@@ -275,6 +275,49 @@ public class GitPatchRoundTripTests
 	}
 
 	[TestMethod]
+	[DataRow("true")]
+	[DataRow("false")]
+	[DataRow("copies")]
+	public async Task DiffReportsAStagedRenameAsPatchDoesWhateverTheHostsDiffRenamesAsync(string diffRenames)
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		GitRepository seeded = await SeedAsync(client, repository, [("diff.renames", diffRenames)]).ConfigureAwait(false);
+
+		repository.WriteFile("old.txt", "one\ntwo\nthree\nfour\nfive\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		repository.DeleteFile("old.txt");
+		repository.WriteFile("new.txt", "one\ntwo\nthree\nfour\nfive\n");
+		_ = await seeded.Add().All().ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+
+		// Without DetectRenames, Diff() must agree with Patch(): a delete and an add, never a rename or
+		// a copy — a staging UI pairs the file list from one with the hunks from the other.
+		IReadOnlyList<GitDiffEntry> plain = await opened.Diff().Staged().ExecuteAsync().ConfigureAwait(false);
+		GitPatch patch = await opened.Patch().Staged().ExecuteAsync().ConfigureAwait(false);
+
+		CollectionAssert.AreEquivalent(
+			patch.Files.Select(file => (file.Kind, file.Path.WeakString)).ToArray(),
+			plain.Select(entry => (entry.Kind, entry.Path.WeakString)).ToArray(),
+			$"Diff() and Patch() disagree with diff.renames={diffRenames}.");
+		CollectionAssert.AreEquivalent(
+			new[] { GitChangeKind.Added, GitChangeKind.Deleted },
+			plain.Select(entry => entry.Kind).ToArray());
+
+		IReadOnlyList<GitDiffEntry> detected =
+			await opened.Diff().Staged().DetectRenames().ExecuteAsync().ConfigureAwait(false);
+		GitDiffEntry renamed = detected.Single();
+
+		Assert.AreEqual(GitChangeKind.Renamed, renamed.Kind);
+		Assert.AreEqual("old.txt", renamed.OriginalPath?.WeakString);
+	}
+
+	[TestMethod]
 	public async Task ReportsAStagedRenameAsDeleteAndAddUnlessRequestedAsync()
 	{
 		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
