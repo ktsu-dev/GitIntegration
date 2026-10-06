@@ -383,6 +383,81 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task BranchAndTagSharingANameAreBothReportedByThatNameAsync()
+	{
+		// A release branch and a release tag both called v1 make the short name ambiguous, and
+		// %(refname:short) then keeps part of the prefix: heads/v1 and tags/v1, which git itself
+		// refuses when they are passed back.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.CreateBranch("v1".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateTag("v1".As<GitTagName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> branches =
+			await repository.Branches().LocalOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(2, branches.Count);
+		Assert.IsTrue(branches.Any(static branch => branch.Name.WeakString == "main"));
+		Assert.IsTrue(branches.Any(static branch => branch.Name.WeakString == "v1"));
+
+		IReadOnlyList<GitTag> tags = await repository.Tags().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual("v1", tags.Single().Name.WeakString);
+
+		// The reported names are usable: deleting by them succeeds.
+		_ = await repository.DeleteBranch(branches.Single(static branch => branch.Name.WeakString == "v1").Name)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.DeleteTag(tags.Single().Name).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task LocalBranchNamedLikeARemoteBranchLeavesTheRemoteNameAndUpstreamIntactAsync()
+	{
+		// A local branch called origin/main makes refs/remotes/origin/main shorten to
+		// remotes/origin/main, which used to leak into both the remote branch's name and the
+		// upstream of every branch tracking it.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// The remote is never contacted; git only needs its fetch refspec to resolve the upstream.
+		IGitProcessRunner runner = repository.ProcessRunner!;
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "remote", "add", "origin", "https://example.invalid/r.git")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "update-ref", "refs/remotes/origin/main", "HEAD")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "config", "branch.main.remote", "origin")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "config", "branch.main.merge", "refs/heads/main")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateBranch("origin/main".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> branches =
+			await repository.Branches().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitBranch remote = branches.Single(static branch => branch.IsRemote);
+		Assert.AreEqual("origin/main", remote.Name.WeakString);
+
+		GitBranch local = branches.Single(static branch => !branch.IsRemote && branch.Name.WeakString == "origin/main");
+		Assert.IsFalse(local.IsCurrent);
+
+		GitBranch main = branches.Single(static branch => branch.Name.WeakString == "main");
+		Assert.AreEqual("origin/main", main.Upstream?.WeakString);
+	}
+
+	[TestMethod]
 	public async Task CheckoutResolvesATagRatherThanAFileOfTheSameNameAsync()
 	{
 		// Checkout emits a trailing "--" rather than a leading --end-of-options, and this is the
