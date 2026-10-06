@@ -1,7 +1,8 @@
-## v4.1.4 (patch)
+## v4.1.5 (patch)
 
-Changes since v4.1.3:
+Changes since v4.1.4:
 
-- Pass --no-renames from Diff unless detection is requested, matching Patch [patch] ([@Claude](https://github.com/Claude))
-- Pass --no-show-signature so Log and Commit survive log.showSignature [patch] ([@Claude](https://github.com/Claude))
+- Build test paths with Path.Join, as the other integration tests do ([@Claude](https://github.com/Claude))
+- Report AlreadyExisted for a submodule, worktree or separate-git-dir target [patch] ([@Claude](https://github.com/Claude))
+- Report branch and tag names unprefixed when a branch and tag share a name [patch] ([@Claude](https://github.com/Claude))
 
