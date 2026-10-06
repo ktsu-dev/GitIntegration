@@ -29,6 +29,7 @@ public class GitDiffBuilderTests
 			"diff",
 			"--name-status",
 			"-z",
+			"--no-renames",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
 	}
@@ -45,6 +46,24 @@ public class GitDiffBuilderTests
 		CollectionAssert.Contains(arguments, "--cached");
 		CollectionAssert.Contains(arguments, "--find-renames");
 		CollectionAssert.Contains(arguments, "--find-copies");
+	}
+
+	[TestMethod]
+	public void TurnsRenameDetectionOffUnlessRequested()
+	{
+		// Git defaults diff.renames to true, so the vector has to say "off" rather than say nothing.
+		string[] plain = [.. new GitDiffBuilder(new RecordingGitProcessRunner(), TestPaths.Root).BuildArguments()];
+		CollectionAssert.Contains(plain, "--no-renames");
+		CollectionAssert.DoesNotContain(plain, "--find-renames");
+		CollectionAssert.DoesNotContain(plain, "--find-copies");
+
+		GitDiffBuilder renames = new(new RecordingGitProcessRunner(), TestPaths.Root);
+		_ = renames.DetectRenames();
+		CollectionAssert.DoesNotContain(renames.BuildArguments().ToArray(), "--no-renames");
+
+		GitDiffBuilder copies = new(new RecordingGitProcessRunner(), TestPaths.Root);
+		_ = copies.DetectCopies();
+		CollectionAssert.DoesNotContain(copies.BuildArguments().ToArray(), "--no-renames");
 	}
 
 	[TestMethod]
