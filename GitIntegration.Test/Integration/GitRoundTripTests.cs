@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -82,6 +83,73 @@ public class GitRoundTripTests
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.IsTrue(second.AlreadyExisted);
+	}
+
+	[TestMethod]
+	public async Task InitReportsASeparateGitDirRepositoryAsAlreadyExistingAsync()
+	{
+		// The target's .git is a file pointing at a git directory elsewhere, so --git-dir prints an
+		// absolute path, as it does for an ancestor; git re-initializes it all the same.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		using TemporaryRepository separateGitDir = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+		IGitProcessRunner runner = repository.ProcessRunner!;
+
+		string gitDir = Path.Join(separateGitDir.RootPath, "sg");
+		_ = await new GitTextBuilder(runner, temporary.Root, "init", "--separate-git-dir", gitDir, "s")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
+			.Init(Path.Join(temporary.RootPath, "s").As<AbsoluteDirectoryPath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsTrue(init.AlreadyExisted);
+	}
+
+	[TestMethod]
+	public async Task InitReportsALinkedWorktreeAsAlreadyExistingAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		using TemporaryRepository worktreeParent = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		string worktree = Path.Join(worktreeParent.RootPath, "wt");
+		_ = await new GitTextBuilder(repository.ProcessRunner!, repository.LocalPath, "worktree", "add", worktree)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
+			.Init(worktree.As<AbsoluteDirectoryPath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsTrue(init.AlreadyExisted);
+	}
+
+	[TestMethod]
+	public async Task InitReportsASubdirectoryOfARepositoryAsFreshAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		_ = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("sub/a.txt", "one\n");
+
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
+			.Init(Path.Join(temporary.RootPath, "sub").As<AbsoluteDirectoryPath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsFalse(init.AlreadyExisted);
 	}
 
 	[TestMethod]

@@ -210,7 +210,10 @@ Non-obvious, load-bearing design points:
 4. **`Init` probes before running, so `GitInitResult.AlreadyExisted` can tell a caller whether a
    repository was already there.** `git init` is idempotent and announces the difference only in
    prose, and it silently ignores `--initial-branch` when re-initialising — the probe (a
-   `rev-parse --git-dir` check) is the only way to know either fact.
+   `rev-parse --is-bare-repository --git-dir --show-cdup` check) is the only way to know either
+   fact. `--git-dir` alone is not enough: it prints an absolute path both for an ancestor
+   repository and for a submodule, linked worktree or `--separate-git-dir` repository rooted at the
+   target, and only the empty `--show-cdup` tells the second apart.
 
 5. **`Clone`'s destination check is advisory.** Git enforces the same rule itself; the pre-check
    exists only so a doomed clone fails before paying its network cost, and it is deliberately racy —

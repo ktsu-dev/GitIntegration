@@ -129,21 +129,62 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 
 	private async Task<bool> ProbeAsync(CancellationToken cancellationToken)
 	{
-		// Asks "is there a repository at exactly this path", via --git-dir, deliberately not via
+		// Asks "is there a repository at exactly this path", deliberately not via
 		// GitProbes.IsWorkTreeAsync's --is-inside-work-tree: that answers a different question,
 		// whether the path is inside *some* working tree. That wrongly reports AlreadyExisted =
 		// true for a plain subdirectory of an existing repository (git init there creates a
 		// nested repository), and wrongly reports AlreadyExisted = false for an existing bare
-		// repository (git init there only prints a re-init warning). --git-dir discriminates all
-		// four cases: ".git" (a non-bare repository at exactly this path), "." (a bare repository
-		// at exactly this path), an absolute path (a repository exists, but as an ancestor, not
-		// here), or a non-zero exit (no repository, or the directory does not exist).
+		// repository (git init there only prints a re-init warning).
 		//
 		// TryExecuteAsync, because failure is the expected answer: the directory may hold no
 		// repository, or may not exist at all, and both exit 128 and both mean "not yet".
-		GitResult<string> probe = await new GitTextBuilder(Runner, _targetPath, "rev-parse", "--git-dir")
+		GitResult<string> probe = await new GitTextBuilder(
+			Runner, _targetPath, "rev-parse", "--is-bare-repository", "--git-dir", "--show-cdup")
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		return probe.Success && probe.Value is ".git" or ".";
+		return probe.Success && probe.Value is not null && IsRepositoryRoot(probe.Value);
+	}
+
+	/// <summary>
+	/// Reads the probe's answer: whether the repository git found is rooted at the target itself.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// <c>--git-dir</c> alone cannot tell. It prints <c>.git</c> for an ordinary repository at the
+	/// target and <c>.</c> for a bare one, but an absolute path both for a repository rooted above
+	/// the target and for one at the target whose <c>.git</c> is a file pointing elsewhere — a
+	/// submodule, a linked worktree, or a <c>--separate-git-dir</c> repository. git re-initializes
+	/// the latter, so it is the working-tree root, not the git directory, that decides.
+	/// </para>
+	/// <para>
+	/// <c>--show-cdup</c> gives that root relative to the target: empty at the root, <c>../</c>
+	/// and so on below it. It prints nothing at all outside a working tree, and the output is
+	/// trimmed, so a missing line and an empty one read the same; the bare check comes first
+	/// because a subdirectory of a bare repository is the one place that difference would matter.
+	/// </para>
+	/// </remarks>
+	/// <param name="output">The trimmed output of the probe.</param>
+	/// <returns><see langword="true"/> when a repository already exists at the target.</returns>
+	internal static bool IsRepositoryRoot(string output)
+	{
+		string[] lines = Ensure.NotNull(output).Split('\n');
+
+		if (lines.Length < 2)
+		{
+			return false;
+		}
+
+		// "." is the target itself being a git directory: a bare repository, or a .git directory.
+		if (string.Equals(lines[1].TrimEnd('\r'), ".", StringComparison.Ordinal))
+		{
+			return true;
+		}
+
+		if (string.Equals(lines[0].TrimEnd('\r'), "true", StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		return lines.Length < 3 || lines[2].TrimEnd('\r').Length == 0;
 	}
 }
