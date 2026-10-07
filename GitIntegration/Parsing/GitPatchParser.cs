@@ -22,6 +22,8 @@ internal static class GitPatchParser
 {
 	private const string GitHeaderPrefix = "diff --git ";
 	private const string CombinedHeaderPrefix = "diff --cc ";
+	private const string LongCombinedHeaderPrefix = "diff --combined ";
+	private const string UnmergedPathPrefix = "* Unmerged path ";
 	private const string BSidePathMarker = " b/";
 	private const string RenameFromPrefix = "rename from ";
 	private const string RenameToPrefix = "rename to ";
@@ -36,7 +38,10 @@ internal static class GitPatchParser
 	/// Parses the text a diff-producing command wrote to standard output.
 	/// </summary>
 	/// <param name="output">Everything git wrote to standard output.</param>
-	/// <returns>The patch, with one file per <c>diff --git</c> or <c>diff --cc</c> block found.</returns>
+	/// <returns>
+	/// The patch, with one file per <c>diff --git</c>, <c>diff --cc</c> or <c>diff --combined</c>
+	/// block found, and one per <c>* Unmerged path</c> line.
+	/// </returns>
 	/// <exception cref="GitParseException">A header or a hunk was malformed.</exception>
 	public static GitPatch Parse(string output)
 	{
@@ -48,7 +53,19 @@ internal static class GitPatchParser
 		int index = 0;
 		while (index < lines.Count)
 		{
-			if (!IsFileStart(Line(output, lines, index)))
+			string line = Line(output, lines, index);
+
+			if (line.StartsWith(UnmergedPathPrefix, StringComparison.Ordinal))
+			{
+				// A modify/delete conflict has no content to diff, so git names the path on this
+				// one line instead of starting a file block for it. Diff() reports the same path
+				// as Unmerged, and leaving it out here would hide the conflict entirely.
+				files.Add(UnmergedPath(output, lines, index, line));
+				index++;
+				continue;
+			}
+
+			if (!IsFileStart(line))
 			{
 				index++;
 				continue;
@@ -105,7 +122,23 @@ internal static class GitPatchParser
 
 	private static bool IsFileStart(string line) =>
 		line.StartsWith(GitHeaderPrefix, StringComparison.Ordinal) ||
-		line.StartsWith(CombinedHeaderPrefix, StringComparison.Ordinal);
+		IsCombinedStart(line);
+
+	private static bool IsCombinedStart(string line) =>
+		line.StartsWith(CombinedHeaderPrefix, StringComparison.Ordinal) ||
+		line.StartsWith(LongCombinedHeaderPrefix, StringComparison.Ordinal);
+
+	private static GitFilePatch UnmergedPath(string output, List<(int Start, int End)> lines, int index, string line) =>
+		new()
+		{
+			Path = GitParseValues.ToRelativeFilePath(UnquotePath(line[UnmergedPathPrefix.Length..], line)),
+			OriginalPath = null,
+			Kind = GitChangeKind.Unmerged,
+			IsBinary = false,
+			IsConflicted = true,
+			Header = output[lines[index].Start..RegionEnd(output, lines, index + 1)],
+			Hunks = [],
+		};
 
 	private static GitFilePatch ParseFile(string output, List<(int Start, int End)> lines, ref int index)
 	{
@@ -116,7 +149,11 @@ internal static class GitPatchParser
 		RelativeFilePath? originalPath = null;
 		GitChangeKind kind = GitChangeKind.Modified;
 		bool isBinary = false;
-		bool isConflicted = false;
+
+		// Git writes the combined format only for an unmerged path, and only some of those carry
+		// a @@@ line: a conflicted binary file stops at "Binary files differ". The header alone
+		// decides, so every such path reports the Unmerged that GitDiffParser gives it.
+		bool isConflicted = IsCombinedStart(firstLine);
 
 		index++;
 
@@ -125,6 +162,7 @@ internal static class GitPatchParser
 			string line = Line(output, lines, index);
 
 			if (IsFileStart(line) ||
+				line.StartsWith(UnmergedPathPrefix, StringComparison.Ordinal) ||
 				line.StartsWith(ConflictHunkPrefix, StringComparison.Ordinal) ||
 				line.StartsWith(HunkPrefix, StringComparison.Ordinal))
 			{
@@ -135,6 +173,13 @@ internal static class GitPatchParser
 			index++;
 		}
 
+		// Set after the header lines, so that a mode line in a combined header cannot report an
+		// unmerged path as Added or Deleted.
+		if (isConflicted)
+		{
+			kind = GitChangeKind.Unmerged;
+		}
+
 		string header = output[fileStart..RegionEnd(output, lines, index)];
 		List<GitHunk> hunks = [];
 
@@ -142,17 +187,14 @@ internal static class GitPatchParser
 		{
 			string boundary = Line(output, lines, index);
 
-			if (boundary.StartsWith(ConflictHunkPrefix, StringComparison.Ordinal))
+			if (isConflicted)
 			{
 				// Combined format from an unmerged path is not a patch git apply accepts, so its
 				// body is skipped rather than misread as ordinary hunks. Kind follows the same
 				// enum member GitDiffParser reports for the path, so a caller switching on
 				// GitChangeKind gets one answer from both verbs.
-				isConflicted = true;
-				kind = GitChangeKind.Unmerged;
-				index++;
-
-				while (index < lines.Count && !IsFileStart(Line(output, lines, index)))
+				while (index < lines.Count && !IsFileStart(Line(output, lines, index)) &&
+					!Line(output, lines, index).StartsWith(UnmergedPathPrefix, StringComparison.Ordinal))
 				{
 					index++;
 				}
@@ -200,6 +242,11 @@ internal static class GitPatchParser
 		if (line.StartsWith(CombinedHeaderPrefix, StringComparison.Ordinal))
 		{
 			return UnquotePath(line[CombinedHeaderPrefix.Length..], line);
+		}
+
+		if (line.StartsWith(LongCombinedHeaderPrefix, StringComparison.Ordinal))
+		{
+			return UnquotePath(line[LongCombinedHeaderPrefix.Length..], line);
 		}
 
 		string remainder = line[GitHeaderPrefix.Length..];

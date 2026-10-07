@@ -20,6 +20,7 @@ public class GitPatchRoundTripTests
 {
 	private static readonly GitAuthorName AuthorName = "Fixture Author".As<GitAuthorName>();
 	private static readonly GitAuthorEmail AuthorEmail = "fixture@example.com".As<GitAuthorEmail>();
+	private static readonly string[] ExpectedUnmergedPaths = ["bin.dat", "d.txt"];
 
 	[TestMethod]
 	public async Task StagingOneHunkLeavesTheOtherUnstagedAsync()
@@ -421,6 +422,70 @@ public class GitPatchRoundTripTests
 		}
 
 		return init.Repository;
+	}
+
+	[TestMethod]
+	public async Task PatchAndDiffAgreeOnUnmergedPathsAfterABinaryAndAModifyDeleteConflictAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+		GitRepository seeded = await SeedAsync(client, repository, []).ConfigureAwait(false);
+
+		// Both sides change bin.dat, which git cannot merge as text, and one side deletes d.txt
+		// while the other modifies it. Neither conflict produces a @@@ hunk.
+		repository.WriteFile("bin.dat", "\0\u0001base");
+		repository.WriteFile("d.txt", "1\n2\n3\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		await RunGitAsync(seeded, "checkout", "-q", "-b", "other").ConfigureAwait(false);
+		repository.WriteFile("bin.dat", "\0\u0001other");
+		repository.WriteFile("d.txt", "1\n2\n3\n4\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		await RunGitAsync(seeded, "checkout", "-q", "main").ConfigureAwait(false);
+		repository.WriteFile("bin.dat", "\0\u0001main");
+		repository.DeleteFile("d.txt");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		// merge is out of scope for this library, so the fixture runs it directly. It is expected
+		// to fail, leaving both paths unmerged.
+		GitProcessResult merged = await seeded.ProcessRunner!.RunAsync(
+			new GitProcessRequest { Arguments = ["-C", repository.RootPath, "merge", "--no-edit", "other"] },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsFalse(merged.Success, "the merge was expected to conflict but succeeded");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> diff = await opened.Diff().ExecuteAsync().ConfigureAwait(false);
+		GitPatch patch = await opened.Patch().ExecuteAsync().ConfigureAwait(false);
+
+		string[] diffUnmerged = [.. diff
+			.Where(entry => entry.Kind == GitChangeKind.Unmerged)
+			.Select(entry => entry.Path.WeakString)
+			.Order(StringComparer.Ordinal)];
+		string[] patchUnmerged = [.. patch.Files
+			.Where(file => file.Kind == GitChangeKind.Unmerged && file.IsConflicted)
+			.Select(file => file.Path.WeakString)
+			.Order(StringComparer.Ordinal)];
+
+		CollectionAssert.AreEqual(ExpectedUnmergedPaths, diffUnmerged, "the fixture must leave both conflicts");
+		CollectionAssert.AreEqual(diffUnmerged, patchUnmerged);
+		Assert.IsTrue(patch.Files.All(file => file.Hunks.Count == 0));
+	}
+
+	/// <summary>Runs a git command this library has no verb for, failing the test if git fails.</summary>
+	/// <param name="repository">The repository to run in.</param>
+	/// <param name="arguments">The git arguments, after <c>-C &lt;root&gt;</c>.</param>
+	private async Task RunGitAsync(GitRepository repository, params string[] arguments)
+	{
+		GitProcessResult result = await repository.ProcessRunner!.RunAsync(
+			new GitProcessRequest { Arguments = ["-C", repository.LocalPath!.WeakString, .. arguments] },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(result.Success, $"git {string.Join(' ', arguments)} failed");
 	}
 
 	/// <summary>Stages everything in the working tree and commits it.</summary>

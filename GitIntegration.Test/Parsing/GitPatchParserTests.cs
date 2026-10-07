@@ -207,6 +207,40 @@ public class GitPatchParserTests
 	}
 
 	[TestMethod]
+	public void FlagsAConflictedBinaryFileAndAModifyDeleteConflict()
+	{
+		// Captured with git 2.43.0 on Linux after a merge left bin.dat changed on both sides (UU)
+		// and d.txt deleted on one side and modified on the other (DU). Neither has a @@@ line.
+		GitPatch patch = GitPatchParser.Parse(Fixture("patch-unmerged-binary-and-deleted.txt"));
+
+		Assert.AreEqual(2, patch.Files.Count);
+
+		GitFilePatch binary = patch.Files[0];
+		Assert.AreEqual("bin.dat", binary.Path.WeakString);
+		Assert.AreEqual(GitChangeKind.Unmerged, binary.Kind);
+		Assert.IsTrue(binary.IsConflicted);
+		Assert.AreEqual(0, binary.Hunks.Count);
+
+		GitFilePatch deleted = patch.Files[1];
+		Assert.AreEqual("d.txt", deleted.Path.WeakString);
+		Assert.AreEqual(GitChangeKind.Unmerged, deleted.Kind);
+		Assert.IsTrue(deleted.IsConflicted);
+		Assert.AreEqual(0, deleted.Hunks.Count);
+	}
+
+	[TestMethod]
+	public void FlagsALongFormCombinedHeaderAsConflicted()
+	{
+		const string output = "diff --combined f.txt\nindex 305b879,1ebef9c..0000000\nBinary files differ\n";
+
+		GitFilePatch file = GitPatchParser.Parse(output).Files.Single();
+
+		Assert.AreEqual("f.txt", file.Path.WeakString);
+		Assert.AreEqual(GitChangeKind.Unmerged, file.Kind);
+		Assert.IsTrue(file.IsConflicted);
+	}
+
+	[TestMethod]
 	public void ParsesCarriageReturnContentWithoutStrippingIt()
 	{
 		GitFilePatch file = GitPatchParser.Parse(Fixture("patch-crlf.txt")).Files.Single();

@@ -1,0 +1,4 @@
+diff --cc bin.dat
+index 1323b0a,012c31b..0000000
+Binary files differ
+* Unmerged path d.txt
