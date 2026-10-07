@@ -42,9 +42,20 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 	/// in this library — and every parser built on it — silently locale-dependent.
 	/// </para>
 	/// <para>
-	/// Both were impossible before <c>ktsu.RunCommand</c> 1.5.0, which added
-	/// <see cref="CommandOptions.EnvironmentVariables"/>. The entries are an overlay, so every
-	/// other variable the calling process had is inherited unchanged.
+	/// The <c>null</c> entries remove variables that would override the arguments this library
+	/// passes. <c>GIT_DIR</c>, <c>GIT_WORK_TREE</c>, <c>GIT_INDEX_FILE</c> and the other
+	/// repository-locating variables take priority over <c>-C</c>, and git exports them to hooks. A
+	/// tool that runs from a hook and opens a different repository would otherwise read, and write,
+	/// the hook's repository. <c>GIT_DIFF_OPTS</c> overrides the <c>-U</c> that <c>Patch()</c> always
+	/// passes, so it could produce zero-context hunks that <c>Apply</c> rejects
+	/// (ktsu-dev/GitIntegration#139). <c>GIT_EXTERNAL_DIFF</c> is already neutralised by
+	/// <c>--no-ext-diff</c>.
+	/// </para>
+	/// <para>
+	/// None of this was possible before <c>ktsu.RunCommand</c> 1.5.0, which added
+	/// <see cref="CommandOptions.EnvironmentVariables"/> and removes a variable whose value is
+	/// <c>null</c>. The entries are an overlay, so every other variable the calling process had is
+	/// inherited unchanged.
 	/// </para>
 	/// </remarks>
 	internal static IReadOnlyDictionary<string, string?> EnvironmentOverlay { get; } =
@@ -52,6 +63,15 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 		{
 			["GIT_TERMINAL_PROMPT"] = "0",
 			["LC_ALL"] = "C",
+			["GIT_DIR"] = null,
+			["GIT_WORK_TREE"] = null,
+			["GIT_INDEX_FILE"] = null,
+			["GIT_OBJECT_DIRECTORY"] = null,
+			["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = null,
+			["GIT_COMMON_DIR"] = null,
+			["GIT_NAMESPACE"] = null,
+			["GIT_PREFIX"] = null,
+			["GIT_DIFF_OPTS"] = null,
 		};
 
 	/// <inheritdoc />
