@@ -293,6 +293,24 @@ public class RunCommandGitProcessRunnerTests
 		Assert.AreEqual("C", RunCommandGitProcessRunner.EnvironmentOverlay["LC_ALL"]);
 	}
 
+	[TestMethod]
+	[DataRow("GIT_DIR")]
+	[DataRow("GIT_WORK_TREE")]
+	[DataRow("GIT_INDEX_FILE")]
+	[DataRow("GIT_OBJECT_DIRECTORY")]
+	[DataRow("GIT_ALTERNATE_OBJECT_DIRECTORIES")]
+	[DataRow("GIT_COMMON_DIR")]
+	[DataRow("GIT_NAMESPACE")]
+	[DataRow("GIT_PREFIX")]
+	[DataRow("GIT_DIFF_OPTS")]
+	public void EnvironmentOverlayRemovesVariablesThatOverrideTheArguments(string name)
+	{
+		// A null value makes ktsu.RunCommand remove the variable from the child's environment, so a
+		// value inherited from a git hook cannot beat -C or -U (ktsu-dev/GitIntegration#139).
+		Assert.IsTrue(RunCommandGitProcessRunner.EnvironmentOverlay.TryGetValue(name, out string? value));
+		Assert.IsNull(value);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 
 	/// <summary>An <see cref="IProgress{T}"/> that invokes its callback on the reporting thread.</summary>
