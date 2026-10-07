@@ -138,6 +138,11 @@ public sealed record GitFilePatch
 	/// another file would otherwise get a shorter patch than it asked for, or a header with no body
 	/// at all, and neither outcome says which hunk went missing.
 	/// </para>
+	/// <para>
+	/// For a renamed or copied file, the full header, rename lines included, is kept only when
+	/// every hunk is given. A subset is written as a plain modification of <see cref="Path"/>, so
+	/// that reverse-applying it to the index unstages only those hunks and leaves the rename staged.
+	/// </para>
 	/// </remarks>
 	/// <param name="hunks">The hunks to include.</param>
 	/// <returns>The patch text.</returns>
@@ -159,7 +164,12 @@ public sealed record GitFilePatch
 				nameof(hunks));
 		}
 
-		StringBuilder builder = new(Header);
+		// A renamed or copied file's header moves the path as well as carrying the hunks. Writing
+		// it under only some of the hunks would apply, or with --reverse undo, the whole rename
+		// alongside the chosen lines, so a subset goes out as a plain change to the new path.
+		bool partialRename = OriginalPath is not null && Hunks.Any(hunk => !wanted.Contains(hunk));
+
+		StringBuilder builder = new(partialRename ? ModificationHeaderForNewPath() : Header);
 		int emitted = 0;
 
 		foreach (GitHunk hunk in Hunks.Where(wanted.Contains))
@@ -176,6 +186,70 @@ public sealed record GitFilePatch
 				nameof(hunks))
 			: builder.ToString();
 	}
+
+	/// <summary>
+	/// Rewrites <see cref="Header"/> as a plain modification of the new path: both sides of the
+	/// <c>diff --git</c>, <c>---</c> and <c>+++</c> lines name it, and the similarity, rename and
+	/// copy lines are dropped. Every other line, the index and mode lines included, is kept.
+	/// </summary>
+	/// <returns>The rewritten header.</returns>
+	private string ModificationHeaderForNewPath()
+	{
+		const string NewSidePrefix = "+++ ";
+		const string OldSidePrefix = "--- ";
+
+		string[] lines = Header.Split('\n');
+		string newSide = lines.FirstOrDefault(line => line.StartsWith(NewSidePrefix, StringComparison.Ordinal))?[NewSidePrefix.Length..]
+			?? throw new InvalidOperationException(
+				$"The header for '{Path.WeakString}' has no '+++' line, so its hunks cannot be written under the new path alone.");
+
+		// git C-quotes the whole operand, prefix included, so the prefix sits after the quote.
+		string oldSide = newSide.StartsWith("\"b/", StringComparison.Ordinal)
+			? "\"a/" + newSide[3..]
+			: newSide.StartsWith("b/", StringComparison.Ordinal)
+				? "a/" + newSide[2..]
+				: throw new InvalidOperationException(
+					$"The header for '{Path.WeakString}' has a '+++' line with no b/ prefix: '{newSide}'.");
+
+		StringBuilder builder = new();
+
+		for (int index = 0; index < lines.Length; index++)
+		{
+			string line = lines[index];
+
+			if (index == lines.Length - 1)
+			{
+				// The text after the header's final newline, which is empty for a well-formed header.
+				_ = builder.Append(line);
+				continue;
+			}
+
+			if (index == 0)
+			{
+				line = $"diff --git {oldSide} {newSide}";
+			}
+			else if (line.StartsWith(OldSidePrefix, StringComparison.Ordinal))
+			{
+				line = OldSidePrefix + oldSide;
+			}
+			else if (IsRenameOrCopyLine(line))
+			{
+				continue;
+			}
+
+			_ = builder.Append(line).Append('\n');
+		}
+
+		return builder.ToString();
+	}
+
+	private static bool IsRenameOrCopyLine(string line) =>
+		line.StartsWith("similarity index ", StringComparison.Ordinal) ||
+		line.StartsWith("dissimilarity index ", StringComparison.Ordinal) ||
+		line.StartsWith("rename from ", StringComparison.Ordinal) ||
+		line.StartsWith("rename to ", StringComparison.Ordinal) ||
+		line.StartsWith("copy from ", StringComparison.Ordinal) ||
+		line.StartsWith("copy to ", StringComparison.Ordinal);
 }
 
 /// <summary>

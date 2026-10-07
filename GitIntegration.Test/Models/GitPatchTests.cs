@@ -46,6 +46,49 @@ public class GitPatchTests
 		Hunks = [HunkOne, HunkTwo],
 	};
 
+	private const string RenameHeader =
+		"diff --git a/a.txt b/b.txt\nsimilarity index 93%\nrename from a.txt\nrename to b.txt\n"
+		+ "index 92dfa21..81f8caa 100644\n--- a/a.txt\n+++ b/b.txt\n";
+
+	private static GitFilePatch RenamedFileWithTwoHunks => FileWithTwoHunks with
+	{
+		Path = "b.txt".As<RelativeFilePath>(),
+		OriginalPath = "a.txt".As<RelativeFilePath>(),
+		Header = RenameHeader,
+	};
+
+	[TestMethod]
+	public void PatchForSomeHunksOfARenameWritesAPlainChangeToTheNewPath()
+	{
+		string patch = RenamedFileWithTwoHunks.PatchFor([HunkOne]);
+
+		Assert.AreEqual(
+			"diff --git a/b.txt b/b.txt\nindex 92dfa21..81f8caa 100644\n--- a/b.txt\n+++ b/b.txt\n" + HunkOne.Text,
+			patch);
+	}
+
+	[TestMethod]
+	public void PatchForEveryHunkOfARenameKeepsTheRenameHeader() =>
+		Assert.AreEqual(
+			RenameHeader + HunkOne.Text + HunkTwo.Text,
+			RenamedFileWithTwoHunks.PatchFor([HunkOne, HunkTwo]));
+
+	[TestMethod]
+	public void PatchForSomeHunksOfAQuotedRenameKeepsTheQuoting()
+	{
+		GitFilePatch file = RenamedFileWithTwoHunks with
+		{
+			Path = "b \"q\".txt".As<RelativeFilePath>(),
+			Header = "diff --git a/a.txt \"b/b \\\"q\\\".txt\"\nsimilarity index 93%\nrename from a.txt\n"
+				+ "rename to \"b \\\"q\\\".txt\"\nindex 92dfa21..81f8caa 100644\n--- a/a.txt\n+++ \"b/b \\\"q\\\".txt\"\n",
+		};
+
+		Assert.AreEqual(
+			"diff --git \"a/b \\\"q\\\".txt\" \"b/b \\\"q\\\".txt\"\nindex 92dfa21..81f8caa 100644\n"
+				+ "--- \"a/b \\\"q\\\".txt\"\n+++ \"b/b \\\"q\\\".txt\"\n" + HunkTwo.Text,
+			file.PatchFor([HunkTwo]));
+	}
+
 	[TestMethod]
 	public void PatchForOneHunkCarriesTheHeaderAndThatHunkOnly()
 	{

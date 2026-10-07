@@ -377,6 +377,52 @@ public class GitPatchRoundTripTests
 		return init.Repository;
 	}
 
+	[TestMethod]
+	public async Task UnstagingOneHunkOfAStagedRenameKeepsTheRenameAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+		GitRepository seeded = await SeedAsync(client, repository, []).ConfigureAwait(false);
+
+		string[] lines = [.. Enumerable.Range(1, 30).Select(number => $"{number}")];
+		repository.WriteFile("a", string.Join('\n', lines) + "\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		// Rename a to b, change lines 2 and 28 of b, and stage all of it.
+		repository.DeleteFile("a");
+		lines[1] = "2 changed";
+		lines[27] = "28 changed";
+		repository.WriteFile("b", string.Join('\n', lines) + "\n");
+		_ = await seeded.Add().All()
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+
+		GitFilePatch file = (await opened.Patch().Staged().DetectRenames().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+
+		Assert.AreEqual("a", file.OriginalPath?.WeakString, "The fixture must stage a rename, or this proves nothing.");
+		Assert.AreEqual(2, file.Hunks.Count, "The fixture must produce two hunks, or this proves nothing.");
+
+		_ = await opened.Apply(file.PatchFor([file.Hunks[0]])).ToIndex().Reversed().ExecuteAsync().ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> staged = await opened.Diff().Staged().DetectRenames().WithLineCounts()
+			.ExecuteAsync().ConfigureAwait(false);
+		IReadOnlyList<GitDiffEntry> unstaged = await opened.Diff().WithLineCounts()
+			.ExecuteAsync().ConfigureAwait(false);
+
+		GitDiffEntry rename = staged.Single();
+		Assert.AreEqual(GitChangeKind.Renamed, rename.Kind);
+		Assert.AreEqual("b", rename.Path.WeakString);
+		Assert.AreEqual("a", rename.OriginalPath?.WeakString);
+		Assert.AreEqual(1, rename.Insertions, "Only the line-28 change stays staged.");
+
+		GitDiffEntry pending = unstaged.Single();
+		Assert.AreEqual("b", pending.Path.WeakString);
+		Assert.AreEqual(1, pending.Insertions, "Only the line-2 change was unstaged.");
+	}
+
 	/// <summary>Stages everything in the working tree and commits it.</summary>
 	/// <param name="repository">The repository to commit in.</param>
 	private async Task CommitAllAsync(GitRepository repository)
