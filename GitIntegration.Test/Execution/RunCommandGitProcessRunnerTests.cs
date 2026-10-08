@@ -287,6 +287,45 @@ public class RunCommandGitProcessRunnerTests
 	}
 
 	[TestMethod]
+	public async Task CapturesAllOutputWrittenJustBeforeTheProcessExitsAsync()
+	{
+		// ktsu.RunCommand before 1.8.0 stopped reading when the process exited and then made one
+		// final read, so whatever was still in the pipe past that read was dropped: git output
+		// over ~8 KiB came back cut at 8,192 characters a few percent of the time, and Patch()
+		// returned short hunks (ktsu-dev/GitIntegration#127). A command that writes well over that
+		// in one burst and exits at once leaves the most in the pipe at exit, and it is repeated
+		// because whether a read loses the race is decided by scheduling.
+		const int Length = 60000;
+		string executable;
+		string[] arguments;
+
+		if (OperatingSystem.IsWindows())
+		{
+			executable = "powershell";
+			arguments = ["-NoProfile", "-Command", $"[Console]::Out.Write('a' * {Length})"];
+		}
+		else
+		{
+			executable = "sh";
+			arguments = ["-c", $"head -c {Length} /dev/zero | tr '\\0' a"];
+		}
+
+		RunCommandGitProcessRunner runner = new(new GitOptions { ExecutablePath = executable });
+		string expected = new('a', Length);
+
+		for (int iteration = 0; iteration < 100; iteration++)
+		{
+			GitProcessResult result = await runner.RunAsync(
+				new GitProcessRequest { Arguments = arguments },
+				TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+			Assert.AreEqual(0, result.ExitCode);
+			Assert.AreEqual(expected.Length, result.StandardOutput.Length, $"Run {iteration} lost output.");
+			Assert.AreEqual(expected, result.StandardOutput, $"Run {iteration} returned different output.");
+		}
+	}
+
+	[TestMethod]
 	public void EnvironmentOverlayForcesNonInteractiveEnglishGit()
 	{
 		Assert.AreEqual("0", RunCommandGitProcessRunner.EnvironmentOverlay["GIT_TERMINAL_PROMPT"]);
