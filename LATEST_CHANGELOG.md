@@ -1,8 +1,7 @@
-## v4.1.9 (patch)
+## v4.1.10 (patch)
 
-Changes since v4.1.8:
+Changes since v4.1.9:
 
-- Keep "#" lines in a commit message where the host strips comments [patch] ([@Claude](https://github.com/Claude))
-- Redact tokens, passwords and device codes from credential ToString [patch] ([@Claude](https://github.com/Claude))
-- Read the patch number before Apple's build note in git --version [patch] ([@Claude](https://github.com/Claude))
+- [patch] Forward IFileSystem.RandomAccess in the test filesystem provider ([@Claude](https://github.com/Claude))
+- [patch] Update ktsu.Essentials to 2.10.7 and Testably.Abstractions to 10.4.0 ([@Claude](https://github.com/Claude))
 
