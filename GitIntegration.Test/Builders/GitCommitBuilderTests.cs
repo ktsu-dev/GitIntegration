@@ -204,6 +204,24 @@ public class GitCommitBuilderTests
 	}
 
 	[TestMethod]
+	public async Task ThrowsNothingToCommitWhenTrackedChangesAreUnstagedAsync()
+	{
+		// The third phrasing, and the most common case: a tracked file is modified but nothing is
+		// staged. It contains neither of the other two phrases.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(
+				standardOutput:
+					"On branch main\nChanges not staged for commit:\n\tmodified:   f\n\n" +
+					"no changes added to commit (use \"git add\" and/or \"git commit -a\")\n",
+				exitCode: 1);
+		GitCommitBuilder builder = new(runner, TestPaths.Root, Message);
+
+		await Assert.ThrowsExactlyAsync<GitNothingToCommitException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+	}
+
+	[TestMethod]
 	public async Task AnOrdinaryCommitFailureStaysAGenericCommandExceptionAsync()
 	{
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
