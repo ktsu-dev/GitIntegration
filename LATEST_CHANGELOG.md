@@ -1,8 +1,8 @@
-## v4.1.8 (patch)
+## v4.1.9 (patch)
 
-Changes since v4.1.7:
+Changes since v4.1.8:
 
-- Merge remote-tracking branch 'origin/main' into fix/194-no-changes-added-to-commit ([@Claude](https://github.com/Claude))
-- Recognise "no changes added to commit" as nothing to commit [patch] ([@Claude](https://github.com/Claude))
-- Take ktsu.RunCommand 1.9.5 so git output is read to EOF [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- Keep "#" lines in a commit message where the host strips comments [patch] ([@Claude](https://github.com/Claude))
+- Redact tokens, passwords and device codes from credential ToString [patch] ([@Claude](https://github.com/Claude))
+- Read the patch number before Apple's build note in git --version [patch] ([@Claude](https://github.com/Claude))
 
