@@ -98,7 +98,7 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
   `GitCloneBuilder` uses for its advisory destination pre-check (`Directory.Exists`,
   `Directory.GetFileSystemEntries`); discovery itself needs none, since
   `git rev-parse --show-toplevel` does its own upward walk.
-- `Testably.Abstractions.FileSystem.Interface` (`PrivateAssets="all"`, `VersionOverride="10.0.0"`) —
+- `Testably.Abstractions.FileSystem.Interface` (`PrivateAssets="all"`, `VersionOverride="10.4.0"`) —
   see the KTSU0006 note below.
 - `ktsu.CredentialCache` — resolves hosting-provider credentials from the host's native keyring.
 - `Octokit` — GitHub API client backing `GitHubProvider`.
@@ -119,12 +119,14 @@ of a transitively-referenced package requiring its own `PackageReference`.
 
 That reference must carry **both** `PrivateAssets="all"` (it exists only to satisfy the analyzer,
 not as part of this library's public surface) **and** a `VersionOverride` pinning it to the lowest
-version any consumer could resolve — here, `10.0.0`, because `ktsu.Essentials` 2.0.0's own nuspec
-pins that version, while the repo-wide central-package-management version floats higher (`10.3.0`).
-Without the override, the library compiles against the higher version, but a consumer resolves
-whatever `ktsu.Essentials` itself pins — the lower one. CoreCLR rolls assembly binds forward but
-never backward, so a compiled reference to a higher version than what's actually present throws
-`FileNotFoundException` for every consumer at runtime. This is invisible in the package's own build
+version any consumer could resolve — here, `10.4.0`, because `ktsu.Essentials` 2.10.7's own nuspec
+pins that version. The repo-wide central-package-management version is currently the same
+(`10.4.0`), but it is free to float higher, and the override keeps it from taking the compiled
+reference with it. Without the override, a higher central version means the library compiles
+against that higher version, but a consumer resolves whatever `ktsu.Essentials` itself pins — the
+lower one. CoreCLR rolls assembly binds forward but never backward, so a compiled reference to a
+higher version than what's actually present throws `FileNotFoundException` for every consumer at
+runtime. This is invisible in the package's own build
 and even in its nuspec; it only surfaces when something actually consumes the packed artifact.
 **Verifying the nuspec is not sufficient.** Any future `PackageReference` added solely to satisfy an
 analyzer needs this same treatment, not just this one.
