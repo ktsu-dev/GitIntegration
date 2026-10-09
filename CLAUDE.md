@@ -366,6 +366,12 @@ Non-obvious, load-bearing design points:
     `Commit()` reuses the `Log()` vector for its read-back, so without the flag a signed commit that
     git did make is reported to the caller as a failure, and a retry makes a duplicate.
 
+16. **`Commit()` passes `--cleanup=whitespace`.** With `commit.cleanup=strip` (or `scissors`) in the
+    host's config, git treats every `#`-leading line of a `--message` as a comment and drops it, so
+    `#123 fixed the crash` silently vanishes from the body, and a `#42: fix login` subject aborts the
+    commit as empty. `whitespace` is git's own default for a message that never opens an editor, so
+    the stored message on an unconfigured host is unchanged.
+
 **Hosting layer.** `GitProvider` is an abstract base with two implementations: `GitHubProvider` over
 Octokit, and `AzureDevOpsProvider` over a raw `HttpClient` — Azure DevOps has no client library this
 library uses (see the dependency note below). Both go through the same shape: every request-issuing

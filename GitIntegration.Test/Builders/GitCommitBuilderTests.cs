@@ -39,6 +39,7 @@ public class GitCommitBuilderTests
 			"-c", "core.quotepath=false",
 			"-c", "color.ui=false",
 			"commit",
+			"--cleanup=whitespace",
 			"--message", "subject here",
 		];
 		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
@@ -59,6 +60,22 @@ public class GitCommitBuilderTests
 
 		Assert.AreEqual("--message", arguments[subject + 1]);
 		Assert.AreEqual("body text", arguments[subject + 2]);
+	}
+
+	[TestMethod]
+	public void PinsTheMessageCleanupModeAheadOfTheMessage()
+	{
+		// commit.cleanup=strip on the host would otherwise drop every "#"-leading line of the message.
+		RecordingGitProcessRunner runner = new();
+		GitCommitBuilder builder = new(runner, TestPaths.Root, Message);
+
+		_ = builder.WithBody("#123 fixed the crash").AllowEmpty().StageTrackedFiles();
+
+		string[] arguments = [.. builder.BuildArguments()];
+		Assert.AreEqual(1, Array.FindAll(arguments, a => a.StartsWith("--cleanup", StringComparison.Ordinal)).Length);
+		Assert.IsLessThan(
+			Array.IndexOf(arguments, "--message"),
+			Array.IndexOf(arguments, "--cleanup=whitespace"));
 	}
 
 	[TestMethod]

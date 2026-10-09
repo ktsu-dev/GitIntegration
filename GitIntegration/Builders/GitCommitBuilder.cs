@@ -129,6 +129,12 @@ internal sealed class GitCommitBuilder(
 			arguments.Add("--author=" + _author);
 		}
 
+		// Pinned because commit.cleanup is a host setting: under "strip" or "scissors" git treats every
+		// "#"-leading line as a comment and drops it, so "#123 fixed the crash" vanishes from the body
+		// and a "#42: fix login" subject aborts the commit as empty. "whitespace" is git's own default
+		// for a message that never opens an editor, so an unconfigured host stores the same message.
+		arguments.Add("--cleanup=whitespace");
+
 		// --message rather than -m, and repeated for the body: git joins repeated values with a
 		// blank line between them, which is precisely the subject-then-body convention.
 		arguments.Add("--message");
