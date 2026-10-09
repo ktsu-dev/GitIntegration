@@ -585,6 +585,16 @@ public sealed record HostingCredential
 	/// <summary>Gets the password, when <see cref="Kind"/> is <see cref="HostingCredentialKind.UsernamePassword"/>.</summary>
 	public string? Password { get; init; }
 
+	/// <summary>Returns the record's members with <see cref="Token"/> and <see cref="Password"/> redacted.</summary>
+	/// <remarks>
+	/// The compiler-generated version prints every property, so logging or interpolating a
+	/// credential wrote a live token in plain text. A secret prints as <c>***</c> when present and
+	/// blank when absent, which keeps "is one set" visible for diagnostics without the value.
+	/// </remarks>
+	/// <returns>The credential as the compiler would print it, minus the secrets.</returns>
+	public override string ToString() =>
+		$"{nameof(HostingCredential)} {{ Kind = {Kind}, Token = {Redacted.Of(Token)}, Username = {Username}, Password = {Redacted.Of(Password)} }}";
+
 	/// <summary>Creates a result carrying a host-native token, such as a personal access token.</summary>
 	/// <remarks>
 	/// Not a bearer token. Azure DevOps sends this kind as Basic with an empty username, the scheme

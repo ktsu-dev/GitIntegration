@@ -39,6 +39,16 @@ public sealed record GitHubDeviceCode
 
 	/// <summary>Gets the minimum wait GitHub requires between token requests.</summary>
 	public required TimeSpan Interval { get; init; }
+
+	/// <summary>Returns the record's members with <see cref="DeviceCode"/> redacted.</summary>
+	/// <remarks>
+	/// The device code is what the token poll exchanges for a credential, so it is as sensitive as
+	/// the token while it is valid. <see cref="UserCode"/> stays visible: it is shown to the user
+	/// anyway, and it is what a log needs to match a sign-in attempt.
+	/// </remarks>
+	/// <returns>The device code as the compiler would print it, minus the secret.</returns>
+	public override string ToString() =>
+		$"{nameof(GitHubDeviceCode)} {{ UserCode = {UserCode}, DeviceCode = {Redacted.Of(DeviceCode)}, VerificationUri = {VerificationUri}, ExpiresIn = {ExpiresIn}, Interval = {Interval} }}";
 }
 
 /// <summary>
