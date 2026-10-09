@@ -153,6 +153,71 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task IsClonedReportsADirectoryInsideAnotherRepositoryAsNotClonedAsync()
+	{
+		// git run in either directory would act on the outer repository, which is exactly why
+		// "clone if not cloned" must not take them for clones.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository outer = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		string empty = Path.Join(temporary.RootPath, "SomeRepo");
+		_ = Directory.CreateDirectory(empty);
+		temporary.WriteFile("sub/a.txt", "one\n");
+
+		GitRepository emptyDirectory = new() { LocalPath = empty.As<AbsoluteDirectoryPath>(), ProcessRunner = outer.ProcessRunner };
+		GitRepository subdirectory = new() { LocalPath = Path.Join(temporary.RootPath, "sub").As<AbsoluteDirectoryPath>(), ProcessRunner = outer.ProcessRunner };
+
+		Assert.IsFalse(await emptyDirectory.IsClonedAsync(cancellationToken).ConfigureAwait(false), "empty directory");
+		Assert.IsFalse(await subdirectory.IsClonedAsync(cancellationToken).ConfigureAwait(false), "non-empty subdirectory");
+		Assert.IsTrue(await outer.IsClonedAsync(cancellationToken).ConfigureAwait(false), "the outer repository itself");
+	}
+
+	[TestMethod]
+	public async Task IsClonedReportsASeparateGitDirCheckoutAsClonedAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		using TemporaryRepository separateGitDir = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		string gitDir = Path.Join(separateGitDir.RootPath, "sg");
+		_ = await new GitTextBuilder(repository.ProcessRunner!, temporary.Root, "init", "--separate-git-dir", gitDir, "s")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository checkout = new() { LocalPath = Path.Join(temporary.RootPath, "s").As<AbsoluteDirectoryPath>(), ProcessRunner = repository.ProcessRunner };
+
+		Assert.IsTrue(await checkout.IsClonedAsync(cancellationToken).ConfigureAwait(false));
+	}
+
+	[TestMethod]
+	public async Task IsClonedReportsALinkedWorktreeAsClonedAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		using TemporaryRepository worktreeParent = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		string worktree = Path.Join(worktreeParent.RootPath, "wt");
+		_ = await new GitTextBuilder(repository.ProcessRunner!, repository.LocalPath, "worktree", "add", worktree)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository linked = new() { LocalPath = worktree.As<AbsoluteDirectoryPath>(), ProcessRunner = repository.ProcessRunner };
+
+		Assert.IsTrue(await linked.IsClonedAsync(cancellationToken).ConfigureAwait(false));
+	}
+
+	[TestMethod]
 	public async Task AddAndCommitProduceAReadableCommitAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -113,6 +114,27 @@ public class GitSubmoduleTests
 		Assert.AreEqual(GitSubmoduleState.InSync, submodules[0].State);
 		Assert.AreEqual(submodules[0].Sha, submodules[0].CheckedOutSha);
 		Assert.IsNotNull(submodules[0].Describe);
+	}
+
+	[TestMethod]
+	public async Task IsClonedReportsASubmoduleCheckoutButNotTheDirectoryHoldingItAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		GitRepository submodule = new() { LocalPath = Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(), ProcessRunner = super.ProcessRunner };
+		GitRepository libs = new() { LocalPath = Path.Join(superDirectory.RootPath, "libs").As<AbsoluteDirectoryPath>(), ProcessRunner = super.ProcessRunner };
+
+		Assert.IsTrue(await submodule.IsClonedAsync(cancellationToken).ConfigureAwait(false), "the submodule's checkout");
+		Assert.IsFalse(await libs.IsClonedAsync(cancellationToken).ConfigureAwait(false), "the superproject directory holding it");
 	}
 
 	[TestMethod]
