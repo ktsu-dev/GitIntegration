@@ -37,4 +37,6 @@ internal sealed class FakeFileSystemProvider(MockFileSystem inner) : IFileSystem
 	public IFileVersionInfoFactory FileVersionInfo => inner.FileVersionInfo;
 
 	public IPath Path => inner.Path;
+
+	public IRandomAccess RandomAccess => inner.RandomAccess;
 }
