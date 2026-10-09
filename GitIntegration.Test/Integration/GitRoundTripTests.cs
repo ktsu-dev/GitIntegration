@@ -362,6 +362,40 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task CommitKeepsHashLinesEvenWhereTheHostStripsCommentsAsync()
+	{
+		// commit.cleanup is a host setting, and under "strip" git treats every "#"-leading line as a
+		// comment. Written into the throwaway repository's own config for the same reason as the
+		// status.showUntrackedFiles test above: same variable, nearest scope, host left alone.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "commit.cleanup", "strip")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit commit = await repository.Commit("Subject".As<GitCommitMessage>())
+			.WithBody("#123 fixed the crash\nsecond")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual("#123 fixed the crash\nsecond", commit.Body, "Commit() dropped the body's \"#\" line.");
+
+		// A "#"-leading subject is the whole message as far as strip is concerned; without the pin
+		// git aborts with "empty commit message" instead of recording it.
+		temporary.WriteFile("a.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit hashSubject = await repository.Commit("#42: fix login".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual("#42: fix login", hashSubject.Subject);
+	}
+
+	[TestMethod]
 	public async Task BranchCreateCheckoutAndDeleteRoundTripAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
