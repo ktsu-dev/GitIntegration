@@ -145,6 +145,42 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	[DataRow("My App", "My-App")]
+	[DataRow("Tool (x86)", "Tool--x86")]
+	[DataRow("a/b@c", "a-b-c")]
+	[DataRow("Café", "Caf")]
+	[DataRow("testhost", "testhost")]
+	[DataRow("ktsu.Tool_1", "ktsu.Tool_1")]
+	public async Task SendsTheRequestWhenTheApplicationNameIsNotAnHttpTokenAsync(string applicationName, string expectedProduct)
+	{
+		// The friendly name is the entry assembly's name, so "My App.csproj" yields "My App". Passed
+		// to ProductHeaderValue as-is, that threw FormatException before any request went out. The
+		// test host is always "testhost", which is why the name is injected here.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.OK, Fixture("github-repositories.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Handler = handler,
+			ApplicationName = applicationName,
+		};
+
+		_ = await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.HasCount(1, handler.Requests);
+		// The fake joins a header's values with ", ", and the product is the first of them.
+		Assert.AreEqual(expectedProduct, handler.Requests[0].Headers["User-Agent"].Split(',')[0]);
+	}
+
+	[TestMethod]
+	[DataRow(null)]
+	[DataRow("")]
+	[DataRow("   ")]
+	[DataRow("日本")]
+	public void FallsBackToTheLibraryNameWhenNothingOfTheApplicationNameIsUsable(string? applicationName) =>
+		Assert.AreEqual(GitHubProvider.FallbackProductName, GitHubProvider.ToProductName(applicationName));
+
+	[TestMethod]
 	public async Task EnumeratesRepositoriesForTheOwnerAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()

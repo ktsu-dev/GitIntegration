@@ -45,6 +45,23 @@ public sealed class GitHubProvider : GitProvider
 	/// <inheritdoc/>
 	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
 
+	/// <summary>
+	/// The product name sent in the User-Agent when the application's own name has no usable
+	/// characters.
+	/// </summary>
+	internal const string FallbackProductName = "ktsu.GitIntegration";
+
+	/// <summary>
+	/// Gets or initializes the application name this provider identifies itself by in the
+	/// User-Agent GitHub requires.
+	/// </summary>
+	/// <remarks>
+	/// <see langword="internal"/> and defaulted to the host's <see cref="AppDomain.FriendlyName"/>, so
+	/// a test can drive a name the test host itself never has. Under MSTest the friendly name is
+	/// <c>testhost</c>, a valid token, which is how a name like <c>My App</c> went unnoticed.
+	/// </remarks>
+	internal string ApplicationName { get; init; } = AppDomain.CurrentDomain.FriendlyName;
+
 	/// <inheritdoc/>
 	/// <remarks>
 	/// <see langword="false"/>, because GitHub's repository-addressed routes are two routes rather
@@ -328,7 +345,7 @@ public sealed class GitHubProvider : GitProvider
 	private (GitHubClient Client, IDisposable Transport) CreateClient()
 	{
 		Credentials credentials = ToOctokitCredentials(ResolveCredential());
-		ProductHeaderValue product = new(AppDomain.CurrentDomain.FriendlyName);
+		ProductHeaderValue product = new(ToProductName(ApplicationName));
 
 		HttpMessageHandler transport = Handler ?? DefaultHandler;
 		HttpClientAdapter adapter = new(() => new NonOwningHandler(transport));
@@ -337,6 +354,37 @@ public sealed class GitHubProvider : GitProvider
 
 		return (client, adapter);
 	}
+
+	/// <summary>
+	/// Turns an application name into a User-Agent product name, which must be an HTTP token.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="AppDomain.FriendlyName"/> is the entry assembly's name, so an executable built from
+	/// <c>My App.csproj</c> is called <c>My App</c>. Passed through unchanged, the space makes
+	/// <see cref="ProductHeaderValue"/> throw <see cref="FormatException"/> before any request is sent.
+	/// Every character outside the RFC 9110 token set, including any non-ASCII letter, becomes
+	/// <c>-</c>, so the host stays recognisable in GitHub's logs. A name with nothing left once those
+	/// are stripped falls back to <see cref="FallbackProductName"/>.
+	/// </remarks>
+	/// <param name="applicationName">The application's name, as the host reports it.</param>
+	/// <returns>A name <see cref="ProductHeaderValue"/> accepts.</returns>
+	internal static string ToProductName(string? applicationName)
+	{
+		if (string.IsNullOrEmpty(applicationName))
+		{
+			return FallbackProductName;
+		}
+
+		char[] product = [.. applicationName.Select(c => IsTokenChar(c) ? c : '-')];
+		string name = new string(product).Trim('-');
+		return name.Length == 0 ? FallbackProductName : name;
+	}
+
+	/// <summary>Reports whether a character may appear in an RFC 9110 token.</summary>
+	/// <param name="c">The character to test.</param>
+	/// <returns><see langword="true"/> for an ASCII letter, digit, or one of <c>!#$%&amp;'*+-.^_`|~</c>.</returns>
+	private static bool IsTokenChar(char c) =>
+		char.IsAsciiLetterOrDigit(c) || "!#$%&'*+-.^_`|~".Contains(c, StringComparison.Ordinal);
 
 	/// <summary>
 	/// A pass-through transport whose disposal stops at itself, so wrapping an
