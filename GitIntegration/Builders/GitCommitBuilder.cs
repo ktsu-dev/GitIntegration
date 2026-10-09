@@ -218,9 +218,10 @@ internal sealed class GitCommitBuilder(
 	/// </summary>
 	/// <remarks>
 	/// Overridden because the base class inspects standard error and git reports "nothing to
-	/// commit" on standard <em>output</em>, leaving standard error empty. Both of git's phrasings
-	/// are matched: the tree may be clean, or it may hold only untracked files, and neither message
-	/// contains the other. The match depends on the <c>LC_ALL=C</c> that
+	/// commit" on standard <em>output</em>, leaving standard error empty. All three of git's
+	/// phrasings are matched: the tree may be clean ("nothing to commit"), it may hold only untracked
+	/// files ("nothing added to commit"), or tracked files may be modified with nothing staged ("no
+	/// changes added to commit"). None of these messages contains another. The match depends on the <c>LC_ALL=C</c> that
 	/// <c>RunCommandGitProcessRunner</c> forces on every invocation. A failing pre-commit hook whose
 	/// own standard output happened to contain one of these phrases would be misclassified as
 	/// <see cref="GitNothingToCommitException"/>; that risk is accepted as narrow.
@@ -232,7 +233,8 @@ internal sealed class GitCommitBuilder(
 		Ensure.NotNull(result);
 
 		if (result.StandardOutput.Contains("nothing to commit", StringComparison.Ordinal) ||
-			result.StandardOutput.Contains("nothing added to commit", StringComparison.Ordinal))
+			result.StandardOutput.Contains("nothing added to commit", StringComparison.Ordinal) ||
+			result.StandardOutput.Contains("no changes added to commit", StringComparison.Ordinal))
 		{
 			return new GitNothingToCommitException(
 				$"There is nothing staged to commit: {result.StandardOutput.Trim()}",
