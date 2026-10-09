@@ -49,9 +49,26 @@ internal static class GitVersionParser
 		};
 	}
 
-	private static int ReadComponent(string[] components, int index) =>
-		index < components.Length &&
-		int.TryParse(components[index], NumberStyles.None, CultureInfo.InvariantCulture, out int value)
+	// Reads the component's leading digits, so a build note glued to the last component still
+	// leaves its number: Apple's git reports "2.39.3 (Apple Git-145)", whose third component is
+	// "3 (Apple Git-145)", and an rc build reports "0-rc0". A component with no leading digit,
+	// such as "windows", reads as zero.
+	private static int ReadComponent(string[] components, int index)
+	{
+		if (index >= components.Length)
+		{
+			return 0;
+		}
+
+		string component = components[index];
+		int length = 0;
+		while (length < component.Length && char.IsAsciiDigit(component[length]))
+		{
+			length++;
+		}
+
+		return int.TryParse(component.AsSpan(0, length), NumberStyles.None, CultureInfo.InvariantCulture, out int value)
 			? value
 			: 0;
+	}
 }
