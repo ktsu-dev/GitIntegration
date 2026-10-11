@@ -1,7 +1,6 @@
-## v4.1.10 (patch)
+## v4.1.11 (patch)
 
-Changes since v4.1.9:
+Changes since v4.1.10:
 
-- [patch] Forward IFileSystem.RandomAccess in the test filesystem provider ([@Claude](https://github.com/Claude))
-- [patch] Update ktsu.Essentials to 2.10.7 and Testably.Abstractions to 10.4.0 ([@Claude](https://github.com/Claude))
+- Report only a working-tree root as cloned, not a directory inside another repository [patch] ([@Claude](https://github.com/Claude))
 
