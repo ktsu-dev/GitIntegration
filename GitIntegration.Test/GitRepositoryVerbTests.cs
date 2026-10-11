@@ -136,6 +136,19 @@ public class GitRepositoryVerbTests
 	}
 
 	[TestMethod]
+	public async Task IsClonedReportsFalseForADirectoryBelowAWorkingTreeRootAsync()
+	{
+		// --show-cdup prints the way up to the root, so a subdirectory of some other repository's
+		// working tree is inside a working tree but is not a clone.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner().Then(standardOutput: "true\n../\n");
+		GitRepository repository = RepositoryOn(runner);
+
+		bool isCloned = await repository.IsClonedAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsFalse(isCloned);
+	}
+
+	[TestMethod]
 	public async Task IsClonedReportsFalseForAPathThatIsNotAWorkingTreeAsync()
 	{
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
