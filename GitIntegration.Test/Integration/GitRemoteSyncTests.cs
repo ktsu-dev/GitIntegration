@@ -407,6 +407,42 @@ public class GitRemoteSyncTests
 	}
 
 	[TestMethod]
+	public async Task FetchWithRecursionExplicitlyOffStillReportsTheUpdatesAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository firstDirectory = new();
+		using TemporaryRepository secondDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+
+		GitRepository first = await CreateWorkingCopyAsync(firstDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(first, firstDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+		_ = await first.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository second = await CreateWorkingCopyAsync(secondDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		// The real git has to accept --porcelain alongside --recurse-submodules=no, or this throws.
+		GitFetchResult fetched = await second.Fetch()
+			.FromRemote(Origin)
+			.RecursingSubmodules(GitSubmoduleRecursion.No)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitVersion version = await IntegrationGitFixture.CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
+
+		// Only the version threshold may take the detail away here; the explicit "no" must not.
+		Assert.AreEqual(version.AtLeast(2, 41), fetched.DetailAvailable);
+
+		if (fetched.DetailAvailable)
+		{
+			Assert.AreEqual(1, fetched.Updates.Count);
+			Assert.AreEqual("refs/remotes/origin/main".As<GitRefName>(), fetched.Updates[0].Reference);
+		}
+	}
+
+	[TestMethod]
 	public async Task FetchingTwiceReportsNothingTheSecondTimeAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
