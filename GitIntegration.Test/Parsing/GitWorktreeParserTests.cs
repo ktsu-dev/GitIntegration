@@ -263,6 +263,11 @@ public sealed class GitWorktreeParserTests
 	[TestMethod]
 	public void KeepsANewlineInAPathUnderNulTermination()
 	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Inconclusive("Windows paths cannot contain a newline.");
+		}
+
 		// Without -z this path arrives as "worktree /odd" followed by a line "dir/wt2", and the
 		// worktree would be reported at /odd.
 		string path = AbsolutePath("odd\ndir");
