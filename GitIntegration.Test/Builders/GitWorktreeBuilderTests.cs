@@ -30,7 +30,39 @@ public sealed class GitWorktreeBuilderTests
 
 		IReadOnlyList<string> arguments = builder.BuildArguments();
 
-		CollectionAssert.AreEqual(Expect("worktree", "list", "--porcelain"), arguments.ToArray());
+		CollectionAssert.AreEqual(Expect("worktree", "list", "--porcelain", "-z"), arguments.ToArray());
+	}
+
+	[TestMethod]
+	public async Task ListsNulTerminatedOnAGitThatSupportsItAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.36.0\n")
+			.Then(standardOutput: $"worktree {TestPaths.Root.WeakString}\0branch refs/heads/main\0locked a\nb\0\0");
+		GitWorktreeListBuilder builder = new(runner, TestPaths.Root);
+
+		IReadOnlyList<GitWorktree> worktrees = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		CollectionAssert.AreEqual(Expect("worktree", "list", "--porcelain", "-z"), runner.Invocations[1].ToArray());
+		Assert.AreEqual(1, worktrees.Count);
+		Assert.AreEqual("a\nb", worktrees[0].LockReason);
+	}
+
+	[TestMethod]
+	public async Task ListsNewlineTerminatedBelowGit236Async()
+	{
+		// worktree list -z arrived in 2.36. An older git gets the newline form, with its reasons
+		// decoded from git's C quoting.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.35.1\n")
+			.Then(standardOutput: $"worktree {TestPaths.Root.WeakString}\nbranch refs/heads/main\nlocked \"a\\nb\"\n\n");
+		GitWorktreeListBuilder builder = new(runner, TestPaths.Root);
+
+		IReadOnlyList<GitWorktree> worktrees = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		CollectionAssert.AreEqual(Expect("worktree", "list", "--porcelain"), runner.Invocations[1].ToArray());
+		Assert.AreEqual(1, worktrees.Count);
+		Assert.AreEqual("a\nb", worktrees[0].LockReason);
 	}
 
 	[TestMethod]

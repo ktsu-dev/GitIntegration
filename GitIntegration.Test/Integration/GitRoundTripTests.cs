@@ -2,6 +2,7 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -132,6 +133,51 @@ public class GitRoundTripTests
 			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		Assert.IsTrue(init.AlreadyExisted);
+	}
+
+	[TestMethod]
+	public async Task WorktreesReportsAnAwkwardPathAndLockReasonAsGitStoresThemAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		using TemporaryRepository worktreeParent = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// A newline is legal in a Linux or macOS path, and is what the newline-terminated listing
+		// cannot carry. Windows forbids it, so the path there is plain and only the reason is awkward.
+		string worktree = Path.Join(worktreeParent.RootPath, OperatingSystem.IsWindows() ? "plain" : "odd\ndir", "wt");
+		const string Reason = "needs \"care\"\nsecond line";
+
+		_ = await new GitTextBuilder(repository.ProcessRunner!, repository.LocalPath, "worktree", "add", worktree)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(repository.ProcessRunner!, repository.LocalPath, "worktree", "lock", "--reason", Reason, worktree)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitWorktree> worktrees = await repository.Worktrees().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(2, worktrees.Count);
+		GitWorktree linked = worktrees[1];
+		Assert.IsTrue(linked.IsLocked);
+		Assert.AreEqual(Reason, linked.LockReason);
+
+		GitVersion version = await IntegrationGitFixture.CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
+
+		// Below 2.36 there is no -z, and a newline in a path cannot be represented at all. git reports
+		// the resolved path (/private/var/... for macOS's /var/...), so the check is on the directory
+		// git names rather than on the spelling of the temp root.
+		if (version.AtLeast(2, 36))
+		{
+			StringAssert.EndsWith(
+				linked.Path.WeakString.Replace('\\', '/'),
+				Path.GetRelativePath(worktreeParent.RootPath, worktree).Replace('\\', '/'));
+			Assert.IsTrue(Directory.Exists(linked.Path.WeakString));
+		}
 	}
 
 	[TestMethod]

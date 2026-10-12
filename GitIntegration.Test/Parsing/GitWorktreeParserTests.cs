@@ -202,4 +202,100 @@ public sealed class GitWorktreeParserTests
 
 		_ = Assert.ThrowsExactly<GitParseException>(() => GitWorktreeParser.Parse(output));
 	}
+
+	[TestMethod]
+	public void DecodesAQuotedLockReason()
+	{
+		// Without -z git C-quotes a reason holding a quote, a backslash or a newline.
+		string output =
+			$"worktree {AbsolutePath("project")}\n" +
+			"HEAD 7f3c9a1b2d4e6f8a0c2e4a6b8d0f2a4c6e8b0d2f\n" +
+			"branch refs/heads/main\n" +
+			"locked \"needs \\\"care\\\"\\nsecond line\"\n" +
+			"\n";
+
+		IReadOnlyList<GitWorktree> worktrees = GitWorktreeParser.Parse(output);
+
+		Assert.AreEqual("needs \"care\"\nsecond line", worktrees[0].LockReason);
+	}
+
+	[TestMethod]
+	public void DecodesAQuotedPrunableReason()
+	{
+		string output =
+			$"worktree {AbsolutePath("project")}\n" +
+			"HEAD 7f3c9a1b2d4e6f8a0c2e4a6b8d0f2a4c6e8b0d2f\n" +
+			"detached\n" +
+			"prunable \"back\\\\slash\"\n" +
+			"\n";
+
+		IReadOnlyList<GitWorktree> worktrees = GitWorktreeParser.Parse(output);
+
+		Assert.AreEqual("back\\slash", worktrees[0].PrunableReason);
+	}
+
+	[TestMethod]
+	public void ReadsANulTerminatedListing()
+	{
+		// Under -z an empty field closes a record, the way a blank line does without it.
+		string output =
+			$"worktree {AbsolutePath("project")}\0" +
+			"HEAD 7f3c9a1b2d4e6f8a0c2e4a6b8d0f2a4c6e8b0d2f\0" +
+			"branch refs/heads/main\0" +
+			"\0" +
+			$"worktree {AbsolutePath("project-review")}\0" +
+			"HEAD 9c1a7f2e4b6d8a0c2e4f6a8b0d2c4e6f8a0b2d4c\0" +
+			"detached\0" +
+			"prunable gitdir file points to non-existent location\0" +
+			"\0";
+
+		IReadOnlyList<GitWorktree> worktrees = GitWorktreeParser.Parse(output, nulTerminated: true);
+
+		Assert.AreEqual(2, worktrees.Count);
+		Assert.AreEqual(AbsolutePath("project"), worktrees[0].Path.WeakString);
+		Assert.IsTrue(worktrees[0].IsMain);
+		Assert.AreEqual("main".As<GitBranchName>(), worktrees[0].Branch);
+		Assert.AreEqual(AbsolutePath("project-review"), worktrees[1].Path.WeakString);
+		Assert.IsTrue(worktrees[1].IsDetached);
+		Assert.AreEqual("gitdir file points to non-existent location", worktrees[1].PrunableReason);
+	}
+
+	[TestMethod]
+	public void KeepsANewlineInAPathUnderNulTermination()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Inconclusive("Windows paths cannot contain a newline.");
+		}
+
+		// Without -z this path arrives as "worktree /odd" followed by a line "dir/wt2", and the
+		// worktree would be reported at /odd.
+		string path = AbsolutePath("odd\ndir");
+		string output =
+			$"worktree {path}\0" +
+			"HEAD 7f3c9a1b2d4e6f8a0c2e4a6b8d0f2a4c6e8b0d2f\0" +
+			"branch refs/heads/main\0" +
+			"\0";
+
+		IReadOnlyList<GitWorktree> worktrees = GitWorktreeParser.Parse(output, nulTerminated: true);
+
+		Assert.AreEqual(1, worktrees.Count);
+		Assert.AreEqual(path, worktrees[0].Path.WeakString);
+	}
+
+	[TestMethod]
+	public void KeepsARawReasonUnderNulTermination()
+	{
+		// -z prints reasons raw, so one that happens to start and end with a quote is not decoded.
+		string output =
+			$"worktree {AbsolutePath("project")}\0" +
+			"HEAD 7f3c9a1b2d4e6f8a0c2e4a6b8d0f2a4c6e8b0d2f\0" +
+			"branch refs/heads/main\0" +
+			"locked \"needs \\\"care\\\"\"\nsecond line\0" +
+			"\0";
+
+		IReadOnlyList<GitWorktree> worktrees = GitWorktreeParser.Parse(output, nulTerminated: true);
+
+		Assert.AreEqual("\"needs \\\"care\\\"\"\nsecond line", worktrees[0].LockReason);
+	}
 }
