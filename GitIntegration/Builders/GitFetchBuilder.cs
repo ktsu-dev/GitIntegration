@@ -121,17 +121,26 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	/// <see cref="ProbeVersionAsync"/> establishes that before the vector is built.
 	/// </para>
 	/// <para>
-	/// The second is <see cref="RecursingSubmodules"/>. Git refuses the two flags together outright —
-	/// "fatal: options '--porcelain' and '--recurse-submodules' cannot be used together", verified
-	/// against git 2.43 — so emitting both would turn every recursing fetch into a failure. Dropping
-	/// <c>--porcelain</c> is the only way to honour the caller's request, and it is the caller's
-	/// request that wins: they asked to fetch submodules, not to be itemised. This is a second reason
-	/// detail can be unavailable, alongside the version threshold, and it is not something the caller
-	/// did wrong — so it degrades rather than throwing, unlike the AllRemotes/FromRemote pair above,
-	/// which is a genuine contradiction between two things the caller asked for.
+	/// The second is <see cref="RecursingSubmodules"/> with a value that actually recurses. Git
+	/// refuses <c>--porcelain</c> together with <c>--recurse-submodules=yes</c> or
+	/// <c>=on-demand</c> — "fatal: options '--porcelain' and '--recurse-submodules' cannot be used
+	/// together", verified against git 2.43 — so emitting both would turn every recursing fetch into a
+	/// failure. Dropping <c>--porcelain</c> is the only way to honour the caller's request, and it is
+	/// the caller's request that wins: they asked to fetch submodules, not to be itemised. This is a
+	/// second reason detail can be unavailable, alongside the version threshold, and it is not
+	/// something the caller did wrong — so it degrades rather than throwing, unlike the
+	/// AllRemotes/FromRemote pair above, which is a genuine contradiction between two things the
+	/// caller asked for.
+	/// </para>
+	/// <para>
+	/// <see cref="GitSubmoduleRecursion.No"/> is not recursing, and git accepts it alongside
+	/// <c>--porcelain</c> (its <c>builtin/fetch.c</c> rejects the pair only for a mode other than
+	/// off or default). A caller passing it explicitly, to override a host's
+	/// <c>submodule.recurse=true</c>, keeps the itemised account.
 	/// </para>
 	/// </remarks>
-	private bool IsPorcelainAvailable => PorcelainSupportedByVersion && _submoduleRecursion is null;
+	private bool IsPorcelainAvailable =>
+		PorcelainSupportedByVersion && _submoduleRecursion is null or GitSubmoduleRecursion.No;
 
 	/// <inheritdoc />
 	public IGitFetchBuilder FromRemote(GitRemoteName name)

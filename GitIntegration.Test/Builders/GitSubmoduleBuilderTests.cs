@@ -464,6 +464,22 @@ public class GitSubmoduleRecursionOptionTests
 	}
 
 	[TestMethod]
+	public void FetchKeepsPorcelainWhenRecursionIsExplicitlyNo()
+	{
+		// git accepts --porcelain with --recurse-submodules=no (it refuses only a mode that
+		// recurses), so a caller overriding a host's submodule.recurse=true keeps the itemisation.
+		RecordingGitProcessRunner runner = new();
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.RecursingSubmodules(GitSubmoduleRecursion.No);
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		CollectionAssert.Contains(arguments, "--porcelain");
+		CollectionAssert.Contains(arguments, "--recurse-submodules=no");
+	}
+
+	[TestMethod]
 	public void FetchKeepsPorcelainWhenNotRecursing()
 	{
 		RecordingGitProcessRunner runner = new();

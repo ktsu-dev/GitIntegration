@@ -246,10 +246,13 @@ Non-obvious, load-bearing design points:
    fails loudly moments later, at the fetch itself, in whichever entry point's own idiom.
 
    The version threshold is **not the only** reason detail can be unavailable, and code reading
-   `DetailAvailable` must not assume it is. `RecursingSubmodules(...)` is the second: git refuses
-   `--porcelain` and `--recurse-submodules` together outright — `fatal: options '--porcelain' and
-   '--recurse-submodules' cannot be used together`, verified against git 2.43 — so emitting both
-   would turn every recursing fetch into a failure. `--porcelain` is dropped instead and the caller's
+   `DetailAvailable` must not assume it is. `RecursingSubmodules(Yes)` and `RecursingSubmodules(OnDemand)`
+   are the second: git refuses `--porcelain` with a `--recurse-submodules` mode that recurses —
+   `fatal: options '--porcelain' and '--recurse-submodules' cannot be used together`, verified
+   against git 2.43 — so emitting both would turn every recursing fetch into a failure.
+   `RecursingSubmodules(No)` is accepted alongside `--porcelain` and keeps the detail, which is what
+   a caller overriding a host's `submodule.recurse=true` needs. For the two that recurse,
+   `--porcelain` is dropped instead and the caller's
    request wins, since they asked to fetch submodules rather than to be itemised. This degrades
    rather than throwing, unlike the `AllRemotes`/`FromRemote` guard, because the caller asked for
    nothing contradictory: the conflict is between their request and an internal implementation
