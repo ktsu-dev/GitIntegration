@@ -168,10 +168,15 @@ public class GitRoundTripTests
 
 		GitVersion version = await IntegrationGitFixture.CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
 
-		// Below 2.36 there is no -z, and a newline in a path cannot be represented at all.
+		// Below 2.36 there is no -z, and a newline in a path cannot be represented at all. git reports
+		// the resolved path (/private/var/... for macOS's /var/...), so the check is on the directory
+		// git names rather than on the spelling of the temp root.
 		if (version.AtLeast(2, 36))
 		{
-			Assert.AreEqual(Path.GetFullPath(worktree), Path.GetFullPath(linked.Path.WeakString));
+			StringAssert.EndsWith(
+				linked.Path.WeakString.Replace('\\', '/'),
+				Path.GetRelativePath(worktreeParent.RootPath, worktree).Replace('\\', '/'));
+			Assert.IsTrue(Directory.Exists(linked.Path.WeakString));
 		}
 	}
 
