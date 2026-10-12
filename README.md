@@ -838,7 +838,7 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `Tags()` | `IGitTagListBuilder` | Builds `git for-each-ref` over `refs/tags`. |
 | `Remotes()` | `IGitRemoteListBuilder` | Builds `git remote -v`. |
 | `Submodules()` | `IGitSubmoduleListBuilder` | Reads `git ls-files --stage -z` for the recorded gitlinks and `git submodule status` for what is checked out. |
-| `Worktrees()` | `IGitWorktreeListBuilder` | Builds `git worktree list --porcelain`. |
+| `Worktrees()` | `IGitWorktreeListBuilder` | Builds `git worktree list --porcelain -z` (without `-z` below git 2.36). |
 | `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision. |
 | `RevList(GitRefName)` | `IGitRevListBuilder` | Builds `git rev-list --count`, counting commits without listing them. |
 | `Divergence(GitRefName, GitRefName)` | `IGitRevListDivergenceBuilder` | Builds `git rev-list --count --left-right`, reporting ahead and behind for any two revisions. |
