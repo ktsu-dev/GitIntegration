@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.Linq;
 
 using ktsu.Semantics.Strings;
 
@@ -65,6 +66,47 @@ public class GitRemoteParserTests
 		Assert.AreEqual(
 			"git@github.com:ktsu-dev/GitIntegration.git".As<GitRepositoryRemotePath>(),
 			remotes[0].PushUrl);
+	}
+
+	[TestMethod]
+	public void KeepsEveryPushUrlInGitsOrder()
+	{
+		// One (push) line per remote.origin.pushurl; git push sends to all of them.
+		IReadOnlyList<GitRemote> remotes = GitRemoteParser.Parse(
+			"origin" + Tab + "https://example.com/a.git (fetch)\n" +
+			"origin" + Tab + "https://example.com/p1.git (push)\n" +
+			"origin" + Tab + "https://example.com/p2.git (push)\n");
+
+		Assert.AreEqual(1, remotes.Count);
+		Assert.AreEqual("https://example.com/p1.git".As<GitRepositoryRemotePath>(), remotes[0].PushUrl);
+		CollectionAssert.AreEqual(
+			new[]
+			{
+				"https://example.com/p1.git".As<GitRepositoryRemotePath>(),
+				"https://example.com/p2.git".As<GitRepositoryRemotePath>(),
+			},
+			remotes[0].PushUrls.ToArray());
+	}
+
+	[TestMethod]
+	public void ReportsTheFetchUrlAsTheOnlyPushUrlWhenNoPushUrlIsConfigured()
+	{
+		IReadOnlyList<GitRemote> remotes = GitRemoteParser.Parse(SingleRemote);
+
+		CollectionAssert.AreEqual(new[] { remotes[0].FetchUrl }, remotes[0].PushUrls.ToArray());
+	}
+
+	[TestMethod]
+	public void DefaultsPushUrlsToPushUrlWhenConstructedWithoutThem()
+	{
+		GitRemote remote = new()
+		{
+			Name = "origin".As<GitRemoteName>(),
+			FetchUrl = "https://example.com/a.git".As<GitRepositoryRemotePath>(),
+			PushUrl = "https://example.com/p.git".As<GitRepositoryRemotePath>(),
+		};
+
+		CollectionAssert.AreEqual(new[] { remote.PushUrl }, remote.PushUrls.ToArray());
 	}
 
 	[TestMethod]
