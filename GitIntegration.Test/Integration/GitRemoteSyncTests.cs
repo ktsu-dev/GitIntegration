@@ -170,6 +170,68 @@ public class GitRemoteSyncTests
 	}
 
 	[TestMethod]
+	public async Task ReportsUnpushedCommitsFromHeadWithoutARevisionAsync()
+	{
+		// The bare call is the natural "what have I not pushed?" query. --remotes counts as revision
+		// input, so unless HEAD is named git lists nothing, which reads as "nothing unpushed".
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "pushed", cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommit unpushed = await CommitFileAsync(
+			repository, workingDirectory, "b.txt", "two\n", "unpushed", cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> commits = await repository.Log()
+			.ExcludingRemoteTrackingRefs()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, commits.Count);
+		Assert.AreEqual(unpushed.Sha, commits[0].Sha);
+	}
+
+	[TestMethod]
+	public async Task ReportsEveryCommitAsUnpushedWithoutAnyRemoteAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository workingDirectory = new();
+
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
+			.Init(workingDirectory.Root)
+			.WithInitialBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitRepository repository = init.Repository;
+
+		await IntegrationGitFixture.ConfigureIdentityAsync(repository, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+
+		GitCommit first = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "first", cancellationToken).ConfigureAwait(false);
+		GitCommit second = await CommitFileAsync(repository, workingDirectory, "b.txt", "two\n", "second", cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> commits = await repository.Log()
+			.ExcludingRemoteTrackingRefs()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(2, commits.Count);
+		Assert.AreEqual(second.Sha, commits[0].Sha);
+		Assert.AreEqual(first.Sha, commits[1].Sha);
+	}
+
+	[TestMethod]
 	public async Task CountsCommitsAndDivergenceAgainstARealRemoteAsync()
 	{
 		// Runs both rev-list builders against a real repository, so the ahead/behind mapping is

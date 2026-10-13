@@ -193,6 +193,37 @@ public class GitLogBuilderTests
 	}
 
 	[TestMethod]
+	public void DefaultsTheUnpushedQueryToHead()
+	{
+		// --remotes counts as revision input even when negated, so git stops falling back to HEAD and
+		// "git log --not --remotes --not" lists nothing. The builder names HEAD itself to keep the
+		// documented "from HEAD" default.
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ExcludingRemoteTrackingRefs();
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		Assert.AreEqual("HEAD", arguments[^1]);
+		Assert.AreEqual("--end-of-options", arguments[^2]);
+		Assert.IsTrue(Array.LastIndexOf(arguments, "--not") < arguments.Length - 2);
+	}
+
+	[TestMethod]
+	public void AddsNoHeadWhenAllRefsAreIncluded()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitLogBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.IncludingAllRefs().ExcludingRemoteTrackingRefs();
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		CollectionAssert.DoesNotContain(arguments, "HEAD");
+	}
+
+	[TestMethod]
 	public void KeepsTheNegationBeforeEveryNonOptionArgument()
 	{
 		// git refuses --not once a non-option argument has appeared: "git log --end-of-options HEAD

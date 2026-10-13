@@ -70,7 +70,8 @@ public interface IGitLogBuilder : IGitCommandBuilder<IReadOnlyList<GitCommit>>
 	/// "which commits in this repository does no remote have?" — the check to run before discarding a
 	/// working copy, to know whether doing so would destroy work that exists nowhere else. Combined
 	/// with <see cref="ForRevision"/> instead, it narrows the same question to one revision's
-	/// history.
+	/// history. With neither, it answers for HEAD, which the builder then names explicitly: git stops
+	/// defaulting to HEAD once <c>--remotes</c> is given, and would otherwise list nothing.
 	/// </para>
 	/// <para>
 	/// Reported as a commit list rather than a bare yes or no, because a caller that only wants the
@@ -215,6 +216,13 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 		if (_revision is not null)
 		{
 			AppendOperands(arguments, _revision.WeakString);
+		}
+		else if (_excludingRemoteTrackingRefs && !_includingAllRefs)
+		{
+			// git falls back to HEAD only when no revision input was given at all, and --remotes counts
+			// as input even when negated, so without an explicit HEAD "--not --remotes --not" selects
+			// nothing and reads as "nothing unpushed". Verified against git 2.43.
+			AppendOperands(arguments, "HEAD");
 		}
 
 		if (_paths.Count > 0)
