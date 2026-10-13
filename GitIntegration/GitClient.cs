@@ -25,6 +25,8 @@ using ktsu.Semantics.Paths;
 /// <param name="fileSystem">Checks a clone destination before the clone starts.</param>
 public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider fileSystem) : IGitClient
 {
+	private const string DubiousOwnershipPhrase = "detected dubious ownership in repository";
+
 	private readonly IGitProcessRunner _runner = Ensure.NotNull(runner);
 	private readonly IFileSystemProvider _fileSystem = Ensure.NotNull(fileSystem);
 
@@ -86,6 +88,20 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 	{
 		GitResult<string> topLevel = await new GitTextBuilder(_runner, startingPath, "rev-parse", "--show-toplevel")
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// git refuses a repository owned by another user unless safe.directory admits it. That
+		// repository exists, so reporting it as absent would be false, and git's diagnostic carries
+		// the exact `git config --global --add safe.directory` line that fixes it. The match relies on
+		// the LC_ALL=C the runner pins, as every other phrase match in this library does.
+		if (topLevel.Error is { } error &&
+			error.StandardError.Contains(DubiousOwnershipPhrase, StringComparison.Ordinal))
+		{
+			throw new GitCommandException(
+				$"git refused the repository containing '{startingPath.WeakString}' as unsafe: {error.StandardError.Trim()}",
+				error.ExitCode,
+				error.Arguments,
+				error.StandardError);
+		}
 
 		if (!topLevel.Success || string.IsNullOrEmpty(topLevel.Value))
 		{

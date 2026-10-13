@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
@@ -13,6 +14,12 @@ public class GitClientTests
 {
 	private const string NotARepository =
 		"fatal: not a git repository (or any of the parent directories): .git\n";
+
+	private const string DubiousOwnership =
+		"fatal: detected dubious ownership in repository at '/srv/r5'\n" +
+		"To add an exception for this directory, call:\n" +
+		"\n" +
+		"\tgit config --global --add safe.directory /srv/r5\n";
 
 	private static string TopLevel =>
 		OperatingSystem.IsWindows() ? "C:/dev/fixture-repo" : "/dev/fixture-repo";
@@ -129,6 +136,51 @@ public class GitClientTests
 			async () => await client
 				.OpenAsync(TestPaths.Root, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
 			.ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task OpenReportsDubiousOwnershipWithGitsMessageRatherThanAsNotFoundAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardError: DubiousOwnership, exitCode: 128);
+		GitClient client = new(runner);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await client
+				.OpenAsync(TestPaths.Root, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(128, exception.ExitCode);
+		Assert.AreEqual(DubiousOwnership, exception.StandardError);
+		StringAssert.Contains(exception.Message, "safe.directory");
+	}
+
+	[TestMethod]
+	public async Task DiscoverReportsDubiousOwnershipRatherThanNullAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardError: DubiousOwnership, exitCode: 128);
+		GitClient client = new(runner);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await client
+				.DiscoverAsync(TestPaths.Root, TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		CollectionAssert.Contains(exception.Arguments.ToArray(), "--show-toplevel");
+	}
+
+	[TestMethod]
+	public async Task IsRepositoryReportsFalseForDubiousOwnershipAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardError: DubiousOwnership, exitCode: 128);
+		GitClient client = new(runner);
+
+		bool isRepository = await client
+			.IsRepositoryAsync(TestPaths.Root, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsFalse(isRepository);
 	}
 
 	[TestMethod]

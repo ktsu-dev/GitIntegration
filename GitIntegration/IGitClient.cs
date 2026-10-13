@@ -22,7 +22,10 @@ public interface IGitClient
 	/// </summary>
 	/// <remarks>
 	/// Never throws for a path that is not a repository, or for a path that does not exist. Both
-	/// answer the same question the same way.
+	/// answer the same question the same way. A repository git refuses as dubious ownership (see
+	/// <c>safe.directory</c>) also answers <see langword="false"/>, since git will run nothing there;
+	/// <see cref="OpenAsync"/> and <see cref="DiscoverAsync"/> report it as a
+	/// <see cref="GitCommandException"/> carrying git's fix-it message instead.
 	/// </remarks>
 	/// <param name="path">The path to test.</param>
 	/// <param name="cancellationToken">Cancels the invocation.</param>
@@ -42,6 +45,10 @@ public interface IGitClient
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns>The opened repository.</returns>
 	/// <exception cref="GitRepositoryNotFoundException">The path is not inside a working tree.</exception>
+	/// <exception cref="GitCommandException">
+	/// git refused the repository as dubious ownership; <see cref="GitCommandException.StandardError"/>
+	/// carries git's <c>safe.directory</c> advice.
+	/// </exception>
 	/// <exception cref="GitParseException">
 	/// git reported a working-tree root that is not an absolute directory path.
 	/// </exception>
@@ -54,6 +61,11 @@ public interface IGitClient
 	/// <param name="startingPath">A path inside, or below, the repository.</param>
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns>The opened repository, or <see langword="null"/> when there is none.</returns>
+	/// <exception cref="GitCommandException">
+	/// git refused the repository as dubious ownership; <see cref="GitCommandException.StandardError"/>
+	/// carries git's <c>safe.directory</c> advice. The repository exists, so this is not reported
+	/// as <see langword="null"/>.
+	/// </exception>
 	/// <exception cref="GitParseException">
 	/// git reported a working-tree root that is not an absolute directory path.
 	/// </exception>
