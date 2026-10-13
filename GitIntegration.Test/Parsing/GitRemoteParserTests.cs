@@ -84,6 +84,18 @@ public class GitRemoteParserTests
 	}
 
 	[TestMethod]
+	public void SkipsARemoteSectionWithNoUrl()
+	{
+		IReadOnlyList<GitRemote> remotes = GitRemoteParser.Parse(
+			"origin" + Tab + "\n" +
+			"upstream" + Tab + "https://x (fetch)\n" +
+			"upstream" + Tab + "https://x (push)\n");
+
+		Assert.AreEqual(1, remotes.Count);
+		Assert.AreEqual("upstream".As<GitRemoteName>(), remotes[0].Name);
+	}
+
+	[TestMethod]
 	public void RejectsALineWithNoTabSeparator()
 	{
 		Assert.ThrowsExactly<GitParseException>(
