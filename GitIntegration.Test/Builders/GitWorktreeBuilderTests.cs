@@ -66,13 +66,15 @@ public sealed class GitWorktreeBuilderTests
 	}
 
 	[TestMethod]
-	public void BuildsTheMinimalWorktreeAddVector()
+	public void DetachesWhenNeitherAModeNorACommitIshIsChosen()
 	{
+		// Bare `git worktree add <path>` creates a branch named after the folder, or checks out an
+		// existing one of that name, so the builder detaches at HEAD instead.
 		RecordingGitProcessRunner runner = new();
 		GitWorktreeAddBuilder builder = new(runner, TestPaths.Root, TestPaths.Worktree);
 
 		CollectionAssert.AreEqual(
-			Expect("worktree", "add", "--end-of-options", TestPaths.Worktree.WeakString),
+			Expect("worktree", "add", "--detach", "--end-of-options", TestPaths.Worktree.WeakString),
 			builder.BuildArguments().ToArray());
 	}
 
@@ -175,7 +177,7 @@ public sealed class GitWorktreeBuilderTests
 		_ = builder.Force().WithoutCheckout();
 
 		CollectionAssert.AreEqual(
-			Expect("worktree", "add", "--force", "--no-checkout", "--end-of-options", TestPaths.Worktree.WeakString),
+			Expect("worktree", "add", "--force", "--no-checkout", "--detach", "--end-of-options", TestPaths.Worktree.WeakString),
 			builder.BuildArguments().ToArray());
 	}
 
