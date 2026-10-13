@@ -154,6 +154,23 @@ public class GitTagWriteBuilderTests
 	}
 
 	[TestMethod]
+	public void RefusesSigningOnlyForALightweightTag()
+	{
+		// tag.gpgSign=true would otherwise turn a lightweight tag into a signed annotated one.
+		GitTagCreateBuilder lightweight = new(new RecordingGitProcessRunner(), TestPaths.Root, Version);
+		string[] lightweightArguments = [.. lightweight.BuildArguments()];
+
+		CollectionAssert.Contains(lightweightArguments, "--no-sign");
+		Assert.IsTrue(
+			Array.IndexOf(lightweightArguments, "--no-sign") < Array.IndexOf(lightweightArguments, "--end-of-options"));
+
+		GitTagCreateBuilder annotated = new(new RecordingGitProcessRunner(), TestPaths.Root, Version);
+		_ = annotated.Annotating("release".As<GitCommitMessage>());
+
+		CollectionAssert.DoesNotContain(annotated.BuildArguments().ToArray(), "--no-sign");
+	}
+
+	[TestMethod]
 	public void EmitsAnnotateAndMessageTogether()
 	{
 		// Either flag alone is a different command: --annotate with no message opens an editor that
