@@ -40,6 +40,19 @@ internal static class GitParseValues
 	}
 
 	/// <summary>
+	/// Reports whether an object id is git's null id — the absence of an object, not an object.
+	/// </summary>
+	/// <remarks>
+	/// Tested by its digits rather than against a constant, because the id's width is the repository's
+	/// object format: 40 characters under SHA-1 and 64 under <c>--object-format=sha256</c>. The empty
+	/// case is excluded explicitly, so "nothing at all" is never mistaken for "all zeroes".
+	/// </remarks>
+	/// <param name="objectId">The object id git printed.</param>
+	/// <returns><see langword="true"/> when every character is a zero.</returns>
+	internal static bool IsNullObjectId(string objectId) =>
+		objectId.Length > 0 && objectId.AsSpan().IndexOfAnyExcept('0') < 0;
+
+	/// <summary>
 	/// Converts a raw field that git may legitimately leave blank into a semantic string, or
 	/// <see langword="null"/> when it is blank.
 	/// </summary>

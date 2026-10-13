@@ -53,6 +53,26 @@ public sealed class GitWorktreeParserTests
 	}
 
 	[TestMethod]
+	[DataRow("0000000000000000000000000000000000000000")]
+	[DataRow("0000000000000000000000000000000000000000000000000000000000000000")]
+	public void ReportsNoHeadForAnUnbornBranch(string nullObjectId)
+	{
+		// git still prints a HEAD line on an unborn branch, carrying the null id. That is git's "no
+		// commit", not a commit, so reporting it would hand a caller a revision git then refuses.
+		string output =
+			$"worktree {AbsolutePath("project")}\n" +
+			$"HEAD {nullObjectId}\n" +
+			"branch refs/heads/main\n" +
+			"\n";
+
+		IReadOnlyList<GitWorktree> worktrees = GitWorktreeParser.Parse(output);
+
+		Assert.AreEqual(1, worktrees.Count);
+		Assert.IsNull(worktrees[0].Head);
+		Assert.AreEqual("main".As<GitBranchName>(), worktrees[0].Branch);
+	}
+
+	[TestMethod]
 	public void StripsTheRefsHeadsPrefixFromTheBranch()
 	{
 		// The hosting half of this library already hands back bare branch names. A caller should not

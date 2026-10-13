@@ -105,7 +105,11 @@ internal static class GitWorktreeParser
 					path = value;
 					break;
 				case "HEAD":
-					head = GitParseValues.ToSemantic<GitCommitSha>(value, "commit id");
+					// An unborn branch still gets a HEAD line, carrying the null id: git's "no commit",
+					// not a commit, so it is reported as no head rather than as forty zeroes.
+					head = GitParseValues.IsNullObjectId(value)
+						? null
+						: GitParseValues.ToSemantic<GitCommitSha>(value, "commit id");
 					break;
 				case "branch":
 					branch = GitParseValues.ToSemantic<GitBranchName>(StripRefsHeadsPrefix(value), "branch name");
