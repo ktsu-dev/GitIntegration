@@ -173,6 +173,32 @@ public class GitTagWriteBuilderTests
 	}
 
 	[TestMethod]
+	public void KeepsHashLeadingLinesInTheMessage()
+	{
+		// git tag strips "#"-leading lines from a --message value unless told otherwise.
+		RecordingGitProcessRunner runner = new();
+		GitTagCreateBuilder builder = new(runner, TestPaths.Root, Version);
+
+		_ = builder.Annotating("#123 fixed the crash".As<GitCommitMessage>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		CollectionAssert.Contains(arguments, "--cleanup=whitespace");
+		Assert.IsTrue(Array.IndexOf(arguments, "--cleanup=whitespace") < Array.IndexOf(arguments, "--end-of-options"));
+	}
+
+	[TestMethod]
+	public void LeavesCleanupOffALightweightTag()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitTagCreateBuilder builder = new(runner, TestPaths.Root, Version);
+
+		string[] arguments = [.. builder.BuildArguments()];
+
+		CollectionAssert.DoesNotContain(arguments, "--cleanup=whitespace");
+	}
+
+	[TestMethod]
 	public void PutsTheNameBeforeTheTarget()
 	{
 		// git tag takes <name> then an optional <commit> positionally. Swapping them tags the wrong
