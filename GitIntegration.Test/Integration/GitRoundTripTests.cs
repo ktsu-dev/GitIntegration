@@ -802,6 +802,34 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task LightweightTagIgnoresTagGpgSignAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit commit = await repository.Commit("c1".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Without --no-sign git tries to sign the tag, which needs a message and so an editor.
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "tag.gpgSign", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitTagName name = "v1.0.0".As<GitTagName>();
+		_ = await repository.CreateTag(name).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitTag tag = (await repository.Tags().ExecuteAsync(cancellationToken).ConfigureAwait(false)).Single();
+		Assert.AreEqual(name, tag.Name);
+		Assert.IsFalse(tag.IsAnnotated);
+		Assert.AreEqual(commit.Sha, tag.Sha);
+	}
+
+	[TestMethod]
 	public async Task RemoteAddSetUrlAndRemoveRoundTripAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

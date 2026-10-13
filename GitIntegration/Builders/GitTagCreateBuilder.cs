@@ -102,6 +102,15 @@ internal sealed class GitTagCreateBuilder(
 			arguments.Add("--force");
 		}
 
+		// A lightweight tag cannot be signed, but tag.gpgSign=true makes git try to sign one anyway,
+		// turning it into an annotated tag that needs a message and so opens an editor nothing here
+		// can answer. --no-sign pins the lightweight tag the caller asked for; an annotated tag is
+		// left to the host's signing preference.
+		if (_message is null)
+		{
+			arguments.Add("--no-sign");
+		}
+
 		// --annotate and --message travel together and are emitted adjacently, because either alone
 		// is a different command: --annotate without a message opens an editor, which output
 		// redirection makes impossible to answer, and --message without --annotate makes an
