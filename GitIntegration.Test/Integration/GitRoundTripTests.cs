@@ -892,6 +892,26 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task RemotesSkipsAConfiguredRemoteWithNoUrlAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		// The shape a global remote.origin.prune=true leaves in a repository with no origin.
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "remote.ghost.prune", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitRemote> remotes =
+			await repository.Remotes().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(0, remotes.Count);
+	}
+
+	[TestMethod]
 	public async Task CloneReproducesTheSourceHistoryAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

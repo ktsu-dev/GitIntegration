@@ -54,6 +54,14 @@ internal static class GitRemoteParser
 			string name = record[..tab];
 			string remainder = record[(tab + 1)..];
 
+			// A remote.<name>.* section with no url (a global remote.origin.prune=true in a
+			// repository without origin, say) is listed as the name and a bare tab. git itself
+			// treats such a remote as non-existent, so it is skipped rather than rejected.
+			if (remainder.Length == 0)
+			{
+				continue;
+			}
+
 			if (!order.Contains(name))
 			{
 				order.Add(name);
