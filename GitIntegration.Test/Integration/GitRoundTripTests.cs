@@ -596,6 +596,35 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task AnnotatedTagKeepsHashLeadingLinesAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitTagName name = "v1.0.0".As<GitTagName>();
+
+		_ = await repository.CreateTag(name)
+			.Annotating("#123 fixed the crash\n\n# 456 another".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitTag> tags = await repository.Tags().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual("#123 fixed the crash", tags.Single().Message);
+
+		// Tags() reports only the subject, so the body line is read from the tag object itself.
+		string tagObject = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "cat-file", "-p", "refs/tags/v1.0.0")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		StringAssert.EndsWith(tagObject.Replace("\r\n", "\n", StringComparison.Ordinal), "#123 fixed the crash\n\n# 456 another");
+	}
+
+	[TestMethod]
 	public async Task BranchAndTagSharingANameAreBothReportedByThatNameAsync()
 	{
 		// A release branch and a release tag both called v1 make the short name ambiguous, and

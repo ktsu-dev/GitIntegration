@@ -111,6 +111,12 @@ internal sealed class GitTagCreateBuilder(
 			arguments.Add("--annotate");
 			arguments.Add("--message");
 			arguments.Add(_message.WeakString);
+
+			// Unlike git commit, git tag applies "strip" cleanup even to a --message value, so every
+			// "#"-leading line is dropped as a comment: "#123 fixed the crash" becomes an empty
+			// message while git still exits 0. "whitespace" keeps the message as given, matching
+			// GitCommitBuilder.
+			arguments.Add("--cleanup=whitespace");
 		}
 
 		// Order is load-bearing, exactly as it is for branch creation: git tag takes <name> then an
