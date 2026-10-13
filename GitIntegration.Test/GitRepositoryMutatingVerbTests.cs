@@ -25,7 +25,7 @@ public class GitRepositoryMutatingVerbTests
 
 		string[][] vectors =
 		[
-			[.. repository.Add().BuildArguments()],
+			[.. repository.Add().All().BuildArguments()],
 			[.. repository.Commit("m".As<GitCommitMessage>()).BuildArguments()],
 			[.. repository.CreateBranch("b".As<GitBranchName>()).BuildArguments()],
 			[.. repository.DeleteBranch("b".As<GitBranchName>()).BuildArguments()],
