@@ -61,12 +61,12 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
   `GitSubmoduleState`, `GitSubmoduleRecursion`, `GitSubmodulePushCheck`, `GitInitResult`,
   `GitCompleted` — the shared "unit" result for mutating verbs whose only outcome is success (C# has
   no generic `void`) — and the remote-sync models `GitRefUpdate`, `GitRefUpdateKind`,
-  `GitFetchResult` (`Updates`, `DetailAvailable`, `IsUpToDate`), and `GitPushResult` (`Updates`,
+  `GitFetchResult` (`Updates`, `DetailAvailable`, `IsUpToDate`, `HasRejections`), and `GitPushResult` (`Updates`,
   `HasRejections`).
 - `GitIntegration/Execution/` — `GitOptions`, `IGitProcessRunner`, `RunCommandGitProcessRunner`,
   `GitResult<T>`, and the exception hierarchy (`GitException` → `GitExecutableNotFoundException`,
   `GitTimeoutException`, `GitParseException`, `GitCommandException` → `GitRepositoryNotFoundException`,
-  `GitNothingToCommitException`, `GitPushRejectedException`, `GitPullConflictException`).
+  `GitNothingToCommitException`, `GitFetchRejectedException`, `GitPushRejectedException`, `GitPullConflictException`).
 - `GitIntegration/Parsing/` — internal parsers turning raw git output into the `Models/` records,
   including `GitFetchParser` and `GitPushParser` for the two porcelain formats `fetch --porcelain`
   and `push --porcelain` emit, `GitTagParser`, and `GitSubmoduleParser`.
@@ -233,6 +233,14 @@ Non-obvious, load-bearing design points:
    `GitPushResult.HasRejections` — git ran and said exactly what happened, which is what "try"
    should surface rather than forcing a caller to catch an exception for an outcome git already
    described in full.
+
+   `Fetch` follows the same split for a refused reference, such as a tag the remote moved: git
+   exits 1, updates everything else, and reports the refusal only as a `!` porcelain record on
+   standard output, with standard error empty. `ExecuteAsync` throws `GitFetchRejectedException`
+   carrying the parsed `GitFetchResult`, and `TryExecuteAsync` returns it as a value to check with
+   `GitFetchResult.HasRejections`. Only a result that records a rejection is treated this way; a
+   failure that merely listed some updates first stays an error. Fetch's `GetDiagnostic` falls
+   back to standard output when standard error is empty, so no fetch failure has a blank message.
 
 7. **`Fetch` degrades below git 2.41 rather than parsing human output, and degrades again when
    recursing into submodules.** `fetch --porcelain` exists

@@ -210,6 +210,119 @@ public class GitFetchBuilderTests
 		Assert.AreEqual(128, result.Error?.ExitCode);
 	}
 
+	private const string TagReference = "refs/tags/v1";
+
+	// What git 2.43 prints for "fetch --porcelain origin --tags" when the remote moved a tag the
+	// local clone already has: the branch updates normally, the tag is refused with "!", the exit
+	// code is 1, and nothing at all goes to standard error.
+	private static readonly string RejectedTagOutput =
+		Record(" ", OldSha, NewSha, UpdatedReference) + Record("!", OldSha, NewSha, TagReference);
+
+	[TestMethod]
+	public async Task ThrowsFetchRejectedCarryingEveryUpdateWhenAReferenceIsRefusedAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: RejectedTagOutput, exitCode: 1);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitFetchRejectedException exception = await Assert.ThrowsExactlyAsync<GitFetchRejectedException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(1, exception.ExitCode);
+		Assert.IsNotNull(exception.Result);
+		Assert.IsTrue(exception.Result.HasRejections);
+		Assert.AreEqual(2, exception.Result.Updates.Count);
+		Assert.AreEqual(GitRefUpdateKind.FastForward, exception.Result.Updates[0].Kind);
+		Assert.AreEqual(GitRefUpdateKind.Rejected, exception.Result.Updates[1].Kind);
+		StringAssert.Contains(exception.Message, TagReference);
+	}
+
+	[TestMethod]
+	public async Task TryExecuteReturnsARefusedReferenceAsAValueAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: RejectedTagOutput, exitCode: 1);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitResult<GitFetchResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(result.Success);
+		Assert.IsTrue(result.Value!.HasRejections);
+		Assert.AreEqual(UpdatedReference.As<GitRefName>(), result.Value.Updates[0].Reference);
+		Assert.AreEqual(TagReference.As<GitRefName>(), result.Value.Updates[1].Reference);
+	}
+
+	[TestMethod]
+	public async Task AFailureThatRefusedNothingStaysAnErrorAsync()
+	{
+		// Updates listed before an unrelated failure, such as one of several remotes being
+		// unreachable, must not turn that failure into a value.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: PorcelainOutput, standardError: "fatal: could not read from remote\n", exitCode: 1)
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: PorcelainOutput, standardError: "fatal: could not read from remote\n", exitCode: 1);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		StringAssert.Contains(exception.Message, "could not read from remote");
+
+		GitResult<GitFetchResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
+	public async Task AFailureWithUnreadablePorcelainStaysAnErrorAsync()
+	{
+		// Whatever git printed alongside a failure, the failure is what gets reported, not a
+		// GitParseException about the output that came with it.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: "! x\n", standardError: "fatal: broken\n", exitCode: 1)
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: "! x\n", standardError: "fatal: broken\n", exitCode: 1);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		StringAssert.Contains(exception.Message, "broken");
+
+		GitResult<GitFetchResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
+	public async Task FallsBackToStandardOutputWhenStandardErrorIsEmptyAsync()
+	{
+		// No fetch failure should end in an empty diagnostic. Below git 2.41 nothing is parsed, so
+		// this reaches the plain error path with the explanation only on standard output.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.40.1\n")
+			.Then(standardOutput: "error: some reference was refused\n", exitCode: 1)
+			.Then(standardOutput: "git version 2.40.1\n")
+			.Then(standardOutput: "error: some reference was refused\n", exitCode: 1);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		StringAssert.Contains(exception.Message, "some reference was refused");
+
+		GitResult<GitFetchResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(result.Success);
+		StringAssert.Contains(result.Error!.StandardError, "some reference was refused");
+	}
+
 	[TestMethod]
 	public async Task TryExecuteDegradesToUnsupportedWhenTheVersionProbeFailsAsync()
 	{

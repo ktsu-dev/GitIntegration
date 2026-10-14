@@ -14,6 +14,15 @@ using ktsu.Semantics.Paths;
 /// <summary>
 /// Downloads objects and refs from a remote without touching the working tree.
 /// </summary>
+/// <remarks>
+/// Like push, its two entry points differ in more than exception-versus-result, because a fetch
+/// that refuses one reference (a tag the remote moved, say) exits non-zero while still updating
+/// the others and listing every one. <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/> stays
+/// strict and throws <see cref="GitFetchRejectedException"/>, which carries that account.
+/// <see cref="IGitCommandBuilder{TResult}.TryExecuteAsync"/> returns the account as a value and
+/// leaves the caller to check <see cref="GitFetchResult.HasRejections"/>. Either way the account
+/// exists only where <c>--porcelain</c> does, from git 2.41.
+/// </remarks>
 public interface IGitFetchBuilder : IGitCommandBuilder<GitFetchResult>
 {
 	/// <summary>Fetches from this remote instead of the branch's configured upstream.</summary>
@@ -276,11 +285,100 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	}
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// A refused reference comes back as <see cref="GitFetchRejectedException"/> carrying the
+	/// parsed account, so the references that did update are not lost with the exit code.
+	/// </remarks>
+	protected override GitCommandException CreateException(GitProcessResult result)
+	{
+		Ensure.NotNull(result);
+
+		GitFetchResult? parsed = ParseRejections(result);
+
+		return parsed is null
+			? base.CreateException(result)
+			: new GitFetchRejectedException(
+				$"git refused at least one reference: {result.StandardOutput.Trim()}",
+				result.ExitCode,
+				result.Arguments,
+				result.StandardError,
+				parsed);
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// Standard output when standard error is empty. Under <c>--porcelain</c> git reports a refused
+	/// reference only as a <c>!</c> record on standard output and writes nothing to standard error,
+	/// which would otherwise leave a failure with an empty diagnostic.
+	/// </remarks>
+	protected override string GetDiagnostic(GitProcessResult result)
+	{
+		Ensure.NotNull(result);
+
+		return string.IsNullOrWhiteSpace(result.StandardError)
+			? result.StandardOutput
+			: result.StandardError;
+	}
+
+	/// <inheritdoc />
 	public override async Task<GitResult<GitFetchResult>> TryExecuteAsync(CancellationToken cancellationToken = default)
 	{
 		await ProbeVersionAsync(cancellationToken).ConfigureAwait(false);
 
-		return await base.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitProcessResult result = await Runner.RunAsync(
+			new GitProcessRequest { Arguments = BuildArguments(), Progress = Progress },
+			cancellationToken).ConfigureAwait(false);
+
+		if (result.Success)
+		{
+			return GitResult<GitFetchResult>.FromValue(ParseResult(result));
+		}
+
+		// Deliberately a success carrying rejections rather than an error, as push does: git ran,
+		// updated what it could, and reported precisely what happened to every reference. Callers
+		// distinguish the two with GitFetchResult.HasRejections.
+		GitFetchResult? parsed = ParseRejections(result);
+
+		return parsed is not null
+			? GitResult<GitFetchResult>.FromValue(parsed)
+			: GitResult<GitFetchResult>.FromError(new GitCommandError
+			{
+				ExitCode = result.ExitCode,
+				Arguments = result.Arguments,
+				StandardError = GetDiagnostic(result),
+			});
+	}
+
+	/// <summary>
+	/// Reads the porcelain account of a failed fetch, when that failure was git refusing references.
+	/// </summary>
+	/// <remarks>
+	/// Only a result that records a rejection counts. A fetch can also fail after listing some
+	/// updates for an unrelated reason, such as one of several remotes being unreachable under
+	/// <c>--all</c>, and returning those updates as a value would hide that failure.
+	/// </remarks>
+	/// <param name="result">The failed invocation outcome.</param>
+	/// <returns>The parsed account, or <see langword="null"/> when it records no rejection.</returns>
+	private GitFetchResult? ParseRejections(GitProcessResult result)
+	{
+		if (!IsPorcelainAvailable)
+		{
+			return null;
+		}
+
+		GitFetchResult parsed;
+
+		try
+		{
+			parsed = GitFetchParser.Parse(result.StandardOutput);
+		}
+		catch (GitParseException)
+		{
+			// The failure is the thing to report, not the parser's view of whatever came with it.
+			return null;
+		}
+
+		return parsed.HasRejections ? parsed : null;
 	}
 
 	/// <summary>
