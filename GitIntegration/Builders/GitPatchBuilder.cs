@@ -25,7 +25,16 @@ using ktsu.Semantics.Paths;
 /// </remarks>
 public interface IGitPatchBuilder : IGitCommandBuilder<GitPatch>
 {
-	/// <summary>Compares the index against HEAD instead of the working tree against the index.</summary>
+	/// <summary>
+	/// Compares the index instead of the working tree: against HEAD, or against the revision
+	/// <see cref="Against"/> names.
+	/// </summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="Between"/>: git refuses <c>--cached</c> alongside two
+	/// revisions. A caller may set both in either order, so only the finished configuration can
+	/// detect the contradiction; <c>BuildArguments</c> throws <see cref="InvalidOperationException"/>
+	/// when both are set, before a process is even spawned.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPatchBuilder Staged();
 
@@ -156,6 +165,16 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
+
+		// Real git answers "diff --cached <a> <b>" with its whole usage screen and exit 129 (verified
+		// against git 2.43), which names neither call. Against shares the revision slot with Between
+		// and takes one revision, which --cached accepts, so only Between conflicts with Staged.
+		if (_staged && _revisions.Length > 1)
+		{
+			throw new InvalidOperationException(
+				"Staged and Between cannot both be requested: git refuses --cached alongside two " +
+				"revisions.");
+		}
 
 		// diff.suppressBlankEmpty makes git print an empty context line as a bare newline with no
 		// leading space, which a patch reader cannot tell from the end of a hunk. A -c on the
