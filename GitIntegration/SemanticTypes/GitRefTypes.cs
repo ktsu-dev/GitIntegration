@@ -7,8 +7,13 @@ using ktsu.Semantics.Strings;
 /// <summary>
 /// A strongly-typed git branch name, such as <c>main</c> or <c>feature/git-v2</c>.
 /// </summary>
+/// <remarks>
+/// Names git forbids, such as <c>a..b</c>, <c>x y</c> or <c>foo.lock</c>, are rejected at
+/// construction. See <see cref="IsGitBranchNameAttribute"/>.
+/// </remarks>
 [HasNonWhitespaceContent]
 [NotAnOption]
+[IsGitBranchName]
 public sealed record GitBranchName : SemanticString<GitBranchName> { }
 
 /// <summary>

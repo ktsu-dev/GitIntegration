@@ -72,10 +72,12 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
   and `push --porcelain` emit, `GitTagParser`, and `GitSubmoduleParser`.
 - `GitIntegration/SemanticTypes/` — the `ktsu.Semantics` wrapper types for git identifiers, including
   `GitTagName`, `GitHostRepositoryId`, and the pull-request types (`GitPullRequestNumber`,
-  `GitPullRequestTitle`, `GitPullRequestAuthor`, `GitPullRequestWebURI`) added in Phase 5b. Two
+  `GitPullRequestTitle`, `GitPullRequestAuthor`, `GitPullRequestWebURI`) added in Phase 5b. Three
   validation attributes live here: `NotAnOptionAttribute`, which stops a value being reinterpreted by
-  git as a flag, and `IsSinglePathSegmentAttribute`, which stops a value being reinterpreted by a URL
-  or a filesystem as more than one segment.
+  git as a flag, `IsSinglePathSegmentAttribute`, which stops a value being reinterpreted by a URL
+  or a filesystem as more than one segment, and `IsGitBranchNameAttribute`, which rejects the branch
+  names `git check-ref-format --branch` forbids. The branch-name rule must never be stricter than
+  git's, because the parsers build `GitBranchName` from git's own output.
 - `GitIntegration/GitProvider.cs` — the abstract hosting base: credential resolution
   (`TryGetCredential`, `ResolveCredential`), the internal `HttpMessageHandler? Handler` transport
   seam, and `CreatePullRequest(GitRepositoryName)`.

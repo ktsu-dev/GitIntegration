@@ -2,6 +2,8 @@
 
 namespace ktsu.GitIntegration.Test;
 
+using System;
+
 using ktsu.Semantics.Strings;
 
 [TestClass]
@@ -86,6 +88,51 @@ public class SemanticTypeTests
 	{
 		Assert.IsFalse(GitBranchName.TryCreate(value, out GitBranchName? result));
 		Assert.IsNull(result);
+	}
+
+	[TestMethod]
+	[DataRow("a..b")] // two consecutive dots
+	[DataRow("x y")] // a space
+	[DataRow("a\tb")] // a control character
+	[DataRow("a\u007fb")] // DEL
+	[DataRow("a~1")] // ~
+	[DataRow("a^b")] // ^
+	[DataRow("a:b")] // :
+	[DataRow("a?b")] // ?
+	[DataRow("a*b")] // *
+	[DataRow("a[b")] // [
+	[DataRow("a\\b")] // a backslash
+	[DataRow("a@{b")] // @{
+	[DataRow("a//b")] // an empty component
+	[DataRow("/a")] // a leading slash
+	[DataRow("a/")] // a trailing slash
+	[DataRow("a.")] // a trailing dot
+	[DataRow(".a")] // a component starting with a dot
+	[DataRow("a/.b")] // a later component starting with a dot
+	[DataRow("foo.lock")] // a component ending in .lock
+	[DataRow("foo.lock/bar")] // an inner component ending in .lock
+	public void GitBranchNameRejectsNamesGitForbids(string value)
+	{
+		Assert.IsFalse(GitBranchName.TryCreate(value, out GitBranchName? result));
+		Assert.IsNull(result);
+		Assert.ThrowsExactly<ArgumentException>(() => GitBranchName.Create(value));
+	}
+
+	[TestMethod]
+	[DataRow("main")]
+	[DataRow("feature/git-v2")]
+	[DataRow("origin/main")]
+	[DataRow("@")] // git creates refs/heads/@, and status reports it as branch.head @
+	[DataRow("a@b")]
+	[DataRow("a.lock.b")]
+	[DataRow("release/1.2")]
+	[DataRow("(detached)")]
+	[DataRow("caf\u00e9/\u00fcn\u00ef")]
+	public void GitBranchNameAcceptsNamesGitAccepts(string value)
+	{
+		// Parsers build GitBranchName from git's own output, so anything git accepts must still
+		// construct, or reading that repository would throw GitParseException.
+		Assert.AreEqual(value, GitBranchName.Create(value).WeakString);
 	}
 
 	[TestMethod]
