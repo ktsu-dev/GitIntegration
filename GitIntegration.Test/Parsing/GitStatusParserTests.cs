@@ -30,6 +30,13 @@ public class GitStatusParserTests
 		"# branch.upstream origin/main" + Nul +
 		"# branch.ab +3 -7" + Nul;
 
+	// git prints branch.upstream from the branch's configuration, but leaves out branch.ab when the
+	// ref it names is gone: deleted on the remote after a merge, or never fetched.
+	private const string TrackingAGoneUpstream =
+		"# branch.oid 9429d2063d91f1097de51a196cb8203b06335738" + Nul +
+		"# branch.head feat" + Nul +
+		"# branch.upstream origin/feat" + Nul;
+
 	private const string DetachedHead =
 		"# branch.oid 94947d6da5c05bf1c86af335b33cff8cee83cb3f" + Nul +
 		"# branch.head (detached)" + Nul;
@@ -84,6 +91,27 @@ public class GitStatusParserTests
 		Assert.AreEqual("origin/main".As<GitBranchName>(), status.Upstream);
 		Assert.AreEqual(1, status.Ahead);
 		Assert.AreEqual(0, status.Behind);
+	}
+
+	[TestMethod]
+	public void ReportsAGoneUpstreamWhenTheAheadBehindHeaderIsMissing()
+	{
+		GitStatus status = GitStatusParser.Parse(TrackingAGoneUpstream);
+
+		Assert.AreEqual("origin/feat".As<GitBranchName>(), status.Upstream);
+		Assert.IsTrue(status.IsUpstreamGone);
+	}
+
+	[TestMethod]
+	public void ReportsAPresentUpstreamAsNotGone()
+	{
+		Assert.IsFalse(GitStatusParser.Parse(TrackingAheadOne).IsUpstreamGone);
+	}
+
+	[TestMethod]
+	public void ReportsNoUpstreamAsNotGone()
+	{
+		Assert.IsFalse(GitStatusParser.Parse(CleanOnMain).IsUpstreamGone);
 	}
 
 	[TestMethod]

@@ -22,10 +22,30 @@ public sealed record GitStatus
 	public GitBranchName? Upstream { get; init; }
 
 	/// <summary>Gets how many commits the current branch has that its upstream does not.</summary>
+	/// <remarks>
+	/// Zero while <see cref="IsUpstreamGone"/> is <see langword="true"/>, which does not mean the
+	/// branch is in sync: git cannot compare against an upstream that does not exist.
+	/// </remarks>
 	public int Ahead { get; init; }
 
 	/// <summary>Gets how many commits the upstream has that the current branch does not.</summary>
+	/// <remarks>
+	/// Zero while <see cref="IsUpstreamGone"/> is <see langword="true"/>, for the same reason as
+	/// <see cref="Ahead"/>.
+	/// </remarks>
 	public int Behind { get; init; }
+
+	/// <summary>
+	/// Gets a value indicating whether the current branch is configured to track an
+	/// <see cref="Upstream"/> that does not exist, because the remote branch was deleted or never
+	/// fetched.
+	/// </summary>
+	/// <remarks>
+	/// This is the state <c>git status -sb</c> shows as <c>[gone]</c>. While it is
+	/// <see langword="true"/>, <see cref="Ahead"/> and <see cref="Behind"/> are both zero and say
+	/// nothing about whether the branch has unpushed commits.
+	/// </remarks>
+	public bool IsUpstreamGone { get; init; }
 
 	/// <summary>Gets a value indicating whether HEAD points at a commit rather than a branch.</summary>
 	public bool IsDetached { get; init; }

@@ -608,5 +608,43 @@ public class GitRemoteSyncTests
 		Assert.IsTrue(status.Entries.Any(entry => entry.IndexState == GitFileState.Unmerged));
 	}
 
+	[TestMethod]
+	public async Task StatusReportsAnUpstreamDeletedOnTheRemoteAsGoneAsync()
+	{
+		// Once the remote branch is deleted, git can no longer count ahead/behind and reports neither,
+		// so 0/0 alone would make a branch with an unpushed commit look safe to throw away.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+		IGitProcessRunner runner = repository.ProcessRunner!;
+		GitBranchName feature = "feat".As<GitBranchName>();
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "first", cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "checkout", "-b", "feat")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(feature)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitStatus tracking = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsFalse(tracking.IsUpstreamGone);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "b.txt", "two\n", "unpushed", cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "push", "origin", "--delete", "feat")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual("origin/feat".As<GitBranchName>(), status.Upstream);
+		Assert.IsTrue(status.IsUpstreamGone);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }
