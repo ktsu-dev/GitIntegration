@@ -90,17 +90,15 @@ internal sealed class GitRevListBuilder(
 
 		AppendOperands(arguments, _revision.WeakString);
 
-		if (_paths.Count > 0)
-		{
-			// A pathspec goes after --, exactly as it does in GitLogBuilder, and the revision must
-			// already have been emitted: git reads everything after -- as a filename, so a revision
-			// placed there counts nothing rather than failing.
-			arguments.Add("--");
+		// Always emitted, exactly as in GitLogBuilder, so the revision is never read as a path
+		// (ktsu-dev/GitIntegration#168). A pathspec goes after it, and the revision must already have
+		// been emitted: git reads everything after -- as a filename, so a revision placed there
+		// counts nothing rather than failing.
+		arguments.Add("--");
 
-			foreach (RelativeFilePath path in _paths)
-			{
-				arguments.Add(path.WeakString);
-			}
+		foreach (RelativeFilePath path in _paths)
+		{
+			arguments.Add(path.WeakString);
 		}
 	}
 
