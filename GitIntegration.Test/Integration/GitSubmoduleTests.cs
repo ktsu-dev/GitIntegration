@@ -448,18 +448,22 @@ public class GitSubmoduleTests
 		_ = await CommitInSubmoduleAsync(checkout, superDirectory, Main, "two\n", cancellationToken).ConfigureAwait(false);
 		superDirectory.WriteFile("libs/sub/untracked.txt", "three\n");
 
+		// Compared as a typed path rather than as text, since the path type spells separators
+		// natively and the text differs on Windows.
+		RelativeFilePath submodulePath = "libs/sub".As<RelativeFilePath>();
+
 		GitStatus status = await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		// IsClean is the property a caller reads before discarding a working copy, and true here
 		// would mean losing the submodule's commit.
 		Assert.IsFalse(status.IsClean, "Status() reported clean because the host ignores submodules.");
-		Assert.Contains(entry => entry.Path.WeakString == "libs/sub", status.Entries);
+		Assert.Contains(entry => entry.Path == submodulePath, status.Entries);
 
 		IReadOnlyList<GitDiffEntry> diff = await super.Diff().ExecuteAsync(cancellationToken).ConfigureAwait(false);
-		Assert.Contains(entry => entry.Path.WeakString == "libs/sub", diff, "Diff() dropped the submodule.");
+		Assert.Contains(entry => entry.Path == submodulePath, diff, "Diff() dropped the submodule.");
 
 		GitPatch patch = await super.Patch().ExecuteAsync(cancellationToken).ConfigureAwait(false);
-		Assert.Contains(file => file.Path.WeakString == "libs/sub", patch.Files, "Patch() dropped the submodule.");
+		Assert.Contains(file => file.Path == submodulePath, patch.Files, "Patch() dropped the submodule.");
 	}
 
 	[TestMethod]
