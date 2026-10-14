@@ -182,6 +182,55 @@ public sealed class GitNothingToCommitException : GitCommandException
 }
 
 /// <summary>
+/// Git refused at least one of the references a fetch tried to update.
+/// </summary>
+/// <remarks>
+/// The fetch counterpart to <see cref="GitPushRejectedException"/>, and for the same reason it
+/// carries the parsed <see cref="Result"/>: a fetch that refuses one reference, such as a tag the
+/// remote moved, exits non-zero while still updating every other reference and listing them all.
+/// Throwing that account away would hide the updates that did land.
+/// </remarks>
+public sealed class GitFetchRejectedException : GitCommandException
+{
+	/// <summary>Gets the parsed fetch result, or <see langword="null"/> when none was available.</summary>
+	public GitFetchResult? Result { get; }
+
+	/// <summary>Initializes a new instance of the <see cref="GitFetchRejectedException"/> class.</summary>
+	public GitFetchRejectedException() { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitFetchRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	public GitFetchRejectedException(string message) : base(message) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitFetchRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="innerException">The underlying failure.</param>
+	public GitFetchRejectedException(string message, Exception innerException) : base(message, innerException) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitFetchRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	public GitFetchRejectedException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)
+		: base(message, exitCode, arguments, standardError) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitFetchRejectedException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	/// <param name="result">The parsed account of what happened to each reference.</param>
+	public GitFetchRejectedException(
+		string message,
+		int exitCode,
+		IReadOnlyList<string> arguments,
+		string standardError,
+		GitFetchResult result)
+		: base(message, exitCode, arguments, standardError) => Result = result;
+}
+
+/// <summary>
 /// Git refused at least one of the references a push tried to update.
 /// </summary>
 /// <remarks>

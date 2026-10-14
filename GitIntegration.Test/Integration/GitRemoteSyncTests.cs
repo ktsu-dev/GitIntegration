@@ -504,6 +504,99 @@ public class GitRemoteSyncTests
 		}
 	}
 
+	/// <summary>
+	/// Makes a clone whose tag <c>v1</c> the upstream has since moved, alongside a new commit on
+	/// <c>main</c>, so the next tag fetch updates the branch and refuses the tag.
+	/// </summary>
+	private static async Task<GitRepository> CreateCloneWithAMovedTagAsync(
+		TemporaryRepository upstreamDirectory,
+		TemporaryRepository cloneDirectory,
+		CancellationToken cancellationToken)
+	{
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
+			.Init(upstreamDirectory.Root)
+			.WithInitialBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitRepository upstream = init.Repository;
+		Assert.IsNotNull(upstream.LocalPath);
+
+		await IntegrationGitFixture.ConfigureIdentityAsync(upstream, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+
+		GitTagName tag = "v1".As<GitTagName>();
+		_ = await CommitFileAsync(upstream, upstreamDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+		_ = await upstream.CreateTag(tag).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository clone = await CreateWorkingCopyAsync(cloneDirectory, upstream.LocalPath, cancellationToken).ConfigureAwait(false);
+		_ = await clone.Fetch().FromRemote(Origin).WithTags().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(upstream, upstreamDirectory, "b.txt", "two\n", "c2", cancellationToken).ConfigureAwait(false);
+		_ = await upstream.CreateTag(tag).Force().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return clone;
+	}
+
+	[TestMethod]
+	public async Task AFetchThatRefusesAMovedTagThrowsAndCarriesTheUpdatesThatLandedAsync()
+	{
+		// git exits 1 with nothing on standard error and reports the refusal only as a porcelain
+		// "!" record, so before ktsu-dev/GitIntegration#188 this was "git exited with code 1: ".
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		GitVersion version = await IntegrationGitFixture.CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
+		if (!version.AtLeast(2, 41))
+		{
+			Assert.Inconclusive("fetch --porcelain needs git 2.41 or later.");
+		}
+
+		using TemporaryRepository upstreamDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		GitRepository clone = await CreateCloneWithAMovedTagAsync(upstreamDirectory, cloneDirectory, cancellationToken).ConfigureAwait(false);
+
+		GitFetchRejectedException exception = await Assert.ThrowsExactlyAsync<GitFetchRejectedException>(
+			async () => await clone.Fetch().FromRemote(Origin).WithTags()
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.IsNotNull(exception.Result);
+		Assert.IsTrue(exception.Result.HasRejections);
+
+		GitRefUpdate branch = exception.Result.Updates.Single(update => update.Reference == "refs/remotes/origin/main".As<GitRefName>());
+		GitRefUpdate tag = exception.Result.Updates.Single(update => update.Reference == "refs/tags/v1".As<GitRefName>());
+		Assert.IsFalse(branch.IsRejected);
+		Assert.AreEqual(GitRefUpdateKind.Rejected, tag.Kind);
+	}
+
+	[TestMethod]
+	public async Task TryFetchReturnsAMovedTagRefusalAsAValueAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		GitVersion version = await IntegrationGitFixture.CreateClient().GetVersionAsync(cancellationToken).ConfigureAwait(false);
+		if (!version.AtLeast(2, 41))
+		{
+			Assert.Inconclusive("fetch --porcelain needs git 2.41 or later.");
+		}
+
+		using TemporaryRepository upstreamDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		GitRepository clone = await CreateCloneWithAMovedTagAsync(upstreamDirectory, cloneDirectory, cancellationToken).ConfigureAwait(false);
+
+		GitResult<GitFetchResult> result = await clone.Fetch()
+			.FromRemote(Origin)
+			.WithTags()
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsTrue(result.Success);
+		Assert.IsNotNull(result.Value);
+		Assert.IsTrue(result.Value.HasRejections);
+		Assert.IsTrue(result.Value.Updates.Any(update => update.Reference == "refs/remotes/origin/main".As<GitRefName>() && !update.IsRejected));
+	}
+
 	[TestMethod]
 	public async Task FetchingTwiceReportsNothingTheSecondTimeAsync()
 	{

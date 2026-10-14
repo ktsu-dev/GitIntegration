@@ -48,6 +48,30 @@ public class GitRemoteResultTests
 	}
 
 	[TestMethod]
+	public void AFetchWithARejectedRefReportsRejections()
+	{
+		GitFetchResult result = new()
+		{
+			Updates = [Update(GitRefUpdateKind.FastForward), Update(GitRefUpdateKind.Rejected)],
+			DetailAvailable = true,
+		};
+
+		Assert.IsTrue(result.HasRejections);
+	}
+
+	[TestMethod]
+	public void AFetchWithNoRejectedRefsReportsNone()
+	{
+		GitFetchResult result = new()
+		{
+			Updates = [Update(GitRefUpdateKind.Created), Update(GitRefUpdateKind.Forced)],
+			DetailAvailable = true,
+		};
+
+		Assert.IsFalse(result.HasRejections);
+	}
+
+	[TestMethod]
 	public void APushWithARejectedRefReportsRejections()
 	{
 		GitPushResult result = new()

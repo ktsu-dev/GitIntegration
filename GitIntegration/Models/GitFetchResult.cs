@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration;
 
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// What a fetch brought in.
@@ -32,4 +33,15 @@ public sealed record GitFetchResult
 	/// reporting it as "up to date" would be a silent lie.
 	/// </remarks>
 	public bool IsUpToDate => DetailAvailable && Updates.Count == 0;
+
+	/// <summary>
+	/// Gets a value indicating whether git refused to update any of the references.
+	/// </summary>
+	/// <remarks>
+	/// A fetch that refuses one reference, such as a tag the remote moved, exits non-zero while
+	/// still updating the rest and reporting every one of them, so this can be true on a result the
+	/// caller obtained without an exception. See <c>IGitFetchBuilder</c>, where <c>ExecuteAsync</c>
+	/// and <c>TryExecuteAsync</c> deliberately treat rejection differently.
+	/// </remarks>
+	public bool HasRejections => Updates.Any(static update => update.IsRejected);
 }
