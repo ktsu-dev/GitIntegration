@@ -22,8 +22,9 @@ public sealed record GitWorktree
 	/// Gets the commit checked out here, or <see langword="null"/> when git reported none.
 	/// </summary>
 	/// <remarks>
-	/// Absent for a bare worktree, which has no checkout to report. Present for a detached one,
-	/// where it is the only thing identifying what is checked out.
+	/// Absent for a bare worktree, which has no checkout to report, and for one on an unborn branch,
+	/// where git prints the all-zero null id because there is no commit yet. Present for a detached
+	/// one, where it is the only thing identifying what is checked out.
 	/// </remarks>
 	public GitCommitSha? Head { get; init; }
 

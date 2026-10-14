@@ -806,8 +806,8 @@ The entry point to the local layer: finds and opens repositories, and reports on
 |------|-------------|-------------|
 | `GetVersionAsync(CancellationToken)` | `Task<GitVersion>` | Reports the version of the git binary being invoked. |
 | `IsRepositoryAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<bool>` | Decides whether a path is inside a git working tree. Never throws for a non-repository path. |
-| `OpenAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<GitRepository>` | Opens the repository containing a path. Throws `GitRepositoryNotFoundException` when there is none. |
-| `DiscoverAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<GitRepository?>` | Opens the repository containing a path, returning `null` instead of throwing when there is none. |
+| `OpenAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<GitRepository>` | Opens the repository containing a path. Throws `GitRepositoryNotFoundException` when there is none, and `GitCommandException` carrying git's `safe.directory` advice when git refuses the repository as dubious ownership. |
+| `DiscoverAsync(AbsoluteDirectoryPath, CancellationToken)` | `Task<GitRepository?>` | Opens the repository containing a path, returning `null` instead of throwing when there is none. A repository git refuses as dubious ownership still throws `GitCommandException`, since it exists. |
 | `Init(AbsoluteDirectoryPath)` | `IGitInitBuilder` | Creates a repository at a path. Probes first, so the result's `AlreadyExisted` can tell a caller whether one was already there. |
 | `Clone(GitRepositoryRemotePath, AbsoluteDirectoryPath)` | `IGitCloneBuilder` | Clones a repository into a local working copy. |
 | `Clone(GitRepository)` | `IGitCloneBuilder` | Clones the repository a hosting provider described, using its `RemotePath` and intended `LocalPath`. |
@@ -946,7 +946,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitCommit` | `Sha`, `TreeSha`, `ParentShas`, `Author`, `Committer`, `Subject`, `Body`. |
 | `GitSignature` | `Name`, `Email`, `Timestamp` recorded on a commit. |
 | `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`. |
-| `GitRemote` | `Name`, `FetchUrl`, `PushUrl`. |
+| `GitRemote` | `Name`, `FetchUrl`, `PushUrl` (the first push URL), `PushUrls` (every push URL, in git's order). |
 | `GitDiffEntry` | `Kind`, `Path`, `OriginalPath`, `SimilarityPercent`. |
 | `GitWorktree` | `Path`, `Head`, `Branch`, `IsMain`, `IsBare`, `IsDetached`, `IsLocked`, `LockReason`, `IsPrunable`, `PrunableReason` for one working tree. `IsMain` is positional: true only for the first record git emits, since git's porcelain has no attribute for it. |
 | `GitVersion` | `Major`, `Minor`, `Patch`, `Raw`, plus `AtLeast(major, minor)`. |
