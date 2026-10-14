@@ -30,6 +30,7 @@ internal static class GitStatusParser
 		GitBranchName? upstream = null;
 		int ahead = 0;
 		int behind = 0;
+		bool hasAheadBehind = false;
 		bool isDetached = false;
 		List<GitStatusEntry> entries = [];
 
@@ -49,7 +50,7 @@ internal static class GitStatusParser
 			switch (record[0])
 			{
 				case '#':
-					ReadHeader(record, ref branch, ref upstream, ref ahead, ref behind, ref isDetached);
+					ReadHeader(record, ref branch, ref upstream, ref ahead, ref behind, ref hasAheadBehind, ref isDetached);
 					break;
 
 				case '1':
@@ -91,6 +92,10 @@ internal static class GitStatusParser
 			Upstream = upstream,
 			Ahead = ahead,
 			Behind = behind,
+
+			// git writes branch.upstream from the branch's configuration but leaves out branch.ab when
+			// the ref it names does not exist, so the pair alone is what tells a gone upstream apart.
+			IsUpstreamGone = upstream is not null && !hasAheadBehind,
 			IsDetached = isDetached,
 			Entries = entries,
 		};
@@ -102,6 +107,7 @@ internal static class GitStatusParser
 		ref GitBranchName? upstream,
 		ref int ahead,
 		ref int behind,
+		ref bool hasAheadBehind,
 		ref bool isDetached)
 	{
 		// "# branch.head main" splits into "#", "branch.head", "main"; the value keeps any spaces
@@ -133,6 +139,7 @@ internal static class GitStatusParser
 
 			case "branch.ab":
 				ReadAheadBehind(parts[2], ref ahead, ref behind);
+				hasAheadBehind = true;
 				break;
 
 			default:
