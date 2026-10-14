@@ -136,6 +136,35 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task AddWorktreeWithNoModeCreatesNoBranchAndDetachesAtHeadAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		using TemporaryRepository worktreeParent = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Bare `git worktree add <path>` would create a branch named "wt1" here.
+		AbsoluteDirectoryPath destination = Path.Join(worktreeParent.RootPath, "wt1").As<AbsoluteDirectoryPath>();
+		_ = await repository.AddWorktree(destination).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> branches =
+			await repository.Branches().LocalOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(1, branches.Count);
+		Assert.AreEqual("main", branches[0].Name.WeakString);
+
+		IReadOnlyList<GitWorktree> worktrees = await repository.Worktrees().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(2, worktrees.Count);
+		Assert.IsTrue(worktrees[1].IsDetached);
+		Assert.IsNull(worktrees[1].Branch);
+	}
+
+	[TestMethod]
 	public async Task WorktreesReportsNoHeadForAFreshRepositoryAsync()
 	{
 		// A repository with no commits sits on an unborn branch, and git lists its worktree with the

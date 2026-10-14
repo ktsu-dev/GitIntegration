@@ -36,7 +36,10 @@ public interface IGitWorktreeAddBuilder : IGitCommandBuilder<GitCompleted>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitWorktreeAddBuilder CreatingOrResettingBranch(GitBranchName branch);
 
-	/// <summary>Checks out a commit rather than a branch. Replaces any previous mode.</summary>
+	/// <summary>
+	/// Checks out a commit rather than a branch. Replaces any previous mode. Also what a builder
+	/// with no mode and no commit-ish does, at <c>HEAD</c>.
+	/// </summary>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitWorktreeAddBuilder Detached();
 
@@ -70,11 +73,20 @@ public interface IGitWorktreeAddBuilder : IGitCommandBuilder<GitCompleted>
 /// Builds <c>git worktree add</c>.
 /// </summary>
 /// <remarks>
+/// <para>
+/// With no mode and no commit-ish, the builder emits <c>--detach</c>: a worktree at <c>HEAD</c> with
+/// no branch. Bare <c>git worktree add &lt;path&gt;</c> would instead create a branch named after the
+/// path's last segment, check out an existing branch of that name, or (under the host's
+/// <c>worktree.guessRemote</c>) base one on a remote branch, so the outcome would depend on the
+/// folder's name and the host's config rather than on what the caller asked for.
+/// </para>
+/// <para>
 /// <c>--guess-remote</c> is deliberately not exposed. Plain <c>git worktree add &lt;path&gt;
 /// &lt;branch&gt;</c> already creates a local tracking branch when the name matches exactly one
 /// remote, which covers creating a worktree for a branch that exists only on the remote.
 /// <c>--guess-remote</c> extends that to the case where no branch is named at all, which this
-/// builder always names.
+/// builder never leaves to git: it either names a branch or detaches.
+/// </para>
 /// </remarks>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">The repository to scope the command to.</param>
@@ -192,6 +204,11 @@ internal sealed class GitWorktreeAddBuilder(
 				arguments.Add(_branch!);
 				break;
 			case AddMode.Detach:
+				arguments.Add("--detach");
+				break;
+			case AddMode.Plain when _commitish is null:
+				// Without a branch or commit-ish git invents a branch from the path's last segment,
+				// or reuses one of that name; detaching at HEAD is the only side-effect-free reading.
 				arguments.Add("--detach");
 				break;
 			case AddMode.Plain:
