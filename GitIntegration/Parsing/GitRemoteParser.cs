@@ -33,7 +33,7 @@ internal static class GitRemoteParser
 		// ordering, which a dictionary alone would not.
 		List<string> order = [];
 		Dictionary<string, string> fetchUrls = new(StringComparer.Ordinal);
-		Dictionary<string, string> pushUrls = new(StringComparer.Ordinal);
+		Dictionary<string, List<string>> pushUrls = new(StringComparer.Ordinal);
 
 		foreach (string line in output.Split('\n'))
 		{
@@ -75,7 +75,15 @@ internal static class GitRemoteParser
 			}
 			else if (remainder.EndsWith(PushSuffix, StringComparison.Ordinal))
 			{
-				pushUrls[name] = remainder[..^PushSuffix.Length];
+				// git prints one push line per remote.<name>.pushurl, and pushes to every one of
+				// them, so each is kept in git's order rather than the last overwriting the rest.
+				if (!pushUrls.TryGetValue(name, out List<string>? urls))
+				{
+					urls = [];
+					pushUrls[name] = urls;
+				}
+
+				urls.Add(remainder[..^PushSuffix.Length]);
 			}
 			else
 			{
@@ -88,26 +96,31 @@ internal static class GitRemoteParser
 		foreach (string name in order)
 		{
 			_ = fetchUrls.TryGetValue(name, out string? fetchUrl);
-			_ = pushUrls.TryGetValue(name, out string? pushUrl);
+			List<string> pushUrlList = pushUrls.TryGetValue(name, out List<string>? urls) ? urls : [];
 
 			// git always prints both directions, but a remote configured with only one is still
 			// better described by the URL that exists than rejected outright.
-			fetchUrl ??= pushUrl;
-			pushUrl ??= fetchUrl;
+			fetchUrl ??= pushUrlList.Count > 0 ? pushUrlList[0] : null;
 
-			// Unreachable at runtime — the two ??= assignments above mean fetchUrl and pushUrl are
-			// either both null or both non-null — but required so nullable analysis can prove
-			// non-nullness below without a suppression.
-			if (fetchUrl is null || pushUrl is null)
+			if (fetchUrl is null)
 			{
 				throw new GitParseException($"git listed the remote '{name}' with no URL.");
 			}
+
+			if (pushUrlList.Count == 0)
+			{
+				pushUrlList.Add(fetchUrl);
+			}
+
+			List<GitRepositoryRemotePath> pushPaths = pushUrlList.ConvertAll(
+				url => GitParseValues.ToSemantic<GitRepositoryRemotePath>(url, "remote push url"));
 
 			remotes.Add(new GitRemote
 			{
 				Name = GitParseValues.ToSemantic<GitRemoteName>(name, "remote name"),
 				FetchUrl = GitParseValues.ToSemantic<GitRepositoryRemotePath>(fetchUrl, "remote fetch url"),
-				PushUrl = GitParseValues.ToSemantic<GitRepositoryRemotePath>(pushUrl, "remote push url"),
+				PushUrl = pushPaths[0],
+				PushUrls = pushPaths,
 			});
 		}
 
