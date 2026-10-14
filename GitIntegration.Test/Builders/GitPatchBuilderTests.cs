@@ -6,6 +6,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using ktsu.Semantics.Strings;
+
 [TestClass]
 public class GitPatchBuilderTests
 {
@@ -117,6 +119,63 @@ public class GitPatchBuilderTests
 		GitPatchBuilder renames = new(runner, TestPaths.Root);
 		_ = renames.DetectRenames();
 		Assert.IsTrue(renames.BuildArguments().Contains("--find-renames"));
+	}
+
+	[TestMethod]
+	public void RejectsAskingForBothStagedAndBetween()
+	{
+		// Real git answers "diff --cached <a> <b>" with its whole usage screen and exit 129 (verified
+		// against git 2.43), so without this guard the caller gets a GitCommandException that names
+		// neither call. Checkout and fetch reject their own contradictions before spawning.
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Staged().Between("main".As<GitRefName>(), "feature/x".As<GitRefName>());
+
+		InvalidOperationException exception = Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+		StringAssert.Contains(exception.Message, "Staged");
+		StringAssert.Contains(exception.Message, "Between");
+	}
+
+	[TestMethod]
+	public void RejectsStagedAndBetweenRegardlessOfTheOrderTheyWereConfiguredIn()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Between("main".As<GitRefName>(), "feature/x".As<GitRefName>()).Staged();
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+	}
+
+	[TestMethod]
+	public void AllowsStagedAgainstOneRevision()
+	{
+		// "diff --cached <rev>" compares the index against that revision, which git accepts.
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Staged().Against("HEAD~1".As<GitRefName>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		CollectionAssert.Contains(arguments, "--cached");
+		CollectionAssert.Contains(arguments, "HEAD~1");
+	}
+
+	[TestMethod]
+	public void AllowsReplacingBetweenWithAgainstAfterStaged()
+	{
+		// The guard reads the finished configuration, so a later Against that replaces Between
+		// leaves a vector git accepts.
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Staged().Between("main".As<GitRefName>(), "feature/x".As<GitRefName>())
+			.Against("HEAD".As<GitRefName>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		CollectionAssert.Contains(arguments, "--cached");
+		CollectionAssert.Contains(arguments, "HEAD");
 	}
 
 	[TestMethod]
