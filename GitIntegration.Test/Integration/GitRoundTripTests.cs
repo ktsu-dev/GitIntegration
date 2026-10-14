@@ -1103,6 +1103,10 @@ public class GitRoundTripTests
 
 		GitRefName docs = "docs".As<GitRefName>();
 
+		// Compared as a typed path rather than as text, since the path type spells separators
+		// natively and the text differs on Windows.
+		RelativeFilePath changed = "docs/a.txt".As<RelativeFilePath>();
+
 		IReadOnlyList<GitCommit> log = await repository.Log().ForRevision(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		Assert.HasCount(1, log, "Log() should list the docs branch's one commit.");
 
@@ -1110,10 +1114,10 @@ public class GitRoundTripTests
 		Assert.AreEqual(1, count);
 
 		IReadOnlyList<GitDiffEntry> diff = await repository.Diff().Against(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
-		Assert.Contains(entry => entry.Path.WeakString == "docs/a.txt", diff);
+		Assert.Contains(entry => entry.Path == changed, diff);
 
 		GitPatch patch = await repository.Patch().Against(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
-		Assert.Contains(file => file.Path.WeakString == "docs/a.txt", patch.Files);
+		Assert.Contains(file => file.Path == changed, patch.Files);
 	}
 
 	[TestMethod]
