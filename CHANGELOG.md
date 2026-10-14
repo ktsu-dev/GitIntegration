@@ -2,6 +2,10 @@
 
 Changes since v4.1.0:
 
+- Cover the fetch rejection exception and unreadable-output path [patch] (Claude)
+- Report a refused reference from Fetch() instead of an empty error [minor] (Claude)
+- Reject branch names git forbids in GitBranchName [patch] (Claude)
+- Refuse Staged() with Between() before running git [patch] (Claude)
 - Report a gone upstream from Status() as IsUpstreamGone [minor] (matt-edmondson)
 - Pass --no-follow so Log().ForPath ignores log.follow [patch] (matt-edmondson)
 - Merge main into fix/152-bare-worktree-detach (matt-edmondson)
