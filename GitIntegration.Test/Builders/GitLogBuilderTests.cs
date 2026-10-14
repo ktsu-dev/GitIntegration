@@ -30,6 +30,7 @@ public class GitLogBuilderTests
 			"-c", "color.ui=false",
 			"log",
 			"--no-show-signature",
+			"--no-follow",
 			"-z",
 			ExpectedFormat,
 		];

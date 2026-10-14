@@ -361,6 +361,45 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task LogForPathIgnoresTheHostsFollowSettingAsync()
+	{
+		// With log.follow=true git follows renames whenever exactly one path is given, so the history of
+		// new.txt would reach back through old.txt on such a host and nowhere else.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+		IGitProcessRunner runner = repository.ProcessRunner!;
+
+		temporary.WriteFile("old.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("one".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("old.txt", "one\ntwo\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("two".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "mv", "old.txt", "new.txt")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("three".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "config", "log.follow", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> history = await repository.Log()
+			.ForPath("new.txt".As<RelativeFilePath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		int revListCount = await repository.RevList("HEAD".As<GitRefName>())
+			.ForPath("new.txt".As<RelativeFilePath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, history.Count);
+		Assert.AreEqual("three", history[0].Subject);
+		Assert.AreEqual(revListCount, history.Count);
+	}
+
+	[TestMethod]
 	public async Task CommittingWithNothingStagedThrowsTheDedicatedExceptionAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
