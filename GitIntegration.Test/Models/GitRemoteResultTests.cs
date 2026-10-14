@@ -120,4 +120,29 @@ public class GitRemoteResultTests
 	{
 		Assert.IsNull(new GitPushRejectedException("rejected").Result);
 	}
+
+	[TestMethod]
+	public void ARejectedFetchExceptionCarriesTheParsedResult()
+	{
+		GitFetchResult result = new() { Updates = [Update(GitRefUpdateKind.Rejected)], DetailAvailable = true };
+
+		GitFetchRejectedException exception = new("rejected", 1, ["fetch"], string.Empty, result);
+
+		Assert.AreSame(result, exception.Result);
+		Assert.AreEqual(1, exception.ExitCode);
+	}
+
+	[TestMethod]
+	public void ARejectedFetchExceptionHasNoResultWhenConstructedWithoutOne()
+	{
+		InvalidOperationException inner = new("inner");
+
+		Assert.IsNull(new GitFetchRejectedException().Result);
+		Assert.IsNull(new GitFetchRejectedException("rejected").Result);
+		Assert.AreSame(inner, new GitFetchRejectedException("rejected", inner).InnerException);
+
+		GitFetchRejectedException withoutResult = new("rejected", 1, ["fetch"], "stderr");
+		Assert.IsNull(withoutResult.Result);
+		Assert.AreEqual("stderr", withoutResult.StandardError);
+	}
 }

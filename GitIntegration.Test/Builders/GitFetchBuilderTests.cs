@@ -279,6 +279,28 @@ public class GitFetchBuilderTests
 	}
 
 	[TestMethod]
+	public async Task AFailureWithUnreadablePorcelainStaysAnErrorAsync()
+	{
+		// Whatever git printed alongside a failure, the failure is what gets reported, not a
+		// GitParseException about the output that came with it.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: "! x\n", standardError: "fatal: broken\n", exitCode: 1)
+			.Then(standardOutput: "git version 2.50.1\n")
+			.Then(standardOutput: "! x\n", standardError: "fatal: broken\n", exitCode: 1);
+		GitFetchBuilder builder = new(runner, TestPaths.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		StringAssert.Contains(exception.Message, "broken");
+
+		GitResult<GitFetchResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
 	public async Task FallsBackToStandardOutputWhenStandardErrorIsEmptyAsync()
 	{
 		// No fetch failure should end in an empty diagnostic. Below git 2.41 nothing is parsed, so
