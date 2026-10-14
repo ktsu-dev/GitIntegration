@@ -281,24 +281,11 @@ internal static class GitSubmoduleParser
 		// unmerged submodule, where there is no single checked-out commit to name. It is a well-formed
 		// object id as far as the semantic type is concerned, so nothing downstream would catch it —
 		// it would simply read as a commit that happens to be all zeroes.
-		CheckedOutSha = status.State == GitSubmoduleState.Uninitialized || IsNullObjectId(status.ObjectId)
+		CheckedOutSha = status.State == GitSubmoduleState.Uninitialized || GitParseValues.IsNullObjectId(status.ObjectId)
 			? null
 			: GitParseValues.ToSemantic<GitCommitSha>(status.ObjectId, "submodule checked-out object id"),
 		Describe = describe,
 	};
-
-	/// <summary>
-	/// Reports whether an object id is git's null id — the absence of an object, not an object.
-	/// </summary>
-	/// <remarks>
-	/// Tested by its digits rather than against a constant, because the id's width is the repository's
-	/// object format: 40 characters under SHA-1 and 64 under <c>--object-format=sha256</c>. The empty
-	/// case is excluded explicitly, so "nothing at all" is never mistaken for "all zeroes".
-	/// </remarks>
-	/// <param name="objectId">The object id git printed.</param>
-	/// <returns><see langword="true"/> when every character is a zero.</returns>
-	private static bool IsNullObjectId(string objectId) =>
-		objectId.Length > 0 && objectId.AsSpan().IndexOfAnyExcept('0') < 0;
 
 	/// <summary>
 	/// Spells a path the way git prints it, so a status line can be matched against it.

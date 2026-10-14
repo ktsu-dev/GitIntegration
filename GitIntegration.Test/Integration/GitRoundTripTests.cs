@@ -136,6 +136,24 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task WorktreesReportsNoHeadForAFreshRepositoryAsync()
+	{
+		// A repository with no commits sits on an unborn branch, and git lists its worktree with the
+		// null id as HEAD. That id names no commit, so Head must be null rather than forty zeroes.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitWorktree> worktrees = await repository.Worktrees().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, worktrees.Count);
+		Assert.IsNull(worktrees[0].Head);
+		Assert.AreEqual("main".As<GitBranchName>(), worktrees[0].Branch);
+	}
+
+	[TestMethod]
 	public async Task WorktreesReportsAnAwkwardPathAndLockReasonAsGitStoresThemAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
