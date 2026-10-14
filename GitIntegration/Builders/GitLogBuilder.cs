@@ -165,6 +165,10 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 		// the record, custom --format or not, which the parser would read as part of the commit id.
 		// Commit() reuses this vector for its read-back, so the same flag keeps it working too.
 		arguments.Add("--no-show-signature");
+
+		// log.follow makes git follow renames whenever exactly one path is given, so ForPath would return
+		// a different history on a host that sets it, and disagree with RevList().ForPath for the same path.
+		arguments.Add("--no-follow");
 		arguments.Add("-z");
 		arguments.Add("--format=" + GitOutputFormats.LogFormat);
 
