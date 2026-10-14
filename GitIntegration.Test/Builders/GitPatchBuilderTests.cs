@@ -31,6 +31,7 @@ public class GitPatchBuilderTests
 			"--src-prefix=a/",
 			"--dst-prefix=b/",
 			"--submodule=short",
+			"--ignore-submodules=none",
 			"-U3",
 			"--no-renames",
 		];

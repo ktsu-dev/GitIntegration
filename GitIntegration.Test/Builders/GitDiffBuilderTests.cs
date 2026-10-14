@@ -29,6 +29,9 @@ public class GitDiffBuilderTests
 			"diff",
 			"--name-status",
 			"-z",
+
+			// Pinned so a host's diff.ignoreSubmodules cannot drop a changed submodule.
+			"--ignore-submodules=none",
 			"--no-renames",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());

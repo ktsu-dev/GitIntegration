@@ -417,6 +417,52 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
+	public async Task StatusDiffAndPatchReportASubmoduleTheHostIgnoresAsync()
+	{
+		// diff.ignoreSubmodules is a host setting, and git applies it to status, diff and a patch
+		// alike when the command carries no --ignore-submodules of its own. Written into the
+		// superproject's own config, the nearest scope, so the host is left alone.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(
+			super.ProcessRunner!, super.LocalPath, "config", "diff.ignoreSubmodules", "all")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Unpushed work in the submodule: a new commit, and an untracked file beside it.
+		GitRepository checkout = new()
+		{
+			LocalPath = Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
+			ProcessRunner = super.ProcessRunner,
+		};
+		await IntegrationGitFixture.ConfigureIdentityAsync(checkout, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+		_ = await CommitInSubmoduleAsync(checkout, superDirectory, Main, "two\n", cancellationToken).ConfigureAwait(false);
+		superDirectory.WriteFile("libs/sub/untracked.txt", "three\n");
+
+		GitStatus status = await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// IsClean is the property a caller reads before discarding a working copy, and true here
+		// would mean losing the submodule's commit.
+		Assert.IsFalse(status.IsClean, "Status() reported clean because the host ignores submodules.");
+		Assert.Contains(entry => entry.Path.WeakString == "libs/sub", status.Entries);
+
+		IReadOnlyList<GitDiffEntry> diff = await super.Diff().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.Contains(entry => entry.Path.WeakString == "libs/sub", diff, "Diff() dropped the submodule.");
+
+		GitPatch patch = await super.Patch().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.Contains(file => file.Path.WeakString == "libs/sub", patch.Files, "Patch() dropped the submodule.");
+	}
+
+	[TestMethod]
 	public async Task ReportsNoSubmodulesForARepositoryWithNoneAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
