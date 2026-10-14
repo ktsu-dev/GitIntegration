@@ -13,10 +13,12 @@ using ktsu.Semantics.Strings;
 public class GitAddBuilderTests
 {
 	[TestMethod]
-	public void BuildsTheDefaultAddVector()
+	public void BuildsTheAllAddVector()
 	{
 		RecordingGitProcessRunner runner = new();
 		GitAddBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.All();
 
 		IReadOnlyList<string> arguments = builder.BuildArguments();
 
@@ -27,8 +29,44 @@ public class GitAddBuilderTests
 			"-c", "core.quotepath=false",
 			"-c", "color.ui=false",
 			"add",
+			"--all",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
+	}
+
+	[TestMethod]
+	public void RejectsAnAddWithNothingToStage()
+	{
+		// A bare "git add" prints "Nothing specified, nothing added." and exits 0, so without this
+		// guard the builder would report success having staged nothing.
+		RecordingGitProcessRunner runner = new();
+		GitAddBuilder builder = new(runner, TestPaths.Root);
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+	}
+
+	[TestMethod]
+	public void RejectsAskingForBothAllAndUpdateTrackedOnly()
+	{
+		// git fails this only as "options '-A' and '-u' cannot be used together" (exit 128), which
+		// names neither of the fluent calls that caused it.
+		RecordingGitProcessRunner runner = new();
+		GitAddBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.All().UpdateTrackedOnly();
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
+	}
+
+	[TestMethod]
+	public async Task RefusesAnAddWithNothingToStageBeforeRunningGitAsync()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitAddBuilder builder = new(runner, TestPaths.Root);
+
+		_ = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+			() => builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token)).ConfigureAwait(false);
+		Assert.IsNull(runner.LastRequest);
 	}
 
 	[TestMethod]
@@ -129,6 +167,8 @@ public class GitAddBuilderTests
 			StandardError = "fatal: pathspec 'no/such/file.txt' did not match any files\n",
 		};
 		GitAddBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ForPath("no/such/file.txt".As<RelativeFilePath>());
 
 		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
 			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))

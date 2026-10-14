@@ -13,18 +13,31 @@ using ktsu.Semantics.Paths;
 public interface IGitAddBuilder : IGitCommandBuilder<GitCompleted>
 {
 	/// <summary>Stages this path. May be called more than once.</summary>
+	/// <remarks>
+	/// At least one of this, <see cref="All"/> or <see cref="UpdateTrackedOnly"/> is required:
+	/// <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when none was called,
+	/// because a bare <c>git add</c> stages nothing yet exits 0.
+	/// </remarks>
 	/// <param name="path">The path, relative to the repository root.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="path"/> is <see langword="null"/>.</exception>
 	public IGitAddBuilder ForPath(RelativeFilePath path);
 
 	/// <summary>Stages every change in the working tree, including new and deleted files.</summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="UpdateTrackedOnly"/>: git rejects <c>--all</c> with
+	/// <c>--update</c>, so <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when
+	/// both are set, before a process is spawned.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitAddBuilder All();
 
 	/// <summary>
 	/// Stages changes to files git already tracks, leaving untracked files alone.
 	/// </summary>
+	/// <remarks>
+	/// Cannot be combined with <see cref="All"/>, for the same reason.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitAddBuilder UpdateTrackedOnly();
 }
@@ -69,6 +82,24 @@ internal sealed class GitAddBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 	protected override void AppendVerbArguments(ICollection<string> arguments)
 	{
 		Ensure.NotNull(arguments);
+
+		// Both mistakes are refused here, before a process is spawned, the way Fetch and Checkout
+		// refuse their own contradictions. A bare "git add" prints "Nothing specified, nothing added."
+		// and exits 0, so it would otherwise report success having staged nothing. "--all --update"
+		// does fail, but only as git's "options '-A' and '-u' cannot be used together" (exit 128),
+		// which names neither of the two calls that caused it. Verified against git 2.43.
+		if (_all && _updateTrackedOnly)
+		{
+			throw new InvalidOperationException(
+				"All and UpdateTrackedOnly cannot both be requested: git add rejects --all with --update.");
+		}
+
+		if (!_all && !_updateTrackedOnly && _paths.Count == 0)
+		{
+			throw new InvalidOperationException(
+				"Add needs something to stage: call ForPath, All or UpdateTrackedOnly. A bare git add " +
+				"stages nothing and still reports success.");
+		}
 
 		arguments.Add("add");
 
