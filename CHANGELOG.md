@@ -550,7 +550,7 @@ Changes since v1.1.9:
 - [minor] Close shell-execute and git option injection holes (matt-edmondson)
 - [minor] Add tests for single-instance guarantee and idempotent options (matt-edmondson)
 - [minor] Add dependency injection registration for git integration (matt-edmondson)
-- [minor] Narrow AppendVerbArguments to ICollection<string> instead of suppressing CA1002 (matt-edmondson)
+- [minor] Narrow AppendVerbArguments to ICollection\<string\> instead of suppressing CA1002 (matt-edmondson)
 - [patch] Use ICollection in AppendVerbArguments signature in plan (matt-edmondson)
 - [minor] Add git command builder base with global argument injection (matt-edmondson)
 - [patch] Document RunCommand cancellation race in spec constraints (matt-edmondson)
