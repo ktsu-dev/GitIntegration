@@ -1028,6 +1028,38 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task BranchesListsARemoteBranchNamedReleaseHeadButNotTheRemoteHeadAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository source = new();
+		GitRepository origin = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
+
+		source.WriteFile("a.txt", "one\n");
+		_ = await origin.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await origin.Commit("first".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await origin.CreateBranch("release/HEAD".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository destinationRoot = new();
+		AbsoluteDirectoryPath destination =
+			Path.Combine(destinationRoot.RootPath, "copy").As<AbsoluteDirectoryPath>();
+
+		// A clone always writes the symbolic refs/remotes/origin/HEAD, so both cases are present.
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(source.RootPath.As<GitRepositoryRemotePath>(), destination)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> remotes =
+			await clone.Branches().RemoteOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		string[] names = [.. remotes.Select(branch => branch.Name.WeakString)];
+		CollectionAssert.Contains(names, "origin/release/HEAD");
+		CollectionAssert.Contains(names, "origin/main");
+		CollectionAssert.DoesNotContain(names, "origin/HEAD");
+	}
+
+	[TestMethod]
 	public async Task CloneRefusesANonEmptyDestinationAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

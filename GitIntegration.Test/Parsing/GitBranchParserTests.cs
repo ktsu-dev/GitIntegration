@@ -15,16 +15,22 @@ public class GitBranchParserTests
 	private const string LocalSha = "9429d2063d91f1097de51a196cb8203b06335738";
 	private const string RemoteSha = "94947d6da5c05bf1c86af335b33cff8cee83cb3f";
 
-	// Captured from a fresh clone. Note refs/remotes/origin/HEAD, whose short name is the bare
-	// remote name, and the single space %(HEAD) emits for a branch that is not checked out.
+	// Captured from a fresh clone. Note refs/remotes/origin/HEAD, the only record with a
+	// %(symref), and the single space %(HEAD) emits for a branch that is not checked out.
 	private const string FreshClone =
-		"refs/heads/main" + Us + "main" + Us + LocalSha + Us + "origin/main" + Us + "*\n" +
-		"refs/remotes/origin/HEAD" + Us + "origin" + Us + LocalSha + Us + Us + " \n" +
-		"refs/remotes/origin/feature/x" + Us + "origin/feature/x" + Us + RemoteSha + Us + Us + " \n" +
-		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " \n";
+		"refs/heads/main" + Us + "main" + Us + LocalSha + Us + "origin/main" + Us + "*" + Us + "\n" +
+		"refs/remotes/origin/HEAD" + Us + "origin/HEAD" + Us + LocalSha + Us + Us + " " + Us + "refs/remotes/origin/main\n" +
+		"refs/remotes/origin/feature/x" + Us + "origin/feature/x" + Us + RemoteSha + Us + Us + " " + Us + "\n" +
+		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " " + Us + "\n";
 
 	private const string LocalBranchNamedLikeARemote =
-		"refs/heads/origin/main" + Us + "origin/main" + Us + LocalSha + Us + Us + " \n";
+		"refs/heads/origin/main" + Us + "origin/main" + Us + LocalSha + Us + Us + " " + Us + "\n";
+
+	// A real branch called release/HEAD on the remote, beside the symbolic origin/HEAD.
+	private const string RemoteBranchEndingInHead =
+		"refs/remotes/origin/HEAD" + Us + "origin/HEAD" + Us + RemoteSha + Us + Us + " " + Us + "refs/remotes/origin/main\n" +
+		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " " + Us + "\n" +
+		"refs/remotes/origin/release/HEAD" + Us + "origin/release/HEAD" + Us + LocalSha + Us + Us + " " + Us + "\n";
 
 	[TestMethod]
 	public void ReadsTheCurrentBranchWithItsUpstream()
@@ -42,12 +48,26 @@ public class GitBranchParserTests
 	[TestMethod]
 	public void SkipsTheRemoteHeadSymbolicRef()
 	{
-		// refs/remotes/origin/HEAD shortens to the bare remote name, so without this filter every
-		// clone reports a phantom branch called "origin".
+		// refs/remotes/origin/HEAD shortens to origin/HEAD, so without this filter every clone
+		// reports a phantom branch of that name.
 		IReadOnlyList<GitBranch> branches = GitBranchParser.Parse(FreshClone);
 
 		Assert.AreEqual(3, branches.Count);
-		Assert.IsFalse(branches.Any(branch => branch.Name == "origin".As<GitBranchName>()));
+		Assert.IsFalse(branches.Any(branch => branch.Name == "origin/HEAD".As<GitBranchName>()));
+	}
+
+	[TestMethod]
+	public void KeepsARemoteBranchWhoseNameEndsInHead()
+	{
+		// release/HEAD is a legal branch name. Only the symbolic reference is dropped, so its
+		// remote-tracking copy must survive even though its full name also ends in /HEAD.
+		IReadOnlyList<GitBranch> branches = GitBranchParser.Parse(RemoteBranchEndingInHead);
+
+		Assert.AreEqual(2, branches.Count);
+		Assert.AreEqual("origin/main".As<GitBranchName>(), branches[0].Name);
+		Assert.AreEqual("origin/release/HEAD".As<GitBranchName>(), branches[1].Name);
+		Assert.IsTrue(branches[1].IsRemote);
+		Assert.AreEqual(LocalSha.As<GitCommitSha>(), branches[1].Sha);
 	}
 
 	[TestMethod]
@@ -84,7 +104,7 @@ public class GitBranchParserTests
 	[TestMethod]
 	public void ToleratesCarriageReturnLineEndings()
 	{
-		string output = "refs/heads/main" + Us + "main" + Us + LocalSha + Us + Us + "*\r\n";
+		string output = "refs/heads/main" + Us + "main" + Us + LocalSha + Us + Us + "*" + Us + "\r\n";
 
 		IReadOnlyList<GitBranch> branches = GitBranchParser.Parse(output);
 

@@ -15,8 +15,7 @@ using System.Collections.Generic;
 internal static class GitBranchParser
 {
 	private const string RemotePrefix = "refs/remotes/";
-	private const string HeadSuffix = "/HEAD";
-	private const int FieldCount = 5;
+	private const int FieldCount = 6;
 
 	/// <summary>
 	/// Parses unit-separated reference records.
@@ -50,9 +49,10 @@ internal static class GitBranchParser
 			bool isRemote = fullRefName.StartsWith(RemotePrefix, StringComparison.Ordinal);
 
 			// refs/remotes/<remote>/HEAD is a symbolic reference naming the remote's default
-			// branch, not a branch of its own. Its short name is the bare remote name, so leaving
-			// it in reports a branch called "origin" in every clone.
-			if (isRemote && fullRefName.EndsWith(HeadSuffix, StringComparison.Ordinal))
+			// branch, not a branch of its own, so leaving it in reports a branch called
+			// "origin/HEAD" in every clone. It is recognised by %(symref) rather than by its name:
+			// "release/HEAD" is a legal branch name, and its remote-tracking copy is a real branch.
+			if (isRemote && fields[5].Length != 0)
 			{
 				continue;
 			}
