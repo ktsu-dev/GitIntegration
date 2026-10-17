@@ -70,6 +70,16 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// </remarks>
 	private static readonly SocketsHttpHandler SharedHandler = CreateDefaultHandler();
 
+	/// <summary>
+	/// The range of <c>X-RateLimit-Reset</c> values <see cref="DateTimeOffset.FromUnixTimeSeconds"/>
+	/// accepts. Anything outside it is treated as unparsable rather than allowed to throw out of
+	/// <see cref="Translate"/>.
+	/// </summary>
+	private static readonly long MinUnixSeconds = DateTimeOffset.MinValue.ToUnixTimeSeconds();
+
+	/// <inheritdoc cref="MinUnixSeconds"/>
+	private static readonly long MaxUnixSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
+
 	/// <inheritdoc/>
 	private protected override HttpMessageHandler DefaultHandler => SharedHandler;
 
@@ -578,7 +588,8 @@ public sealed class AzureDevOpsProvider : GitProvider
 	/// <see cref="GitHostingRateLimitException"/>; 404 becomes
 	/// <see cref="GitHostingNotFoundException"/>; anything else becomes
 	/// <see cref="GitHostingRequestException"/>. The rate-limit header names, and
-	/// <c>X-RateLimit-Reset</c> as the reset-time header, come from findings section 7.
+	/// <c>X-RateLimit-Reset</c> and <c>Retry-After</c> as the reset-time headers, come from
+	/// findings section 7.
 	/// </remarks>
 	/// <param name="response">The failed response.</param>
 	/// <param name="responseBody">The response body, already read.</param>
@@ -634,16 +645,28 @@ public sealed class AzureDevOpsProvider : GitProvider
 	}
 
 	/// <summary>Reads the rate-limit reset time from a response's headers, if present.</summary>
+	/// <remarks>
+	/// <c>X-RateLimit-Reset</c> wins when both headers are present, because it is an absolute instant
+	/// where a <c>Retry-After</c> delay has to be anchored to <see cref="DateTimeOffset.UtcNow"/>.
+	/// <c>Retry-After</c> is what Azure DevOps sends with a bare 429 block, so it is the fallback.
+	/// </remarks>
 	/// <param name="headers">The response headers.</param>
-	/// <returns>The reset time, or <see langword="null"/> when the header is absent or unparsable.</returns>
+	/// <returns>The reset time, or <see langword="null"/> when neither header is present and parsable.</returns>
 	private static DateTimeOffset? TryGetRateLimitReset(HttpResponseHeaders headers)
 	{
 		if (headers.TryGetValues("X-RateLimit-Reset", out IEnumerable<string>? values)
-			&& long.TryParse(values.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long epochSeconds))
+			&& long.TryParse(values.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long epochSeconds)
+			&& epochSeconds >= MinUnixSeconds
+			&& epochSeconds <= MaxUnixSeconds)
 		{
 			return DateTimeOffset.FromUnixTimeSeconds(epochSeconds);
 		}
 
-		return null;
+		return headers.RetryAfter switch
+		{
+			{ Date: DateTimeOffset date } => date,
+			{ Delta: TimeSpan delta } => DateTimeOffset.UtcNow.Add(delta),
+			_ => null,
+		};
 	}
 }

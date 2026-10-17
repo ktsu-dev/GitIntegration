@@ -517,6 +517,91 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	[TestMethod]
+	public async Task FallsBackToRetryAfterWhenATooManyRequestsResponseHasNoResetHeaderAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"TF400733: The request has been canceled: Request was blocked due to exceeding usage of resource.",
+				("Retry-After", "30"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsTrue(exception.ResetsAt >= before.AddSeconds(30), $"ResetsAt {exception.ResetsAt:O} is earlier than {before.AddSeconds(30):O}.");
+		Assert.IsTrue(exception.ResetsAt <= after.AddSeconds(30), $"ResetsAt {exception.ResetsAt:O} is later than {after.AddSeconds(30):O}.");
+	}
+
+	[TestMethod]
+	public async Task ReadsARetryAfterDateAsTheResetTimeAsync()
+	{
+		DateTimeOffset resetsAt = new(2027, 1, 1, 0, 0, 30, TimeSpan.Zero);
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.TooManyRequests, "blocked", ("Retry-After", "Fri, 01 Jan 2027 00:00:30 GMT"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(resetsAt, exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task PrefersXRateLimitResetOverRetryAfterAsync()
+	{
+		DateTimeOffset resetsAt = DateTimeOffset.FromUnixTimeSeconds(1798800000);
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"blocked",
+				("X-RateLimit-Reset", "1798800000"),
+				("Retry-After", "30"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(resetsAt, exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ReportsNoResetTimeWhenATooManyRequestsResponseNamesNoneAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.TooManyRequests, "blocked");
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task TreatsAnOutOfRangeXRateLimitResetAsUnparsableAsync()
+	{
+		// FromUnixTimeSeconds throws ArgumentOutOfRangeException past year 9999; that must not
+		// escape Translate in place of the rate-limit exception.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.TooManyRequests, "blocked", ("X-RateLimit-Reset", "999999999999999"));
+		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
 	public async Task ThrowsWhenPullRequestsAreRequestedWithoutAProjectAsync()
 	{
 		AzureDevOpsProvider provider = new() { Owner = "contoso".As<GitProviderOwner>() };
