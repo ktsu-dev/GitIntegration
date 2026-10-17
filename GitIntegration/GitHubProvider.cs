@@ -260,10 +260,15 @@ public sealed class GitHubProvider : GitProvider
 		try
 		{
 			// Source maps to head and Target maps to base: NewPullRequest's positional constructor
-			// takes (title, head, base), the same order GitHub's own API expects. Built inside the
+			// takes (title, head, base), the same order GitHub's own API expects. A fork's branch is
+			// spelled owner:branch, GitHub's own form for a cross-repository head. Built inside the
 			// try, after the transport already exists, so its own argument validation can never leak
 			// the transport this method just acquired.
-			NewPullRequest newPullRequest = new(specification.Title.WeakString, specification.Source.WeakString, specification.Target.WeakString)
+			string head = specification.SourceOwner is null
+				? specification.Source.WeakString
+				: $"{specification.SourceOwner.WeakString}:{specification.Source.WeakString}";
+
+			NewPullRequest newPullRequest = new(specification.Title.WeakString, head, specification.Target.WeakString)
 			{
 				Body = specification.Description,
 				Draft = specification.IsDraft,

@@ -1052,14 +1052,15 @@ with more open pull requests than one page costs more than one request and is ne
 
 ### `IGitPullRequestCreateBuilder`
 
-Collects a pull request's details before submitting it. `From`, `Into`, and `Titled` are required;
-`Describing` and `AsDraft` are optional. A missing required value throws `InvalidOperationException`
-from `ExecuteAsync`, not from the setter that left it unset, since parts may be supplied in any
-order.
+Collects a pull request's details before submitting it. `From` (or `FromFork`), `Into`, and
+`Titled` are required; `Describing` and `AsDraft` are optional. A missing required value throws
+`InvalidOperationException` from `ExecuteAsync`, not from the setter that left it unset, since
+parts may be supplied in any order.
 
 | Name | Return Type | Description |
 |------|-------------|-------------|
 | `From(GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the source branch. |
+| `FromFork(GitProviderOwner, GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the source branch in another owner's fork. GitHub receives `owner:branch` as the head; Azure DevOps throws `NotSupportedException` from `ExecuteAsync`. |
 | `Into(GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the target branch. |
 | `Titled(GitPullRequestTitle)` | `IGitPullRequestCreateBuilder` | Sets the title. |
 | `Describing(string)` | `IGitPullRequestCreateBuilder` | Sets the description. |
