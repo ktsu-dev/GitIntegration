@@ -2,6 +2,7 @@
 
 Changes since v4.1.0:
 
+- Pass --progress to network verbs when a progress sink is attached [patch] (Claude)
 - Cover the fetch rejection exception and unreadable-output path [patch] (Claude)
 - Report a refused reference from Fetch() instead of an empty error [minor] (Claude)
 - Reject branch names git forbids in GitBranchName [patch] (Claude)
