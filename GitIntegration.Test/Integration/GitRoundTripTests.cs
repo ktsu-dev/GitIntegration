@@ -825,6 +825,59 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task LogReturnsAnEmptyListBeforeTheFirstCommitAsync()
+	{
+		// An unborn HEAD makes git log exit 128, with different text depending on whether HEAD was
+		// implied or named, while --all on the same repository exits 0 with no output. A history
+		// view opened on a fresh repository should see no commits whichever options it chose.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		IGitLogBuilder[] builders =
+		[
+			repository.Log(),
+			repository.Log().ForPath("a.txt".As<RelativeFilePath>()),
+			repository.Log().ExcludingRemoteTrackingRefs(),
+			repository.Log().IncludingAllRefs(),
+		];
+
+		foreach (IGitLogBuilder builder in builders)
+		{
+			IReadOnlyList<GitCommit> commits = await builder.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+			Assert.AreEqual(0, commits.Count);
+		}
+
+		GitResult<IReadOnlyList<GitCommit>> result =
+			await repository.Log().TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(result.Success);
+		Assert.AreEqual(0, result.Value!.Count);
+	}
+
+	[TestMethod]
+	public async Task LogStillRefusesAnUnknownRevisionBeforeTheFirstCommitAsync()
+	{
+		// Only the implied HEAD is forgiven. A revision the caller named is a question about that
+		// revision, and on an empty repository it does not exist.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await repository.Log().ForRevision("does-not-exist".As<GitRefName>())
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		GitResult<IReadOnlyList<GitCommit>> result = await repository.Log().ForRevision("does-not-exist".As<GitRefName>())
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
 	public async Task DiffReportsLineCountsFromARealRepositoryAsync()
 	{
 		// The parser tests pin the shape of git's output; this pins that git really does emit that
