@@ -220,11 +220,17 @@ internal static class GitStatusParser
 		// ? <path> and ! <path> carry no per-side detail, so the single state applies to both.
 		string[] fields = SplitFields(record, count: 2);
 
+		// git marks a collapsed directory with a trailing slash. A file path cannot end in one, so the
+		// slash is lifted into IsDirectory rather than left for the path conversion to drop.
+		string path = fields[1];
+		bool isDirectory = path.Length > 1 && path[^1] == '/';
+
 		return new GitStatusEntry
 		{
 			IndexState = state,
 			WorkTreeState = state,
-			Path = GitParseValues.ToRelativeFilePath(fields[1]),
+			Path = GitParseValues.ToRelativeFilePath(isDirectory ? path[..^1] : path),
+			IsDirectory = isDirectory,
 		};
 	}
 

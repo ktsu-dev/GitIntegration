@@ -83,4 +83,16 @@ public sealed record GitStatusEntry
 	/// otherwise.
 	/// </summary>
 	public RelativeFilePath? OriginalPath { get; init; }
+
+	/// <summary>
+	/// Gets a value indicating whether <see cref="Path"/> names a directory rather than a file.
+	/// </summary>
+	/// <remarks>
+	/// Only an untracked or ignored entry can be a directory. Under
+	/// <see cref="GitUntrackedFilesMode.Normal"/>, git collapses a directory holding no tracked
+	/// files, or an untracked nested repository, to one record for the directory itself, and marks it
+	/// with a trailing slash that <see cref="Path"/> cannot carry. Without this flag that record reads
+	/// exactly like an untracked file of the same name.
+	/// </remarks>
+	public bool IsDirectory { get; init; }
 }
