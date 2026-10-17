@@ -153,6 +153,7 @@ internal sealed class GitSubmoduleUpdateBuilder(IGitProcessRunner runner, Absolu
 
 		arguments.Add("submodule");
 		arguments.Add("update");
+		AppendProgressFlag(arguments);
 
 		if (_initialize)
 		{

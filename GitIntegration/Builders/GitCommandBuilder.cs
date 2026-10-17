@@ -79,6 +79,28 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 	protected virtual bool PassesPathsLiterally => false;
 
 	/// <summary>
+	/// Appends <c>--progress</c> when a sink is attached, so git reports transfer progress even
+	/// though its standard error is redirected rather than a terminal.
+	/// </summary>
+	/// <remarks>
+	/// Without the flag git writes no counting, "Receiving objects" or "Resolving deltas" lines to a
+	/// redirected standard error, which leaves a sink with nothing during the slow network phase. It
+	/// is emitted only when someone is listening, so standard error stays small and the diagnostic in
+	/// a thrown exception stays short otherwise (issue #154).
+	/// </remarks>
+	/// <param name="arguments">The vector being assembled.</param>
+	/// <exception cref="ArgumentNullException"><paramref name="arguments"/> is <see langword="null"/>.</exception>
+	protected void AppendProgressFlag(ICollection<string> arguments)
+	{
+		Ensure.NotNull(arguments);
+
+		if (Progress is not null)
+		{
+			arguments.Add("--progress");
+		}
+	}
+
+	/// <summary>
 	/// Appends caller-supplied operands after an end-of-options marker, so a value beginning with a
 	/// dash cannot be reinterpreted by git as an option.
 	/// </summary>

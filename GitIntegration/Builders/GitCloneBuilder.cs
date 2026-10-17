@@ -121,6 +121,7 @@ internal sealed class GitCloneBuilder(
 		Ensure.NotNull(arguments);
 
 		arguments.Add("clone");
+		AppendProgressFlag(arguments);
 
 		if (_branch is not null)
 		{
