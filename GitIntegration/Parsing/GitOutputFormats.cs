@@ -41,9 +41,12 @@ internal static class GitOutputFormats
 	/// <remarks>
 	/// The full reference name leads, and is the reason this format differs from the one sketched
 	/// in the design document. A short name cannot say whether a branch is local or
-	/// remote-tracking — a local branch may be called <c>origin/main</c> — and
-	/// <c>refs/remotes/origin/HEAD</c>, present in every clone, shortens to the bare remote name
-	/// and would otherwise be reported as a branch called <c>origin</c>. <c>%1f</c> is
+	/// remote-tracking — a local branch may be called <c>origin/main</c>. The trailing
+	/// <c>%(symref)</c> names the target of a symbolic reference and is empty for every other one.
+	/// <c>refs/remotes/origin/HEAD</c>, present in every clone, is symbolic: it shortens to
+	/// <c>origin/HEAD</c> and would otherwise be reported as a branch of that name, so the parser
+	/// drops it on that field rather than on its name, because <c>release/HEAD</c> is a legal
+	/// branch name and its remote-tracking copy ends the same way. <c>%1f</c> is
 	/// <c>for-each-ref</c>'s own hex escape, which differs in spelling from <c>log</c>'s
 	/// <c>%x1f</c> but means the same byte.
 	/// <para>
@@ -55,7 +58,7 @@ internal static class GitOutputFormats
 	/// </para>
 	/// </remarks>
 	internal const string ForEachRefFormat =
-		"%(refname)%1f%(refname:lstrip=2)%1f%(objectname)%1f%(upstream:lstrip=2)%1f%(HEAD)";
+		"%(refname)%1f%(refname:lstrip=2)%1f%(objectname)%1f%(upstream:lstrip=2)%1f%(HEAD)%1f%(symref)";
 
 	/// <summary>
 	/// The <c>for-each-ref</c> format for tags: name, the reference's own object id, the
