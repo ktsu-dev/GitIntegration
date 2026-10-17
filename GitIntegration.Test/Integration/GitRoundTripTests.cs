@@ -825,6 +825,57 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task RevParsePeelsAnAnnotatedTagToItsCommitAsync()
+	{
+		// rev-parse returns the object a revision names, and for an annotated tag that is the tag
+		// object, not the commit. RevParse promises a GitCommitSha, so it has to peel; otherwise
+		// "is v1 at HEAD?" compares a tag id against a commit id and quietly answers no.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit commit = await repository.Commit("c1".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.CreateTag("v1".As<GitTagName>())
+			.Annotating("release 1".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommitSha tagged = await repository.RevParse("v1".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommitSha head = await repository.RevParse("HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(commit.Sha, tagged);
+		Assert.AreEqual(head, tagged);
+	}
+
+	[TestMethod]
+	public async Task RevParseRefusesARevisionThatNamesNoCommitAsync()
+	{
+		// A tree is not a commit, so handing its id back typed as GitCommitSha would be a lie. It
+		// fails the way any revision that resolves to no commit does.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitResult<GitCommitSha> result = await repository.RevParse("HEAD^{tree}".As<GitRefName>())
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
 	public async Task DiffReportsLineCountsFromARealRepositoryAsync()
 	{
 		// The parser tests pin the shape of git's output; this pins that git really does emit that

@@ -839,7 +839,7 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `Remotes()` | `IGitRemoteListBuilder` | Builds `git remote -v`. |
 | `Submodules()` | `IGitSubmoduleListBuilder` | Reads `git ls-files --stage -z` for the recorded gitlinks and `git submodule status` for what is checked out. |
 | `Worktrees()` | `IGitWorktreeListBuilder` | Builds `git worktree list --porcelain -z` (without `-z` below git 2.36). |
-| `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision. |
+| `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision, peeled to the commit it names. |
 | `RevList(GitRefName)` | `IGitRevListBuilder` | Builds `git rev-list --count`, counting commits without listing them. |
 | `Divergence(GitRefName, GitRefName)` | `IGitRevListDivergenceBuilder` | Builds `git rev-list --count --left-right`, reporting ahead and behind for any two revisions. |
 | `Add()` | `IGitAddBuilder` | Builds `git add`. |
