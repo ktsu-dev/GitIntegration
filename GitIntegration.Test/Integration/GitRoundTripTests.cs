@@ -1078,5 +1078,76 @@ public class GitRoundTripTests
 		Assert.AreEqual(100, changes[0].SimilarityPercent);
 	}
 
+	[TestMethod]
+	public async Task RevisionVerbsReadABranchNamedLikeADirectoryAsTheBranchAsync()
+	{
+		// --end-of-options settles that an operand is not a flag, but git still guesses whether it is
+		// a revision or a path until it sees --. A branch sharing a tracked directory's name is both,
+		// and without the -- every one of these verbs died with "ambiguous argument"
+		// (ktsu-dev/GitIntegration#168).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("docs/a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.CreateBranch("docs".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("docs/a.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRefName docs = "docs".As<GitRefName>();
+
+		// Compared as a typed path rather than as text, since the path type spells separators
+		// natively and the text differs on Windows.
+		RelativeFilePath changed = "docs/a.txt".As<RelativeFilePath>();
+
+		IReadOnlyList<GitCommit> log = await repository.Log().ForRevision(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.HasCount(1, log, "Log() should list the docs branch's one commit.");
+
+		int count = await repository.RevList(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(1, count);
+
+		IReadOnlyList<GitDiffEntry> diff = await repository.Diff().Against(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.Contains(entry => entry.Path == changed, diff);
+
+		GitPatch patch = await repository.Patch().Against(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.Contains(file => file.Path == changed, patch.Files);
+	}
+
+	[TestMethod]
+	public async Task RevisionVerbsRejectAMissingRevisionThatMatchesAPathAsync()
+	{
+		// With no such revision, git used to fall back to reading the operand as a path and exit 0:
+		// Diff() returned the working-tree diff limited to docs/, and Log() HEAD's history limited to
+		// it, a confident wrong answer instead of an unknown revision (ktsu-dev/GitIntegration#168).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("docs/a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		temporary.WriteFile("docs/a.txt", "two\n");
+
+		GitRefName docs = "docs".As<GitRefName>();
+
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.Diff().Against(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.Patch().Against(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.Log().ForRevision(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.RevList(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

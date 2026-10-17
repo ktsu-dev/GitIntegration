@@ -217,6 +217,7 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 			arguments.Add("--not");
 		}
 
+		bool emittedRevision = true;
 		if (_revision is not null)
 		{
 			AppendOperands(arguments, _revision.WeakString);
@@ -228,12 +229,22 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 			// nothing and reads as "nothing unpushed". Verified against git 2.43.
 			AppendOperands(arguments, "HEAD");
 		}
+		else
+		{
+			emittedRevision = false;
+		}
 
-		if (_paths.Count > 0)
+		if (emittedRevision || _paths.Count > 0)
 		{
 			// A pathspec goes after --, which is its own end-of-options marker for that position.
 			// The revision must already have been emitted: git reads everything after -- as a
 			// filename, so a revision placed there returns an empty log rather than failing.
+			//
+			// The -- is emitted after a revision even with no paths. --end-of-options settles that an
+			// operand is not a flag, but not whether it is a revision or a path, and git only stops
+			// guessing at --. Without it, a branch named like a directory fails as "ambiguous
+			// argument", and a missing revision that matches a path returns that path's history
+			// instead of failing (ktsu-dev/GitIntegration#168). GitCheckoutBuilder does the same.
 			arguments.Add("--");
 
 			foreach (RelativeFilePath path in _paths)
