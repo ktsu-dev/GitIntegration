@@ -942,7 +942,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | Type | Description |
 |------|-------------|
 | `GitStatus` | `Branch`, `Upstream`, `Ahead`, `Behind`, `IsDetached`, `Entries`, `IsClean`. |
-| `GitStatusEntry` | `IndexState`, `WorkTreeState`, `Path`, `OriginalPath` for one changed path. |
+| `GitStatusEntry` | `IndexState`, `WorkTreeState`, `Path`, `OriginalPath`, `IsDirectory` (an untracked or ignored directory git collapsed to one record) for one changed path. |
 | `GitCommit` | `Sha`, `TreeSha`, `ParentShas`, `Author`, `Committer`, `Subject`, `Body`. |
 | `GitSignature` | `Name`, `Email`, `Timestamp` recorded on a commit. |
 | `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`. |
