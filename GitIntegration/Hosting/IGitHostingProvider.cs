@@ -184,6 +184,22 @@ public interface IGitPullRequestCreateBuilder
 	/// <exception cref="System.ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
 	public IGitPullRequestCreateBuilder From(GitBranchName source);
 
+	/// <summary>Sets the branch the pull request merges from, held in another owner's fork.</summary>
+	/// <remarks>
+	/// A fork's branch cannot be named through <see cref="From(GitBranchName)"/>: GitHub spells it
+	/// <c>owner:branch</c>, and a colon is not legal in a git branch name, so
+	/// <see cref="GitBranchName"/> rightly refuses it. <see cref="GitHubProvider"/> sends
+	/// <c>{headOwner}:{source}</c> as the pull request's head. <see cref="AzureDevOpsProvider"/>
+	/// does not support fork-qualified sources and refuses one from
+	/// <see cref="ExecuteAsync(CancellationToken)"/> before making any request. Whichever of this
+	/// and <see cref="From(GitBranchName)"/> is called last sets the source.
+	/// </remarks>
+	/// <param name="headOwner">The owner of the fork that holds <paramref name="source"/>.</param>
+	/// <param name="source">The source branch, as named in that fork.</param>
+	/// <returns>The same builder, to allow chaining.</returns>
+	/// <exception cref="System.ArgumentNullException"><paramref name="headOwner"/> or <paramref name="source"/> is <see langword="null"/>.</exception>
+	public IGitPullRequestCreateBuilder FromFork(GitProviderOwner headOwner, GitBranchName source);
+
 	/// <summary>Sets the branch the pull request merges into.</summary>
 	/// <remarks>
 	/// Required, but not checked here, for the same reason as <see cref="From(GitBranchName)"/>:
@@ -230,6 +246,10 @@ public interface IGitPullRequestCreateBuilder
 	/// <exception cref="System.InvalidOperationException">
 	/// A required part — the source branch, the target branch, or the title — was never supplied.
 	/// </exception>
+	/// <exception cref="System.NotSupportedException">
+	/// The source was set with <see cref="FromFork(GitProviderOwner, GitBranchName)"/> and the
+	/// provider cannot open a pull request from a fork-qualified source.
+	/// </exception>
 	public Task<GitPullRequest> ExecuteAsync(CancellationToken cancellationToken = default);
 }
 
@@ -247,4 +267,8 @@ public interface IGitPullRequestCreateBuilder
 /// <param name="Title">The pull request's title.</param>
 /// <param name="Description">The pull request's description, or <see langword="null"/> when none was given.</param>
 /// <param name="IsDraft">Whether the pull request should be created as a draft.</param>
-internal sealed record GitPullRequestSpecification(GitBranchName Source, GitBranchName Target, GitPullRequestTitle Title, string? Description, bool IsDraft);
+/// <param name="SourceOwner">
+/// The owner of the fork holding <paramref name="Source"/>, or <see langword="null"/> when the source
+/// is a branch of the repository the pull request is opened against.
+/// </param>
+internal sealed record GitPullRequestSpecification(GitBranchName Source, GitBranchName Target, GitPullRequestTitle Title, string? Description, bool IsDraft, GitProviderOwner? SourceOwner = null);

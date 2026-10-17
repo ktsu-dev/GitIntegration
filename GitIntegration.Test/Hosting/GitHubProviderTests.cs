@@ -669,6 +669,42 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task SendsAForkSourceAsOwnerColonBranchInTheCreateBodyAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repos/contoso/example-repo/pulls", HttpStatusCode.Created, Fixture("github-pullrequest-created.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		_ = await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+			.FromFork("my-fork-owner".As<GitProviderOwner>(), "fix/thing".As<GitBranchName>())
+			.Into("main".As<GitBranchName>())
+			.Titled("Fix thing".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		string body = handler.Requests[0].Body!;
+		StringAssert.Contains(body, "\"head\":\"my-fork-owner:fix/thing\"");
+		StringAssert.Contains(body, "\"base\":\"main\"");
+	}
+
+	[TestMethod]
+	public async Task SendsASameRepositorySourceAsTheBareBranchInTheCreateBodyAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repos/contoso/example-repo/pulls", HttpStatusCode.Created, Fixture("github-pullrequest-created.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		_ = await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+			.From("fix/thing".As<GitBranchName>())
+			.Into("main".As<GitBranchName>())
+			.Titled("Fix thing".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(handler.Requests[0].Body!, "\"head\":\"fix/thing\"");
+	}
+
+	[TestMethod]
 	public async Task TranslatesAnUnauthorizedResponseToGitHostingAuthenticationExceptionAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
