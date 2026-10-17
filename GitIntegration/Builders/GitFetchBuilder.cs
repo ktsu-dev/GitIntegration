@@ -226,6 +226,7 @@ internal sealed class GitFetchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		}
 
 		arguments.Add("fetch");
+		AppendProgressFlag(arguments);
 
 		if (IsPorcelainAvailable)
 		{

@@ -739,5 +739,97 @@ public class GitRemoteSyncTests
 		Assert.IsTrue(status.IsUpstreamGone);
 	}
 
+	[TestMethod]
+	public async Task CloneAndFetchReportTransferProgressToASinkAsync()
+	{
+		// git writes "Receiving objects" to a redirected standard error only under --progress, so
+		// before issue #154 a sink saw nothing during the network phase. A file:// URL forces the
+		// pack transport (a plain path clone hardlinks instead), and more than fetch.unpackLimit's
+		// 100 objects keeps the fetch on index-pack, which is what reports "Receiving objects".
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		await CommitManyFilesAsync(repository, workingDirectory, "first", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		RecordingProgress cloneProgress = new();
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(new Uri(remote.WeakString).AbsoluteUri.As<GitRepositoryRemotePath>(), cloneDirectory.Root)
+			.ReportingProgress(cloneProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		StringAssert.Contains(cloneProgress.Text, "Receiving objects");
+
+		await CommitManyFilesAsync(repository, workingDirectory, "second", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		RecordingProgress fetchProgress = new();
+		_ = await clone.Fetch()
+			.ReportingProgress(fetchProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		StringAssert.Contains(fetchProgress.Text, "Receiving objects");
+	}
+
+	private static async Task CommitManyFilesAsync(
+		GitRepository repository,
+		TemporaryRepository temporary,
+		string prefix,
+		CancellationToken cancellationToken)
+	{
+		for (int i = 0; i < 150; i++)
+		{
+			temporary.WriteFile($"{prefix}-{i}.txt", $"{prefix} {i}\n");
+		}
+
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository
+			.Commit(prefix.As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Collects reports synchronously. <see cref="Progress{T}"/> posts each report through the
+	/// synchronization context, so asserting on what it received would race the callbacks.
+	/// </summary>
+	private sealed class RecordingProgress : IProgress<string>
+	{
+		private readonly Lock _gate = new();
+		private readonly System.Text.StringBuilder _received = new();
+
+		public string Text
+		{
+			get
+			{
+				lock (_gate)
+				{
+					return _received.ToString();
+				}
+			}
+		}
+
+		public void Report(string value)
+		{
+			lock (_gate)
+			{
+				_ = _received.Append(value);
+			}
+		}
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

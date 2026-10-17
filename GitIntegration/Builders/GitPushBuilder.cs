@@ -193,6 +193,7 @@ internal sealed class GitPushBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		Ensure.NotNull(arguments);
 
 		arguments.Add("push");
+		AppendProgressFlag(arguments);
 
 		// Unconditional: it is what makes the outcome machine-readable, and it is the only reason
 		// a rejected push can be reported as data rather than as prose.

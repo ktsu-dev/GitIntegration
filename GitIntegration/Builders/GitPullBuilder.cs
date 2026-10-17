@@ -215,6 +215,7 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		}
 
 		arguments.Add("pull");
+		AppendProgressFlag(arguments);
 
 		if (_fastForwardOnly)
 		{
