@@ -196,7 +196,11 @@ public class GitRepository
 		return new GitRestoreBuilder(RequireRunner(), RequireLocalPath(), path);
 	}
 
-	/// <summary>Resolves a revision to the object id it names.</summary>
+	/// <summary>Resolves a revision to the id of the commit it names.</summary>
+	/// <remarks>
+	/// The revision is peeled to a commit, so an annotated tag resolves to the commit it points at
+	/// rather than to the tag object, and a revision naming a tree or blob fails as unresolvable.
+	/// </remarks>
 	/// <param name="revision">The revision to resolve.</param>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="revision"/> is <see langword="null"/>.</exception>
