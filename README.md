@@ -632,9 +632,12 @@ IGitHostingProvider github = new GitHubProvider
 IReadOnlyList<GitRepository> repositories = await github.GetRepositoriesAsync();
 ```
 
-`GitHubProvider.GetRepositoriesAsync` returns only `Owner`'s **public** repositories — GitHub's
-`GET /users/{login}/repos` does not honour authentication to reveal private ones. Azure DevOps has
-no equivalent restriction: it returns everything the resolved credential can see.
+`GitHubProvider.GetRepositoriesAsync` routes by what `Owner` turns out to be. Authenticated, an
+organisation's repositories come from `GET /orgs/{org}/repos` and the credential's own account from
+`GET /user/repos`, so both include the private repositories the credential can see. Any other user
+falls back to the public `GET /users/{login}/repos` route, which is all GitHub offers for that
+case, and an unauthenticated provider always uses it. See [`GitHubProvider`](#githubprovider) for
+how the route is chosen. Azure DevOps returns everything the resolved credential can see.
 
 ```csharp
 using ktsu.GitIntegration;

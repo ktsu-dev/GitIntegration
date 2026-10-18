@@ -42,7 +42,9 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
   `Divergence(...)`) and per mutating verb (`Add()`, `Commit(...)`, `CreateBranch(...)`,
   `DeleteBranch(...)`, `CreateTag(...)`, `DeleteTag(...)`, `Checkout(...)`, `AddRemote(...)`,
   `RemoveRemote(...)`, `SetRemoteUrl(...)`, `Fetch()`, `Pull()`, `Push()`, `UpdateSubmodules()`),
-  plus `IsClonedAsync` and `OpenWebClient`. Both `LocalPath` and `ProcessRunner` are nullable and
+  the patch verbs (`Patch()`, `Apply(...)`, `Unstage(...)`), the worktree verbs (`Worktrees()`,
+  `AddWorktree(...)`, `RemoveWorktree(...)`, `PruneWorktrees()`), plus `IsClonedAsync` and
+  `OpenWebClient`. Both `LocalPath` and `ProcessRunner` are nullable and
   separately guarded — `RequireLocalPath()` alongside `RequireRunner()` — because a repository a
   hosting provider enumerated carries neither, and the two properties are public `init` accessors so
   a caller can supply one without the other.
@@ -52,8 +54,10 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
   `GitRemoteRemoveBuilder`, `GitRemoteSetUrlBuilder`, `GitFetchBuilder`, `GitPullBuilder`,
   `GitPushBuilder`, the tag builders (`GitTagListBuilder`, `GitTagCreateBuilder`,
   `GitTagDeleteBuilder`), the submodule builders (`GitSubmoduleListBuilder`,
-  `GitSubmoduleUpdateBuilder`), and the two `rev-list` builders (`GitRevListBuilder`,
-  `GitRevListDivergenceBuilder`). `IGitVersionBuilder` and every concrete `Git*Builder` class are
+  `GitSubmoduleUpdateBuilder`), the two `rev-list` builders (`GitRevListBuilder`,
+  `GitRevListDivergenceBuilder`), the patch builders (`GitPatchBuilder`, `GitApplyBuilder`,
+  `GitRestoreBuilder`), and the worktree builders (`GitWorktreeListBuilder`, `GitWorktreeAddBuilder`,
+  and `GitWorktreeRemoveBuilder` and `GitWorktreePruneBuilder` in `GitWorktreeWriteBuilders.cs`). `IGitVersionBuilder` and every concrete `Git*Builder` class are
   `internal` — not part of the public API surface. Only the `IGit*Builder` interfaces are public.
 - `GitIntegration/Models/` — result records and enums: `GitStatus`, `GitStatusEntry`, `GitCommit`,
   `GitSignature`, `GitBranch`, `GitTag`, `GitSubmodule`, `GitRemote`, `GitDiffEntry`,
@@ -62,7 +66,8 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
   `GitCompleted` — the shared "unit" result for mutating verbs whose only outcome is success (C# has
   no generic `void`) — and the remote-sync models `GitRefUpdate`, `GitRefUpdateKind`,
   `GitFetchResult` (`Updates`, `DetailAvailable`, `IsUpToDate`, `HasRejections`), and `GitPushResult` (`Updates`,
-  `HasRejections`).
+  `HasRejections`), `GitWorktree`, and the patch models in `GitPatch.cs` (`GitPatch`, `GitFilePatch`,
+  `GitHunk`, `GitPatchLine`).
 - `GitIntegration/Execution/` — `GitOptions`, `IGitProcessRunner`, `RunCommandGitProcessRunner`,
   `GitResult<T>`, and the exception hierarchy (`GitException` → `GitExecutableNotFoundException`,
   `GitTimeoutException`, `GitParseException`, `GitCommandException` → `GitRepositoryNotFoundException`,
@@ -85,8 +90,9 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
 - `GitIntegration/Hosting/` — `IGitHostingProvider` and `IGitPullRequestCreateBuilder` (the public
   hosting contracts), `AzureDevOpsProvider` (the Azure DevOps implementation, over a raw
   `HttpClient`), `AzureDevOpsJson.cs` (its `JsonSerializerContext` and wire-format DTOs),
-  `GitPullRequestCreateBuilder` (the one shared builder implementation both providers use), and
-  `GitHostingExceptions.cs` (the `GitHostingException` hierarchy).
+  `GitPullRequestCreateBuilder` (the one shared builder implementation both providers use),
+  `GitHubDeviceFlow.cs` (`GitHubDeviceFlow` and `GitHubDeviceCode`, interactive sign-in through
+  GitHub's OAuth device flow), and `GitHostingExceptions.cs` (the `GitHostingException` hierarchy).
 - `GitIntegration/Models/GitPullRequest.cs` — `GitPullRequest` and `GitPullRequestState`.
 - `GitIntegration/ServiceCollectionExtensions.cs` — `AddGitIntegration()` DI registration. Registers
   only the local layer — see the Hosting layer section below for why the hosting layer is not
@@ -551,14 +557,20 @@ organisation; set, it scopes to that project. Pull requests have no project-less
 when `Project` is null, rather than guessing a project by re-enumerating and matching repository
 names (rejected: an extra call, and ambiguous whenever two projects share a repository name).
 
-**GitHub's `GetRepositoriesAsync` returns public repositories only, and a token does not widen
-that.** It calls `GET /users/{login}/repos`, which does not honour authentication to reveal an
-owner's private repositories the way `GET /user/repos` would for the *token's own* account — and
-switching to that endpoint would silently stop honouring the configured `Owner`, since it always
-describes the token's own repositories regardless of which owner was asked for. Azure DevOps has no
-equivalent restriction: its enumeration returns everything the supplied token can see. Two
-implementations of the same `IGitHostingProvider.GetRepositoriesAsync` contract genuinely differ
-here — do not assume GitHub coverage matches Azure DevOps's, or vice versa.
+**GitHub's `GetRepositoriesAsync` routes by owner type, and only two routes reveal private
+repositories.** No single GitHub endpoint both honours `Owner` and reveals private repositories,
+so `GitHubProvider` reads the owner's type from `GET /users/{login}` (not from
+`GET /orgs/{login}/repos` answering `404`, which an SSO-enforcing organisation or a token without
+`read:org` also produces) and picks a route: an organisation goes to `GET /orgs/{org}/repos`; a
+user who is the credential's own account (confirmed by `GET /user`) goes to `GET /user/repos`; any
+other user, or a GitHub App installation token whose `GET /user` answers `403`, falls back to the
+public-only `GET /users/{login}/repos`. An unauthenticated provider skips both probes and calls the
+public route directly, since every route gives the same public answer without a credential.
+`GET /user/repos` must never be reached without that ownership check: it always describes the
+token's own repositories, so using it for another owner would silently stop honouring `Owner`.
+Azure DevOps's enumeration returns everything the supplied token can see, so the two
+implementations of `IGitHostingProvider.GetRepositoriesAsync` still differ for a user owner who is
+not the credential's own account. `GitIntegration.Test/Hosting/GitHubProviderTests.cs` pins each route.
 
 **A success status code is not a promise the body is JSON.** A proxy interstitial, a captive portal,
 or a single sign-on redirect page all arrive as HTML under a `200`. `AzureDevOpsProvider`'s three
@@ -612,7 +624,12 @@ Submodule support **is** in scope and is implemented — `Submodules()`, `Update
 contradicted the v2 design doc's own "deferred to a later version"; that discrepancy is resolved,
 and the design doc carries a dated amendment saying so. `git submodule add` is not wrapped: the
 verbs exist to inspect and update submodules, not to create them. Still out of scope from the design
-doc's non-goals, and genuinely so: `merge`, `rebase`, `bisect`, `stash`, `worktree`.
+doc's non-goals, and genuinely so: `merge`, `rebase`, `bisect`, `stash`.
+
+Worktree support **is** in scope and is implemented: `Worktrees()`, `AddWorktree(...)`,
+`RemoveWorktree(...)` and `PruneWorktrees()`. It used to be on the list above; the worktrees and
+GitHub auth design (`docs/superpowers/specs/2026-09-21-worktrees-and-github-auth-design.md`) brought
+it in.
 
 ## Testing
 
