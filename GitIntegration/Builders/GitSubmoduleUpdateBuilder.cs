@@ -83,7 +83,9 @@ public interface IGitSubmoduleUpdateBuilder : IGitCommandBuilder<GitCompleted>
 	/// Offered because this is a network operation whenever a submodule has to be cloned or fetched,
 	/// the same reason <c>Fetch</c>, <c>Clone</c>, and <c>Push</c> offer it.
 	/// </remarks>
-	/// <param name="progress">The sink to report to. Must be thread-safe.</param>
+	/// <param name="progress">
+	/// The sink to report to. Must be thread-safe. If the sink throws, the exception is contained: reporting to it stops, git runs to completion, and the result is parsed in full.
+	/// </param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="progress"/> is <see langword="null"/>.</exception>
 	public IGitSubmoduleUpdateBuilder ReportingProgress(IProgress<string> progress);
