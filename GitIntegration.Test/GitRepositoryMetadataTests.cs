@@ -38,16 +38,18 @@ public class GitRepositoryMetadataTests
 	}
 
 	[TestMethod]
-	public void OpenWebClientTolerablyReturnsWhenWebUriIsNull()
+	public void OpenWebClientDoesNotLaunchWhenWebUriIsNull()
 	{
+		List<Uri> launched = [];
 		GitRepository repository = new()
 		{
 			LocalPath = TestPaths.Root,
+			LaunchBrowser = launched.Add,
 		};
 
-		// This verifies the null guard returns rather than dereferencing. It cannot observe
-		// whether anything was launched; IsBrowsableUri is asserted directly for that.
 		repository.OpenWebClient();
+
+		Assert.IsEmpty(launched);
 	}
 
 	[TestMethod]
@@ -55,17 +57,41 @@ public class GitRepositoryMetadataTests
 	[DataRow(@"C:\Windows\System32\calc.exe")]
 	[DataRow("./relative/path")]
 	[DataRow("ktsu-dev/GitIntegration")]
+	[DataRow("ms-settings:privacy")]
 	public void OpenWebClientReturnsWithoutLaunchingForRejectedValue(string value)
 	{
+		List<Uri> launched = [];
 		GitRepository repository = new()
 		{
 			LocalPath = TestPaths.Root,
 			WebURI = value.As<GitRepositoryWebURI>(),
+			LaunchBrowser = launched.Add,
 		};
 
 		// The gate rejects the value, so this must return rather than shell-executing it.
 		Assert.IsFalse(GitRepository.IsBrowsableUri(value, out Uri? _));
 		repository.OpenWebClient();
+
+		Assert.IsEmpty(launched);
+	}
+
+	[TestMethod]
+	[DataRow("http://github.com/ktsu-dev/GitIntegration")]
+	[DataRow("https://github.com/ktsu-dev/GitIntegration")]
+	public void OpenWebClientLaunchesAcceptedUriExactlyOnce(string value)
+	{
+		List<Uri> launched = [];
+		GitRepository repository = new()
+		{
+			LocalPath = TestPaths.Root,
+			WebURI = value.As<GitRepositoryWebURI>(),
+			LaunchBrowser = launched.Add,
+		};
+
+		repository.OpenWebClient();
+
+		Assert.HasCount(1, launched);
+		Assert.AreEqual(new Uri(value), launched[0]);
 	}
 
 	[TestMethod]
