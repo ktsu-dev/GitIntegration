@@ -471,6 +471,36 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task StatusTellsAnUntrackedDirectoryFromAnUntrackedFileAsync()
+	{
+		// The default untracked mode collapses a directory with no tracked files to one record, so
+		// newdir/ and a file named newfile would both come back as a bare untracked path without a
+		// directory flag.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("newdir/x.txt", "two\n");
+		temporary.WriteFile("newfile", "three\n");
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitStatusEntry directory = status.Entries.Single(entry => entry.Path == "newdir".As<RelativeFilePath>());
+		Assert.AreEqual(GitFileState.Untracked, directory.WorkTreeState);
+		Assert.IsTrue(directory.IsDirectory);
+
+		GitStatusEntry file = status.Entries.Single(entry => entry.Path == "newfile".As<RelativeFilePath>());
+		Assert.AreEqual(GitFileState.Untracked, file.WorkTreeState);
+		Assert.IsFalse(file.IsDirectory);
+	}
+
+	[TestMethod]
 	public async Task UnstageBeforeTheFirstCommitLeavesTheFileUntrackedAsync()
 	{
 		// A freshly initialised repository has no HEAD to restore the index from, which is exactly
