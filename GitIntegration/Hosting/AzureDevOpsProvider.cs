@@ -258,6 +258,15 @@ public sealed class AzureDevOpsProvider : GitProvider
 		cancellationToken.ThrowIfCancellationRequested();
 		EnsureProjectIsSet();
 
+		// Azure DevOps names a fork's source through a separate forkSource repository reference,
+		// not an owner, so there is nothing to map a head owner onto. Refusing it beats silently
+		// opening the pull request from the same-named branch of the target repository instead.
+		if (specification.SourceOwner is not null)
+		{
+			throw new NotSupportedException(
+				$"{nameof(AzureDevOpsProvider)} cannot open a pull request from a fork-qualified source ('{specification.SourceOwner.WeakString}'). Use From instead of FromFork.");
+		}
+
 		Uri requestUri = BuildPullRequestCreateUri(repositoryIdentifier);
 		HostingCredential credential = ResolveCredential();
 

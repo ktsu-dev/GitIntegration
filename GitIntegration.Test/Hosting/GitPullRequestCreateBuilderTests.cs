@@ -67,6 +67,37 @@ public sealed class GitPullRequestCreateBuilderTests
 
 		Assert.IsNull(captured()!.Description);
 		Assert.IsFalse(captured()!.IsDraft);
+		Assert.IsNull(captured()!.SourceOwner);
+	}
+
+	[TestMethod]
+	public async Task PassesAForkSourceOwnerToTheExecuteDelegateAsync()
+	{
+		(GitPullRequestCreateBuilder builder, Func<GitPullRequestSpecification?> captured) = Recording();
+
+		_ = await builder
+			.FromFork("octocat".As<GitProviderOwner>(), "fix/thing".As<GitBranchName>())
+			.Into("main".As<GitBranchName>()).Titled("t".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual("octocat".As<GitProviderOwner>(), captured()!.SourceOwner);
+		Assert.AreEqual("fix/thing".As<GitBranchName>(), captured()!.Source);
+	}
+
+	[TestMethod]
+	public async Task FromAfterFromForkClearsTheSourceOwnerAsync()
+	{
+		// The last call sets the source, owner included: a plain From must not inherit the fork.
+		(GitPullRequestCreateBuilder builder, Func<GitPullRequestSpecification?> captured) = Recording();
+
+		_ = await builder
+			.FromFork("octocat".As<GitProviderOwner>(), "fix/thing".As<GitBranchName>())
+			.From("feature/x".As<GitBranchName>())
+			.Into("main".As<GitBranchName>()).Titled("t".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsNull(captured()!.SourceOwner);
+		Assert.AreEqual("feature/x".As<GitBranchName>(), captured()!.Source);
 	}
 
 	[TestMethod]
@@ -144,6 +175,15 @@ public sealed class GitPullRequestCreateBuilderTests
 		(GitPullRequestCreateBuilder builder, _) = Recording();
 
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = builder.From(null!));
+	}
+
+	[TestMethod]
+	public void RejectsANullForkOwnerOrBranch()
+	{
+		(GitPullRequestCreateBuilder builder, _) = Recording();
+
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = builder.FromFork(null!, "a".As<GitBranchName>()));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = builder.FromFork("octocat".As<GitProviderOwner>(), null!));
 	}
 
 	[TestMethod]

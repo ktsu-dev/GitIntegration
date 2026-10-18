@@ -1074,6 +1074,30 @@ public sealed class AzureDevOpsProviderTests
 	}
 
 	[TestMethod]
+	public async Task RefusesAForkSourceBeforeSendingAnyRequestAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(HttpStatusCode.Created, Fixture("azure-devops-pullrequest-created.json"), ("Content-Type", "application/json"));
+		AzureDevOpsProvider provider = new()
+		{
+			Owner = "contoso".As<GitProviderOwner>(),
+			Project = "ExampleProject".As<AzureDevOpsProjectName>(),
+			Handler = handler,
+		};
+
+		NotSupportedException exception = await Assert.ThrowsExactlyAsync<NotSupportedException>(
+			async () => await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+				.FromFork("my-fork-owner".As<GitProviderOwner>(), "fix/thing".As<GitBranchName>())
+				.Into("main".As<GitBranchName>())
+				.Titled("Fix thing".As<GitPullRequestTitle>())
+				.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "my-fork-owner");
+		Assert.AreEqual(0, handler.Requests.Count);
+	}
+
+	[TestMethod]
 	public async Task LeavesAnInjectedHandlerUndisposedAndUsableForASecondCallAsync()
 	{
 		// The GitHubProviderTests counterpart, through the other transport: this provider builds a
