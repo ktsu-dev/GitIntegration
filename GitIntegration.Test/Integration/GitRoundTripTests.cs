@@ -338,6 +338,28 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task CommitWithAuthorRecordsAnOrdinaryAuthorAsGivenAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		GitAuthorName name = "Zoë O'Brien, Jr.".As<GitAuthorName>();
+		GitAuthorEmail email = "zoe+tag@example.com".As<GitAuthorEmail>();
+
+		GitCommit commit = await repository
+			.Commit("c1".As<GitCommitMessage>())
+			.AllowEmpty()
+			.WithAuthor(name, email)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(name, commit.Author.Name);
+		Assert.AreEqual(email, commit.Author.Email);
+	}
+
+	[TestMethod]
 	public async Task LogAndCommitIgnoreTheHostsShowSignatureSettingAsync()
 	{
 		// log.showSignature is common among people who sign commits, and with it git prints each signed
