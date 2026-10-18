@@ -210,9 +210,11 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 				inner.Report(chunk);
 			}
 #pragma warning disable CA1031 // A progress sink is caller code; any exception it throws is contained by design.
-			catch (Exception)
+			catch (Exception exception) when (exception is not OutOfMemoryException)
 #pragma warning restore CA1031
 			{
+				// OutOfMemoryException is left to propagate: it says the process, not the sink, is
+				// in trouble, and swallowing it would hide that from the caller.
 				Volatile.Write(ref _failed, 1);
 			}
 		}
