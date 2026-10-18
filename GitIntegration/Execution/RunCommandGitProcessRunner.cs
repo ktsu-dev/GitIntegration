@@ -87,17 +87,19 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 
 		// Chunks are reported to the progress sink as ktsu.RunCommand delivers them, which is what
 		// makes push and fetch observable while they are still running, rather than only after the
-		// process exits.
+		// process exits. Each chunk is appended before it is reported, so a sink that throws cannot
+		// cost the result parser any output.
+		ContainedProgress? sink = progress is null ? null : new(progress);
 		OutputHandler outputHandler = new(
 			onStandardOutput: chunk =>
 			{
 				standardOutput.Append(chunk);
-				progress?.Report(chunk);
+				sink?.Report(chunk);
 			},
 			onStandardError: chunk =>
 			{
 				standardError.Append(chunk);
-				progress?.Report(chunk);
+				sink?.Report(chunk);
 			});
 
 		using CancellationTokenSource linked = CreateLinkedTokenSource(cancellationToken);
@@ -173,6 +175,57 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 			// reports the command was.
 			Arguments = [.. arguments],
 		};
+	}
+
+	/// <summary>
+	/// Forwards output to a caller's progress sink until the sink first throws, then stops.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// The sink runs inside ktsu.RunCommand's output pump while git is still running. Letting its
+	/// exception escape there would fault the whole invocation after git may already have changed
+	/// the remote, or stop the pump and truncate the output the result parser reads, and the caller
+	/// could not tell which had happened. Containing it keeps the remote outcome knowable: git runs
+	/// to completion and its result is parsed in full, exactly as if no sink had been attached.
+	/// </para>
+	/// <para>
+	/// Reporting stops at the first exception rather than carrying on, because a sink that has
+	/// failed once is in an unknown state. Reports are serialized under a lock so that holds even
+	/// though the standard-output and standard-error readers can arrive together: without it both
+	/// could pass the failure check before either recorded the throw, and the failed sink would be
+	/// entered a second time. Progress chunks are infrequent, so the lock costs nothing that
+	/// matters.
+	/// </para>
+	/// </remarks>
+	/// <param name="inner">The caller's sink.</param>
+	internal sealed class ContainedProgress(IProgress<string> inner)
+	{
+		private readonly Lock _gate = new();
+		private bool _failed;
+
+		public void Report(string chunk)
+		{
+			lock (_gate)
+			{
+				if (_failed)
+				{
+					return;
+				}
+
+				try
+				{
+					inner.Report(chunk);
+				}
+#pragma warning disable CA1031 // A progress sink is caller code; any exception it throws is contained by design.
+				catch (Exception exception) when (exception is not OutOfMemoryException)
+#pragma warning restore CA1031
+				{
+					// OutOfMemoryException is left to propagate: it says the process, not the sink, is
+					// in trouble, and swallowing it would hide that from the caller.
+					_failed = true;
+				}
+			}
+		}
 	}
 
 	private CancellationTokenSource CreateLinkedTokenSource(CancellationToken cancellationToken)

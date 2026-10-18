@@ -50,6 +50,7 @@ public interface IGitCloneBuilder : IGitCommandBuilder<GitRepository>
 	/// <remarks>
 	/// Clone writes its entire progress stream to standard error. The sink may be invoked
 	/// concurrently by the standard-output and standard-error readers and must be thread-safe.
+	/// If the sink throws, the exception is contained: reporting to it stops, git runs to completion, and the result is parsed in full.
 	/// </remarks>
 	/// <param name="progress">The sink to report to.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
