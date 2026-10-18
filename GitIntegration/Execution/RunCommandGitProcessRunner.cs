@@ -190,32 +190,40 @@ public sealed class RunCommandGitProcessRunner(GitOptions options) : IGitProcess
 	/// </para>
 	/// <para>
 	/// Reporting stops at the first exception rather than carrying on, because a sink that has
-	/// failed once is in an unknown state, and the two output readers can enter it concurrently.
+	/// failed once is in an unknown state. Reports are serialized under a lock so that holds even
+	/// though the standard-output and standard-error readers can arrive together: without it both
+	/// could pass the failure check before either recorded the throw, and the failed sink would be
+	/// entered a second time. Progress chunks are infrequent, so the lock costs nothing that
+	/// matters.
 	/// </para>
 	/// </remarks>
 	/// <param name="inner">The caller's sink.</param>
-	private sealed class ContainedProgress(IProgress<string> inner)
+	internal sealed class ContainedProgress(IProgress<string> inner)
 	{
-		private int _failed;
+		private readonly Lock _gate = new();
+		private bool _failed;
 
 		public void Report(string chunk)
 		{
-			if (Volatile.Read(ref _failed) != 0)
+			lock (_gate)
 			{
-				return;
-			}
+				if (_failed)
+				{
+					return;
+				}
 
-			try
-			{
-				inner.Report(chunk);
-			}
+				try
+				{
+					inner.Report(chunk);
+				}
 #pragma warning disable CA1031 // A progress sink is caller code; any exception it throws is contained by design.
-			catch (Exception exception) when (exception is not OutOfMemoryException)
+				catch (Exception exception) when (exception is not OutOfMemoryException)
 #pragma warning restore CA1031
-			{
-				// OutOfMemoryException is left to propagate: it says the process, not the sink, is
-				// in trouble, and swallowing it would hide that from the caller.
-				Volatile.Write(ref _failed, 1);
+				{
+					// OutOfMemoryException is left to propagate: it says the process, not the sink, is
+					// in trouble, and swallowing it would hide that from the caller.
+					_failed = true;
+				}
 			}
 		}
 	}
