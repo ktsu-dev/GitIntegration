@@ -7,14 +7,14 @@ using System.Collections.Generic;
 using ktsu.Semantics.Paths;
 
 /// <summary>
-/// Resolves a revision to the object id it names.
+/// Resolves a revision to the id of the commit it names, peeling an annotated tag to its commit.
 /// </summary>
 public interface IGitRevParseBuilder : IGitCommandBuilder<GitCommitSha>
 {
 }
 
 /// <summary>
-/// Builds <c>git rev-parse --verify</c>.
+/// Builds <c>git rev-parse --verify &lt;revision&gt;^{commit}</c>.
 /// </summary>
 /// <param name="runner">Runs the assembled command.</param>
 /// <param name="repositoryPath">The repository to scope the command to.</param>
@@ -38,8 +38,11 @@ internal sealed class GitRevParseBuilder(
 		// which is what lets a non-zero exit code stand for "no such revision".
 		arguments.Add("--verify");
 
-		// The revision is caller-supplied, so it goes behind the end-of-options marker.
-		AppendOperands(arguments, _revision.WeakString);
+		// The revision is caller-supplied, so it goes behind the end-of-options marker. ^{commit}
+		// peels it to the commit it names, which is what the GitCommitSha result promises: without
+		// it an annotated tag resolves to the tag object, and a tree or blob revision comes back
+		// typed as a commit. With it, those fail like any other revision that names no commit.
+		AppendOperands(arguments, _revision.WeakString + "^{commit}");
 	}
 
 	/// <inheritdoc />

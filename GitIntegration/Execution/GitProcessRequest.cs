@@ -23,8 +23,16 @@ public sealed record GitProcessRequest
 	/// after the process exits. Used by long-running remote operations.
 	/// </summary>
 	/// <remarks>
+	/// <para>
 	/// The sink may be entered concurrently by the standard-output and standard-error readers.
 	/// Implementations must be thread-safe.
+	/// </para>
+	/// <para>
+	/// An exception thrown by the sink does not reach the caller. <see cref="RunCommandGitProcessRunner"/>
+	/// stops reporting to that sink, lets git run to completion, and returns the full output, so
+	/// the result is the same as if no sink had been attached. Another <see cref="IGitProcessRunner"/>
+	/// implementation is expected to do the same.
+	/// </para>
 	/// </remarks>
 	public IProgress<string>? Progress { get; init; }
 }

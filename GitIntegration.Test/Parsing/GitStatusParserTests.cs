@@ -71,6 +71,14 @@ public class GitStatusParserTests
 		"# branch.head main" + Nul +
 		"! bin/output.dll" + Nul;
 
+	// Under the default untracked mode git collapses a directory holding no tracked files to one
+	// record for the directory, marked with a trailing slash; an ignored directory reads the same.
+	private const string UntrackedAndIgnoredDirectories =
+		"# branch.head main" + Nul +
+		"? newdir/" + Nul +
+		"? newfile" + Nul +
+		"! bin/" + Nul;
+
 	[TestMethod]
 	public void ReadsTheCurrentBranchAndReportsCleanWhenThereAreNoEntries()
 	{
@@ -216,6 +224,29 @@ public class GitStatusParserTests
 
 		Assert.AreEqual(GitFileState.Ignored, status.Entries[0].IndexState);
 		Assert.AreEqual("bin/output.dll".As<RelativeFilePath>(), status.Entries[0].Path);
+	}
+
+	[TestMethod]
+	public void MarksACollapsedUntrackedOrIgnoredDirectoryAsADirectory()
+	{
+		GitStatus status = GitStatusParser.Parse(UntrackedAndIgnoredDirectories);
+
+		Assert.AreEqual(3, status.Entries.Count);
+
+		GitStatusEntry directory = status.Entries[0];
+		Assert.AreEqual(GitFileState.Untracked, directory.IndexState);
+		Assert.AreEqual("newdir".As<RelativeFilePath>(), directory.Path);
+		Assert.IsTrue(directory.IsDirectory);
+
+		GitStatusEntry file = status.Entries[1];
+		Assert.AreEqual(GitFileState.Untracked, file.IndexState);
+		Assert.AreEqual("newfile".As<RelativeFilePath>(), file.Path);
+		Assert.IsFalse(file.IsDirectory);
+
+		GitStatusEntry ignored = status.Entries[2];
+		Assert.AreEqual(GitFileState.Ignored, ignored.IndexState);
+		Assert.AreEqual("bin".As<RelativeFilePath>(), ignored.Path);
+		Assert.IsTrue(ignored.IsDirectory);
 	}
 
 	[TestMethod]

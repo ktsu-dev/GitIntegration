@@ -376,6 +376,45 @@ public class RunCommandGitProcessRunnerTests
 		return ("sh", ["-c", "sleep 30"]);
 	}
 
+	[TestMethod]
+	public async Task ContainedProgressDoesNotReenterASinkThatThrewWhileTheOtherReaderWaitedAsync()
+	{
+		// The standard-output and standard-error readers can report together. The first report
+		// holds the sink until the second reader has started its own report, then throws: the
+		// failed sink must not be entered again, however the two calls interleave.
+		int calls = 0;
+		using ManualResetEventSlim secondStarted = new();
+		SynchronousProgress sink = new(value =>
+		{
+			if (Interlocked.Increment(ref calls) == 1)
+			{
+				_ = secondStarted.Wait(TimeSpan.FromSeconds(5));
+				Thread.Sleep(200);
+			}
+
+			throw new InvalidOperationException("The progress sink failed.");
+		});
+
+		RunCommandGitProcessRunner.ContainedProgress contained = new(sink);
+
+		Task first = Task.Run(() => contained.Report("first"));
+		while (Volatile.Read(ref calls) == 0)
+		{
+			await Task.Yield();
+		}
+
+		Task second = Task.Run(() =>
+		{
+			secondStarted.Set();
+			contained.Report("second");
+		});
+
+		await Task.WhenAll(first, second).ConfigureAwait(false);
+		contained.Report("third");
+
+		Assert.AreEqual(1, Volatile.Read(ref calls));
+	}
+
 	private sealed class SynchronousProgress(Action<string> onReport) : IProgress<string>
 	{
 		public void Report(string value) => onReport(value);

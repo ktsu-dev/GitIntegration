@@ -22,6 +22,7 @@ internal sealed class GitPullRequestCreateBuilder(Func<GitPullRequestSpecificati
 	private readonly Func<GitPullRequestSpecification, CancellationToken, Task<GitPullRequest>> _execute = Ensure.NotNull(execute);
 
 	private GitBranchName? _source;
+	private GitProviderOwner? _sourceOwner;
 	private GitBranchName? _target;
 	private GitPullRequestTitle? _title;
 	private string? _description;
@@ -31,6 +32,16 @@ internal sealed class GitPullRequestCreateBuilder(Func<GitPullRequestSpecificati
 	public IGitPullRequestCreateBuilder From(GitBranchName source)
 	{
 		_source = Ensure.NotNull(source);
+		_sourceOwner = null;
+		return this;
+	}
+
+	/// <inheritdoc/>
+	public IGitPullRequestCreateBuilder FromFork(GitProviderOwner headOwner, GitBranchName source)
+	{
+		Ensure.NotNull(headOwner);
+		_source = Ensure.NotNull(source);
+		_sourceOwner = headOwner;
 		return this;
 	}
 
@@ -72,7 +83,7 @@ internal sealed class GitPullRequestCreateBuilder(Func<GitPullRequestSpecificati
 		if (_source is null)
 		{
 			throw new InvalidOperationException(
-				"The pull request has no source branch. Call From to set one.");
+				"The pull request has no source branch. Call From or FromFork to set one.");
 		}
 
 		if (_target is null)
@@ -87,7 +98,7 @@ internal sealed class GitPullRequestCreateBuilder(Func<GitPullRequestSpecificati
 				"The pull request has no title. Call Titled to set one.");
 		}
 
-		GitPullRequestSpecification specification = new(_source, _target, _title, _description, _isDraft);
+		GitPullRequestSpecification specification = new(_source, _target, _title, _description, _isDraft, _sourceOwner);
 		return await _execute(specification, cancellationToken).ConfigureAwait(false);
 	}
 }

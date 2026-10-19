@@ -75,7 +75,9 @@ public interface IGitFetchBuilder : IGitCommandBuilder<GitFetchResult>
 	public IGitFetchBuilder RecursingSubmodules(GitSubmoduleRecursion recursion);
 
 	/// <summary>Reports git's progress output as it arrives.</summary>
-	/// <param name="progress">The sink to report to. Must be thread-safe.</param>
+	/// <param name="progress">
+	/// The sink to report to. Must be thread-safe. If the sink throws, the exception is contained: reporting to it stops, git runs to completion, and the result is parsed in full.
+	/// </param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="progress"/> is <see langword="null"/>.</exception>
 	public IGitFetchBuilder ReportingProgress(IProgress<string> progress);

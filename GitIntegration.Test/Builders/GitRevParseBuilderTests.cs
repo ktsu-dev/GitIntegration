@@ -29,7 +29,7 @@ public class GitRevParseBuilderTests
 			"rev-parse",
 			"--verify",
 			"--end-of-options",
-			"HEAD",
+			"HEAD^{commit}",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
 	}

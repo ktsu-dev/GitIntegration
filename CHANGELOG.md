@@ -2,6 +2,17 @@
 
 Changes since v4.1.0:
 
+- Serialize contained progress reports so a failed sink is never re-entered [patch] (Claude)
+- Let OutOfMemoryException escape the contained progress sink [patch] (Claude)
+- Describe GitHubProvider's owner-type routing and the worktree and patch verbs in the docs [patch] (Claude)
+- Contain an exception thrown by a progress sink instead of faulting the verb [patch] (Claude)
+- Route OpenWebClient's launch through an internal seam so tests can observe it [patch] (Claude)
+- Refuse author values git would rewrite in WithAuthor (Claude)
+- Peel RevParse to the commit a revision names [patch] (Claude)
+- Add FromFork so GitHub pull requests can be opened from a fork [minor] (Claude)
+- Fall back to Retry-After for the Azure DevOps rate-limit reset time [patch] (Claude)
+- Keep remote branches whose name ends in /HEAD in Branches() [patch] (Claude)
+- Mark collapsed untracked and ignored directories in Status() [minor] (matt-edmondson)
 - Pass --progress to network verbs when a progress sink is attached [patch] (Claude)
 - Cover the fetch rejection exception and unreadable-output path [patch] (Claude)
 - Report a refused reference from Fetch() instead of an empty error [minor] (Claude)
