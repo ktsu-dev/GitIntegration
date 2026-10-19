@@ -465,7 +465,9 @@ same 403 to `GitHostingAuthenticationException`. `RateLimitExceededException`,
 `SecondaryRateLimitExceededException`, and `AbuseException` all derive from `ForbiddenException`, so
 **arm order is load-bearing**: the three specific ones must precede it. Only `AbuseException` carries
 a relative delay (`RetryAfterSeconds`) rather than an absolute instant, so it is anchored to
-`DateTimeOffset.UtcNow`; `SecondaryRateLimitExceededException` carries no reset time at all.
+`DateTimeOffset.UtcNow`. `SecondaryRateLimitExceededException` has no reset property of its own, so
+its reset time comes from the response's `Retry-After` header when GitHub sends one, read the same
+way as the bare-429 arm below, and is `null` otherwise.
 
 **A bare `429` needs a fourth arm, matched on status rather than on type.** Octokit has no dedicated
 exception for it: a `429` surfaces as a plain `ApiException`, so it reached
