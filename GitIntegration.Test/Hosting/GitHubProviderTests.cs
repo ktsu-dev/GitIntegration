@@ -771,7 +771,7 @@ public sealed class GitHubProviderTests
 		// Octokit routes a 403 whose body names a secondary rate limit to
 		// SecondaryRateLimitExceededException, which derives from ForbiddenException. It must
 		// therefore be matched before the ForbiddenException arm, or it would be reported as an
-		// authentication failure. GitHub sends no reset time with it, so ResetsAt is null.
+		// authentication failure. This response carries no Retry-After, so ResetsAt is null.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
 			.Respond(
 				(HttpStatusCode)403,
@@ -786,6 +786,35 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
 		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
 		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ReadsResetsAtFromRetryAfterOnASecondaryRateLimitResponseAsync()
+	{
+		// SecondaryRateLimitExceededException has no reset property of its own, but GitHub may send
+		// Retry-After with it. Without that delay a caller can only guess when to retry, and GitHub
+		// escalates the limit for clients that retry too early. Bracketed rather than exact, because
+		// the mapping anchors to UtcNow.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"You have exceeded a secondary rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "60"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsInRange(before.AddSeconds(60), after.AddSeconds(60), exception.ResetsAt.Value);
 	}
 
 	[TestMethod]

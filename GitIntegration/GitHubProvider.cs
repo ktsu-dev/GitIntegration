@@ -589,7 +589,7 @@ public sealed class GitHubProvider : GitProvider
 		return exception switch
 		{
 			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset, exception),
-			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null, exception),
+			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception)), exception),
 			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds), exception),
 			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception)), exception),
 			AuthorizationException => new GitHostingAuthenticationException(authenticationMessage, Name, exception.StatusCode, responseBody, exception),
@@ -600,11 +600,12 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <summary>
-	/// Converts an abuse-detection <c>Retry-After</c> delay into the absolute reset time
+	/// Converts a <c>Retry-After</c> delay into the absolute reset time
 	/// <see cref="GitHostingRateLimitException.ResetsAt"/> reports.
 	/// </summary>
 	/// <remarks>
-	/// <see cref="AbuseException.RetryAfterSeconds"/> is a relative delay, and
+	/// <see cref="AbuseException.RetryAfterSeconds"/> and the <c>Retry-After</c> header a secondary
+	/// rate limit or a bare <c>429</c> may carry are relative delays, and
 	/// <see cref="GitHostingRateLimitException.ResetsAt"/> is an absolute instant, because that is
 	/// what <see cref="RateLimitExceededException.Reset"/> and Azure DevOps's
 	/// <c>X-RateLimit-Reset</c> both report. Anchoring to <see cref="DateTimeOffset.UtcNow"/> loses
