@@ -73,6 +73,30 @@ public class GitCloneBuilderTests
 	}
 
 	[TestMethod]
+	public void PairsADepthWithNoLocalSoALocalPathCloneIsShallow()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
+
+		_ = builder.WithDepth(1);
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int marker = Array.IndexOf(arguments, "--end-of-options");
+
+		CollectionAssert.Contains(arguments, "--no-local");
+		Assert.IsTrue(Array.IndexOf(arguments, "--no-local") < marker);
+	}
+
+	[TestMethod]
+	public void LeavesLocalCloneOptimisationsOnWithoutADepth()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
+
+		CollectionAssert.DoesNotContain(builder.BuildArguments().ToArray(), "--no-local");
+	}
+
+	[TestMethod]
 	public void RejectsANonPositiveDepth()
 	{
 		RecordingGitProcessRunner runner = new();

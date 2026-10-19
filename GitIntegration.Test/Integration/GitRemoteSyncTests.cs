@@ -740,6 +740,39 @@ public class GitRemoteSyncTests
 	}
 
 	[TestMethod]
+	public async Task CloneWithDepthFromALocalPathIsShallowAsync()
+	{
+		// git ignores --depth for a plain local path and exits 0 with a full clone, so before
+		// issue #251 WithDepth(1) here quietly copied every commit.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one", "first", cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "two", "second", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(remote.WeakString.As<GitRepositoryRemotePath>(), cloneDirectory.Root)
+			.WithDepth(1)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> commits = await clone.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, commits.Count);
+		Assert.IsTrue(File.Exists(Path.Combine(cloneDirectory.Root.WeakString, ".git", "shallow")));
+	}
+
+	[TestMethod]
 	public async Task CloneAndFetchReportTransferProgressToASinkAsync()
 	{
 		// git writes "Receiving objects" to a redirected standard error only under --progress, so
