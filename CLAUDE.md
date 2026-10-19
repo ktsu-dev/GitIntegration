@@ -466,8 +466,7 @@ same 403 to `GitHostingAuthenticationException`. `RateLimitExceededException`,
 **arm order is load-bearing**: the three specific ones must precede it. Only `AbuseException` carries
 a relative delay (`RetryAfterSeconds`) rather than an absolute instant, so it is anchored to
 `DateTimeOffset.UtcNow`. `SecondaryRateLimitExceededException` has no reset property of its own, so
-its reset time comes from the response's `Retry-After` header when GitHub sends one, read the same
-way as the bare-429 arm below, and is `null` otherwise.
+its reset time is read the same way as the bare-429 arm below.
 
 **A bare `429` needs a fourth arm, matched on status rather than on type.** Octokit has no dedicated
 exception for it: a `429` surfaces as a plain `ApiException`, so it reached
@@ -478,8 +477,12 @@ specific claim and a 429 carried by one of those subtypes should still be answer
 Its reset time comes from the response's `Retry-After` header, read case-insensitively rather than by
 key: HTTP header names are case-insensitive and Octokit's header dictionary compares ordinally, so a
 keyed lookup would work only because `HttpResponseMessage` happens to canonicalise this header's
-casing. A `Retry-After` carrying an HTTP date rather than seconds yields `null`, since an unset
-`ResetsAt` is better than an invented one.
+casing. A `Retry-After` carrying an HTTP date rather than seconds is not used, since an unset
+`ResetsAt` is better than an invented one. Without a usable `Retry-After`, a response reporting its
+quota spent (`X-RateLimit-Remaining: 0`) gives `X-RateLimit-Reset`, GitHub's documented fallback, read
+case-insensitively and range-checked as Azure DevOps reads it. That is how a primary limit answered
+with a `429` arrives, because Octokit builds `RateLimitExceededException` only for a `403`. With
+neither header usable, `ResetsAt` is `null`.
 
 **A repository from a hosting provider carries no `LocalPath`, and how it is addressed is the
 provider's own decision.** `GitRepository.LocalPath` is nullable because a repository a provider enumerated has never been

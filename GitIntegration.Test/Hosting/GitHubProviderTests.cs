@@ -900,6 +900,97 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task ReadsResetsAtFromXRateLimitResetOnATooManyRequestsResponseWithASpentQuotaAsync()
+	{
+		// GitHub may answer a spent primary quota with a 429 rather than a 403. Octokit builds
+		// RateLimitExceededException, which carries Reset, only for a 403, so this arrives as a plain
+		// ApiException with no Retry-After. The reset instant is still in the headers.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("X-RateLimit-Remaining", "0"),
+				("X-RateLimit-Reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1798800000), exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ReadsResetsAtFromXRateLimitResetOnASecondaryRateLimitResponseWithASpentQuotaAsync()
+	{
+		// GitHub's documented order for a secondary limit is Retry-After, then X-RateLimit-Reset when
+		// X-RateLimit-Remaining is 0.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"You have exceeded a secondary rate limit\"}",
+				("Content-Type", "application/json"),
+				("x-ratelimit-remaining", "0"),
+				("x-ratelimit-reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
+		Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1798800000), exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task PrefersRetryAfterOverXRateLimitResetAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "90"),
+				("X-RateLimit-Remaining", "0"),
+				("X-RateLimit-Reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsInRange(before.AddSeconds(90), after.AddSeconds(90), exception.ResetsAt.Value);
+	}
+
+	[TestMethod]
+	public async Task LeavesResetsAtNullWhenTheQuotaIsNotReportedSpentAsync()
+	{
+		// GitHub sends X-RateLimit-Reset on every response. The reset of a quota that still has
+		// requests left says nothing about when this one may be retried.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("X-RateLimit-Remaining", "4999"),
+				("X-RateLimit-Reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
 	public async Task LeavesResetsAtNullWhenRetryAfterCarriesAnHttpDateAsync()
 	{
 		// Retry-After may carry an HTTP date rather than a delay in seconds. GitHub sends seconds, so
