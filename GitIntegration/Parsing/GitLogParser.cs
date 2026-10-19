@@ -100,5 +100,64 @@ internal static class GitLogParser
 	private static DateTimeOffset ReadTimestamp(string value) =>
 		DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset timestamp)
 			? timestamp
-			: throw new GitParseException($"git reported a commit timestamp that is not valid: '{value}'.");
+			: TryReadOutOfRangeOffset(value, out timestamp)
+				? timestamp
+				: throw new GitParseException($"git reported a commit timestamp that is not valid: '{value}'.");
+
+	/// <summary>
+	/// Reads a timestamp whose offset is beyond the ±14:00 that <see cref="DateTimeOffset"/> can hold.
+	/// </summary>
+	/// <remarks>
+	/// git stores a commit's zone as an arbitrary <c>±hhmm</c> and prints it unchanged, so imported
+	/// history and misconfigured clocks produce values such as <c>+15:00</c> that git itself accepts
+	/// (ktsu-dev/GitIntegration#262). The instant is still exact, so it is returned in UTC rather
+	/// than failing the whole log for one record.
+	/// </remarks>
+	private static bool TryReadOutOfRangeOffset(string value, out DateTimeOffset timestamp)
+	{
+		timestamp = default;
+
+		// %aI is "yyyy-MM-ddTHH:mm:ss" followed by "+hh:mm" or "-hh:mm".
+		const int OffsetLength = 6;
+		if (value.Length <= OffsetLength)
+		{
+			return false;
+		}
+
+		string localPart = value[..^OffsetLength];
+		string offsetPart = value[^OffsetLength..];
+
+		if (offsetPart[0] is not ('+' or '-')
+			|| offsetPart[3] != ':'
+			|| !int.TryParse(offsetPart[1..3], NumberStyles.None, CultureInfo.InvariantCulture, out int hours)
+			|| !int.TryParse(offsetPart[4..], NumberStyles.None, CultureInfo.InvariantCulture, out int minutes)
+			|| !DateTime.TryParseExact(localPart, "yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime local))
+		{
+			return false;
+		}
+
+		TimeSpan offset = new(hours, minutes, 0);
+		if (offsetPart[0] == '-')
+		{
+			offset = offset.Negate();
+		}
+
+		// Only the case DateTimeOffset refuses is handled here: an in-range offset that still failed
+		// to parse is malformed for some other reason.
+		if (offset.Duration() <= TimeSpan.FromHours(14))
+		{
+			return false;
+		}
+
+		try
+		{
+			timestamp = new DateTimeOffset(DateTime.SpecifyKind(local - offset, DateTimeKind.Utc));
+			return true;
+		}
+		catch (ArgumentOutOfRangeException)
+		{
+			// The instant falls outside the range DateTime can represent.
+			return false;
+		}
+	}
 }
