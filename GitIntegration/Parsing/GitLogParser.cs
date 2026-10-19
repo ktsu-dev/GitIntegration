@@ -97,12 +97,16 @@ internal static class GitLogParser
 		return parents;
 	}
 
-	private static DateTimeOffset ReadTimestamp(string value) =>
-		DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset timestamp)
-			? timestamp
-			: TryReadOutOfRangeOffset(value, out timestamp)
-				? timestamp
-				: throw new GitParseException($"git reported a commit timestamp that is not valid: '{value}'.");
+	private static DateTimeOffset ReadTimestamp(string value)
+	{
+		if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset timestamp)
+			|| TryReadOutOfRangeOffset(value, out timestamp))
+		{
+			return timestamp;
+		}
+
+		throw new GitParseException($"git reported a commit timestamp that is not valid: '{value}'.");
+	}
 
 	/// <summary>
 	/// Reads a timestamp whose offset is beyond the ±14:00 that <see cref="DateTimeOffset"/> can hold.
