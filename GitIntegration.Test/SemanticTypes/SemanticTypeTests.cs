@@ -182,10 +182,10 @@ public class SemanticTypeTests
 		// Guards the reflection below: if it found nothing, the distinctness test would pass vacuously.
 		Type[] types = PublicSemanticStringTypes();
 
-		CollectionAssert.Contains(types, typeof(GitBranchName));
-		CollectionAssert.Contains(types, typeof(GitRemoteName));
-		CollectionAssert.Contains(types, typeof(GitCommitSha));
-		CollectionAssert.Contains(types, typeof(GitRepositoryName));
+		Assert.Contains(typeof(GitBranchName), types);
+		Assert.Contains(typeof(GitRemoteName), types);
+		Assert.Contains(typeof(GitCommitSha), types);
+		Assert.Contains(typeof(GitRepositoryName), types);
 	}
 
 	[TestMethod]
@@ -220,7 +220,7 @@ public class SemanticTypeTests
 			}
 		}
 
-		Assert.AreEqual(0, violations.Count, string.Join("; ", violations.Distinct()));
+		Assert.IsEmpty(violations, string.Join("; ", violations.Distinct()));
 	}
 
 	private static Type[] PublicSemanticStringTypes() =>
