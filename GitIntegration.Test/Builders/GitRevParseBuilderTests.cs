@@ -29,9 +29,23 @@ public class GitRevParseBuilderTests
 			"rev-parse",
 			"--verify",
 			"--end-of-options",
-			"HEAD^{commit}",
+			"HEAD",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
+	}
+
+	[TestMethod]
+	public async Task ExecutePeelsTheResolvedObjectIdRatherThanTheRevisionAsync()
+	{
+		// ^{commit} follows the id the first step returned, never the caller's expression: after ":/"
+		// git would read it as part of the message to search for (ktsu-dev/GitIntegration#265).
+		RecordingGitProcessRunner runner = new() { StandardOutput = HeadSha + "\n" };
+		GitRevParseBuilder builder = new(runner, TestPaths.Root, ":/fix nasty".As<GitRefName>());
+
+		_ = await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.AreEqual(HeadSha + "^{commit}", runner.LastArguments![^1]);
+		Assert.AreEqual("--end-of-options", runner.LastArguments[^2]);
 	}
 
 	[TestMethod]

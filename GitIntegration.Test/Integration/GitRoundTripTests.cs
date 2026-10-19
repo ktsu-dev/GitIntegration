@@ -907,6 +907,32 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task RevParseResolvesACommitMessageSearchAsync()
+	{
+		// git reads everything after ":/" as the message to search for, so a peel suffix appended
+		// to the expression would become part of the search and match nothing (#265).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit wanted = await repository.Commit("fix nasty bug".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommitSha found = await repository.RevParse(":/fix nasty".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(wanted.Sha, found);
+	}
+
+	[TestMethod]
 	public async Task RevParseRefusesARevisionThatNamesNoCommitAsync()
 	{
 		// A tree is not a commit, so handing its id back typed as GitCommitSha would be a lie. It
