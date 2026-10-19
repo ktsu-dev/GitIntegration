@@ -744,7 +744,7 @@ public class GitRemoteSyncTests
 	{
 		// git ignores --depth for a plain local path and exits 0 with a full clone, so before
 		// issue #251 WithDepth(1) here quietly copied every commit.
-		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		CancellationToken cancellationToken = TestContext.CancellationToken;
 		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
 
 		using TemporaryRepository remoteDirectory = new();
@@ -768,7 +768,7 @@ public class GitRemoteSyncTests
 
 		IReadOnlyList<GitCommit> commits = await clone.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		Assert.AreEqual(1, commits.Count);
+		Assert.HasCount(1, commits);
 		Assert.IsTrue(File.Exists(Path.Combine(cloneDirectory.Root.WeakString, ".git", "shallow")));
 	}
 

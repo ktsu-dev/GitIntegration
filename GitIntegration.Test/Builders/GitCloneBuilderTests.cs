@@ -83,8 +83,8 @@ public class GitCloneBuilderTests
 		string[] arguments = [.. builder.BuildArguments()];
 		int marker = Array.IndexOf(arguments, "--end-of-options");
 
-		CollectionAssert.Contains(arguments, "--no-local");
-		Assert.IsTrue(Array.IndexOf(arguments, "--no-local") < marker);
+		Assert.Contains("--no-local", arguments);
+		Assert.IsLessThan(marker, Array.IndexOf(arguments, "--no-local"));
 	}
 
 	[TestMethod]
@@ -93,7 +93,7 @@ public class GitCloneBuilderTests
 		RecordingGitProcessRunner runner = new();
 		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
 
-		CollectionAssert.DoesNotContain(builder.BuildArguments().ToArray(), "--no-local");
+		Assert.DoesNotContain("--no-local", builder.BuildArguments());
 	}
 
 	[TestMethod]
