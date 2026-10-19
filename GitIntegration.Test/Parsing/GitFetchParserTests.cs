@@ -91,6 +91,38 @@ public class GitFetchParserTests
 	}
 
 	[TestMethod]
+	[DataRow("0000000000000000000000000000000000000000", "6702dd1957dedc4e0f54245bda65f3ddc5f37e64")]
+	[DataRow(
+		"0000000000000000000000000000000000000000000000000000000000000000",
+		"6702dd1957dedc4e0f54245bda65f3ddc5f37e646702dd1957dedc4e0f54245b")]
+	public void ReportsANullOldIdAsNullForACreatedRef(string nullId, string newSha)
+	{
+		// git writes its null id for the side of the update that does not exist. Push() reports
+		// null there, so fetch must too, under SHA-1 and SHA-256 alike.
+		GitRefUpdate update = GitFetchParser.Parse(
+			Record("*", nullId, newSha, "refs/remotes/origin/created")).Updates[0];
+
+		Assert.AreEqual(GitRefUpdateKind.Created, update.Kind);
+		Assert.IsNull(update.OldSha);
+		Assert.AreEqual(newSha.As<GitCommitSha>(), update.NewSha);
+	}
+
+	[TestMethod]
+	[DataRow("7c85857fc85452150652c289fc94f1f912b96c40", "0000000000000000000000000000000000000000")]
+	[DataRow(
+		"7c85857fc85452150652c289fc94f1f912b96c407c85857fc85452150652c289",
+		"0000000000000000000000000000000000000000000000000000000000000000")]
+	public void ReportsANullNewIdAsNullForAPrunedRef(string oldSha, string nullId)
+	{
+		GitRefUpdate update = GitFetchParser.Parse(
+			Record("-", oldSha, nullId, "refs/remotes/origin/pruned")).Updates[0];
+
+		Assert.AreEqual(GitRefUpdateKind.Removed, update.Kind);
+		Assert.AreEqual(oldSha.As<GitCommitSha>(), update.OldSha);
+		Assert.IsNull(update.NewSha);
+	}
+
+	[TestMethod]
 	public void ReportsAnUnknownFlagWithoutThrowing()
 	{
 		GitFetchResult result = GitFetchParser.Parse(
