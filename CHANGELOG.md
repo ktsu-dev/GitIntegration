@@ -2,6 +2,7 @@
 
 Changes since v4.1.0:
 
+- Read Retry-After on GitHub secondary rate limits [patch] (Claude)
 - Serialize contained progress reports so a failed sink is never re-entered [patch] (Claude)
 - Let OutOfMemoryException escape the contained progress sink [patch] (Claude)
 - Describe GitHubProvider's owner-type routing and the worktree and patch verbs in the docs [patch] (Claude)
