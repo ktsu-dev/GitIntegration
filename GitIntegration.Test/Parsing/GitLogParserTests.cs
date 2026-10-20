@@ -174,6 +174,36 @@ public class GitLogParserTests
 	}
 
 	[TestMethod]
+	[DataRow("2023-11-15T13:13:20+15:00", DisplayName = "+15:00")]
+	[DataRow("2023-11-14T07:13:20-15:00", DisplayName = "-15:00")]
+	[DataRow("2023-11-14T22:13:20+00:00", DisplayName = "In range, for comparison")]
+	public void ReadsATimestampWithAnOffsetBeyondFourteenHours(string timestamp)
+	{
+		// git accepts any ±hhmm zone (GIT_AUTHOR_DATE="1700000000 +1500"), and DateTimeOffset only
+		// holds ±14:00. One such commit must not fail the whole log (#262).
+		string record = MergeCommit
+			.Replace("2026-08-20T00:05:20+10:00", timestamp, StringComparison.Ordinal)
+			.Replace("2026-08-21T09:00:00-04:00", timestamp, StringComparison.Ordinal);
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		DateTime expected = DateTimeOffset.FromUnixTimeSeconds(1700000000).UtcDateTime;
+		Assert.AreEqual(expected, commits[0].Author.Timestamp.UtcDateTime);
+		Assert.AreEqual(expected, commits[0].Committer.Timestamp.UtcDateTime);
+	}
+
+	[TestMethod]
+	[DataRow("2023-11-15T13:13:20+15:0x", DisplayName = "Malformed offset")]
+	[DataRow("2023-13-15T13:13:20+15:00", DisplayName = "Invalid month")]
+	[DataRow("+15:00", DisplayName = "Offset only")]
+	public void RejectsAMalformedTimestampWithAnOutOfRangeOffset(string timestamp)
+	{
+		string broken = TwoCommits.Replace("2026-08-20T00:05:20+10:00", timestamp, StringComparison.Ordinal);
+
+		Assert.ThrowsExactly<GitParseException>(() => GitLogParser.Parse(broken));
+	}
+
+	[TestMethod]
 	public void RejectsAnUnparseableTimestamp()
 	{
 		string broken = TwoCommits.Replace("2026-08-20T00:05:20+10:00", "not-a-date", StringComparison.Ordinal);
