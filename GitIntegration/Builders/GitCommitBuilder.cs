@@ -47,6 +47,11 @@ public interface IGitCommitBuilder : IGitCommandBuilder<GitCommit>
 	/// <exception cref="ArgumentNullException">
 	/// <paramref name="name"/> or <paramref name="email"/> is <see langword="null"/>.
 	/// </exception>
+	/// <exception cref="ArgumentException">
+	/// <paramref name="name"/> or <paramref name="email"/> contains <c>&lt;</c>, <c>&gt;</c> or a
+	/// control character. Git strips or splits on these rather than refusing them, so the commit
+	/// would record a different author than the one asked for.
+	/// </exception>
 	public IGitCommitBuilder WithAuthor(GitAuthorName name, GitAuthorEmail email);
 }
 
@@ -101,10 +106,38 @@ internal sealed class GitCommitBuilder(
 	/// <inheritdoc />
 	public IGitCommitBuilder WithAuthor(GitAuthorName name, GitAuthorEmail email)
 	{
+		string nameValue = Ensure.NotNull(name).WeakString;
+		string emailValue = Ensure.NotNull(email).WeakString;
+		RequireIdentValue(nameValue, nameof(name));
+		RequireIdentValue(emailValue, nameof(email));
+
 		// git parses a single "Name <email>" string here; passing two arguments would make it read
 		// the second as a pathspec.
-		_author = $"{Ensure.NotNull(name).WeakString} <{Ensure.NotNull(email).WeakString}>";
+		_author = $"{nameValue} <{emailValue}>";
 		return this;
+	}
+
+	/// <summary>
+	/// Refuses a value git would not record as given.
+	/// </summary>
+	/// <remarks>
+	/// Git splits "Name &lt;email&gt;" at the first <c>&lt;</c> and the first <c>&gt;</c> after it, and
+	/// strips <c>&lt;</c>, <c>&gt;</c> and newlines from the name, all without failing. Checked here
+	/// rather than on <see cref="GitAuthorName"/> and <see cref="GitAuthorEmail"/> because those types
+	/// also carry identities read back from history, which must stay readable whatever they hold.
+	/// </remarks>
+	private static void RequireIdentValue(string value, string parameterName)
+	{
+		foreach (char c in value)
+		{
+			if (c is '<' or '>' || char.IsControl(c))
+			{
+				throw new ArgumentException(
+					$"The author value \"{value}\" contains '<', '>' or a control character, which git " +
+					"would split on or strip, recording a different author than the one asked for.",
+					parameterName);
+			}
+		}
 	}
 
 	/// <inheritdoc />

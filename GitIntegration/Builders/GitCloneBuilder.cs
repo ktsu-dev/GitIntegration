@@ -25,6 +25,10 @@ public interface IGitCloneBuilder : IGitCommandBuilder<GitRepository>
 	/// <summary>
 	/// Fetches only this many commits of history, producing a shallow clone.
 	/// </summary>
+	/// <remarks>
+	/// A depth also makes the clone use git's pack transport when the source is a local path,
+	/// because git ignores <c>--depth</c> for a plain local clone and copies the whole history.
+	/// </remarks>
 	/// <param name="depth">How many commits of history to fetch. Must be positive.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentOutOfRangeException"><paramref name="depth"/> is not positive.</exception>
@@ -50,6 +54,7 @@ public interface IGitCloneBuilder : IGitCommandBuilder<GitRepository>
 	/// <remarks>
 	/// Clone writes its entire progress stream to standard error. The sink may be invoked
 	/// concurrently by the standard-output and standard-error readers and must be thread-safe.
+	/// If the sink throws, the exception is contained: reporting to it stops, git runs to completion, and the result is parsed in full.
 	/// </remarks>
 	/// <param name="progress">The sink to report to.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -121,6 +126,7 @@ internal sealed class GitCloneBuilder(
 		Ensure.NotNull(arguments);
 
 		arguments.Add("clone");
+		AppendProgressFlag(arguments);
 
 		if (_branch is not null)
 		{
@@ -132,6 +138,12 @@ internal sealed class GitCloneBuilder(
 		if (_depth is int depth)
 		{
 			arguments.Add("--depth=" + depth.ToString(CultureInfo.InvariantCulture));
+
+			// git ignores --depth when the source is a plain local path: it hardlinks or copies the
+			// whole object store, warns on standard error and still exits 0, so the caller would get
+			// a full clone it asked to be shallow. --no-local forces the pack transport the depth
+			// needs, and has no effect on a URL, which already uses it.
+			arguments.Add("--no-local");
 		}
 
 		if (_bare)

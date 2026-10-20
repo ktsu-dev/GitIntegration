@@ -5,6 +5,8 @@ namespace ktsu.GitIntegration;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading;
+using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
 
@@ -217,6 +219,7 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 			arguments.Add("--not");
 		}
 
+		bool emittedRevision = true;
 		if (_revision is not null)
 		{
 			AppendOperands(arguments, _revision.WeakString);
@@ -228,12 +231,22 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 			// nothing and reads as "nothing unpushed". Verified against git 2.43.
 			AppendOperands(arguments, "HEAD");
 		}
+		else
+		{
+			emittedRevision = false;
+		}
 
-		if (_paths.Count > 0)
+		if (emittedRevision || _paths.Count > 0)
 		{
 			// A pathspec goes after --, which is its own end-of-options marker for that position.
 			// The revision must already have been emitted: git reads everything after -- as a
 			// filename, so a revision placed there returns an empty log rather than failing.
+			//
+			// The -- is emitted after a revision even with no paths. --end-of-options settles that an
+			// operand is not a flag, but not whether it is a revision or a path, and git only stops
+			// guessing at --. Without it, a branch named like a directory fails as "ambiguous
+			// argument", and a missing revision that matches a path returns that path's history
+			// instead of failing (ktsu-dev/GitIntegration#168). GitCheckoutBuilder does the same.
 			arguments.Add("--");
 
 			foreach (RelativeFilePath path in _paths)
@@ -246,4 +259,69 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 	/// <inheritdoc />
 	protected override IReadOnlyList<GitCommit> ParseResult(GitProcessResult result) =>
 		GitLogParser.Parse(Ensure.NotNull(result).StandardOutput);
+
+	/// <inheritdoc />
+	public override async Task<IReadOnlyList<GitCommit>> ExecuteAsync(CancellationToken cancellationToken = default)
+	{
+		try
+		{
+			return await base.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		}
+		catch (GitCommandException) when (ReadsFromHead)
+		{
+			if (await IsHeadUnbornAsync(cancellationToken).ConfigureAwait(false))
+			{
+				return [];
+			}
+
+			throw;
+		}
+	}
+
+	/// <inheritdoc />
+	public override async Task<GitResult<IReadOnlyList<GitCommit>>> TryExecuteAsync(CancellationToken cancellationToken = default)
+	{
+		GitResult<IReadOnlyList<GitCommit>> result = await base.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return !result.Success && ReadsFromHead && await IsHeadUnbornAsync(cancellationToken).ConfigureAwait(false)
+			? GitResult<IReadOnlyList<GitCommit>>.FromValue([])
+			: result;
+	}
+
+	/// <summary>
+	/// Whether the log walks from HEAD because the caller named no starting point of their own.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="IncludingAllRefs"/> walks every reference instead, and git already answers that
+	/// with an empty log on a repository with no commits. An explicit <see cref="ForRevision"/> is
+	/// left alone so a revision that does not exist still fails.
+	/// </remarks>
+	private bool ReadsFromHead => _revision is null && !_includingAllRefs;
+
+	/// <summary>
+	/// Asks git whether HEAD names a branch with no commits yet, as it does straight after
+	/// <c>init</c>.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Taken only after <c>log</c> has already failed, so the common case still costs one
+	/// invocation. On an unborn HEAD <c>log</c> exits 128 with "does not have any commits yet", or
+	/// with "unknown revision" once <see cref="ExcludingRemoteTrackingRefs"/> names HEAD explicitly,
+	/// so the failure alone does not say which it was, and matching both texts would be brittle.
+	/// </para>
+	/// <para>
+	/// <c>rev-parse --verify -q HEAD</c> exits 1 with no output when HEAD does not resolve, and 128
+	/// for everything else that can go wrong, such as the path not being a repository at all, so
+	/// only exit code 1 is read as unborn. Verified against git 2.43.
+	/// </para>
+	/// </remarks>
+	/// <param name="cancellationToken">Cancels the probe.</param>
+	/// <returns><see langword="true"/> when HEAD has no commit to resolve to.</returns>
+	private async Task<bool> IsHeadUnbornAsync(CancellationToken cancellationToken)
+	{
+		GitResult<string> probe = await new GitTextBuilder(Runner, RepositoryPath, "rev-parse", "--verify", "-q", "HEAD")
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return !probe.Success && probe.Error?.ExitCode == 1;
+	}
 }

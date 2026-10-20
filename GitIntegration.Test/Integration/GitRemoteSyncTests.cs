@@ -739,5 +739,205 @@ public class GitRemoteSyncTests
 		Assert.IsTrue(status.IsUpstreamGone);
 	}
 
+	[TestMethod]
+	public async Task CloneWithDepthFromALocalPathIsShallowAsync()
+	{
+		// git ignores --depth for a plain local path and exits 0 with a full clone, so before
+		// issue #251 WithDepth(1) here quietly copied every commit.
+		CancellationToken cancellationToken = TestContext.CancellationToken;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one", "first", cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "two", "second", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(remote.WeakString.As<GitRepositoryRemotePath>(), cloneDirectory.Root)
+			.WithDepth(1)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> commits = await clone.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.HasCount(1, commits);
+		Assert.IsTrue(File.Exists(Path.Combine(cloneDirectory.Root.WeakString, ".git", "shallow")));
+	}
+
+	[TestMethod]
+	public async Task CloneAndFetchReportTransferProgressToASinkAsync()
+	{
+		// git writes "Receiving objects" to a redirected standard error only under --progress, so
+		// before issue #154 a sink saw nothing during the network phase. A file:// URL forces the
+		// pack transport (a plain path clone hardlinks instead), and more than fetch.unpackLimit's
+		// 100 objects keeps the fetch on index-pack, which is what reports "Receiving objects".
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		await CommitManyFilesAsync(repository, workingDirectory, "first", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		RecordingProgress cloneProgress = new();
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(new Uri(remote.WeakString).AbsoluteUri.As<GitRepositoryRemotePath>(), cloneDirectory.Root)
+			.ReportingProgress(cloneProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		StringAssert.Contains(cloneProgress.Text, "Receiving objects");
+
+		await CommitManyFilesAsync(repository, workingDirectory, "second", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		RecordingProgress fetchProgress = new();
+		_ = await clone.Fetch()
+			.ReportingProgress(fetchProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		StringAssert.Contains(fetchProgress.Text, "Receiving objects");
+	}
+
+	[TestMethod]
+	public async Task ThrowingProgressSinkIsContainedAndTheResultIsParsedInFullAsync()
+	{
+		// Issue #147: a sink that throws on its first chunk must not fault the verb or cost the
+		// parser any output. Each verb gets a fresh sink, which must be entered exactly once: the
+		// first chunk throws and reporting to that sink stops.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		await CommitManyFilesAsync(repository, workingDirectory, "first", cancellationToken).ConfigureAwait(false);
+
+		ThrowingProgress pushProgress = new();
+		GitPushResult pushed = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.SettingUpstream()
+			.ReportingProgress(pushProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, pushProgress.Calls);
+		Assert.IsFalse(pushed.HasRejections);
+		Assert.AreEqual(1, pushed.Updates.Count);
+		Assert.AreEqual(GitRefUpdateKind.Created, pushed.Updates[0].Kind);
+		Assert.AreEqual("refs/heads/main".As<GitRefName>(), pushed.Updates[0].Reference);
+
+		ThrowingProgress cloneProgress = new();
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(new Uri(remote.WeakString).AbsoluteUri.As<GitRepositoryRemotePath>(), cloneDirectory.Root)
+			.ReportingProgress(cloneProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, cloneProgress.Calls);
+		Assert.IsNotNull(clone.LocalPath);
+
+		GitCommit second = await CommitFileAsync(repository, workingDirectory, "b.txt", "two\n", "second", cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		ThrowingProgress fetchProgress = new();
+		GitFetchResult fetched = await clone.Fetch()
+			.ReportingProgress(fetchProgress)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, fetchProgress.Calls);
+		Assert.IsTrue(fetched.DetailAvailable);
+		Assert.AreEqual(1, fetched.Updates.Count);
+		Assert.AreEqual("refs/remotes/origin/main".As<GitRefName>(), fetched.Updates[0].Reference);
+		Assert.AreEqual(second.Sha, fetched.Updates[0].NewSha);
+	}
+
+	private static async Task CommitManyFilesAsync(
+		GitRepository repository,
+		TemporaryRepository temporary,
+		string prefix,
+		CancellationToken cancellationToken)
+	{
+		for (int i = 0; i < 150; i++)
+		{
+			temporary.WriteFile($"{prefix}-{i}.txt", $"{prefix} {i}\n");
+		}
+
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository
+			.Commit(prefix.As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Throws on every report, counting how many times it was entered.
+	/// </summary>
+	private sealed class ThrowingProgress : IProgress<string>
+	{
+		private int _calls;
+
+		public int Calls => Volatile.Read(ref _calls);
+
+		public void Report(string value)
+		{
+			_ = Interlocked.Increment(ref _calls);
+			throw new InvalidOperationException("The progress sink failed.");
+		}
+	}
+
+	/// <summary>
+	/// Collects reports synchronously. <see cref="Progress{T}"/> posts each report through the
+	/// synchronization context, so asserting on what it received would race the callbacks.
+	/// </summary>
+	private sealed class RecordingProgress : IProgress<string>
+	{
+		private readonly Lock _gate = new();
+		private readonly System.Text.StringBuilder _received = new();
+
+		public string Text
+		{
+			get
+			{
+				lock (_gate)
+				{
+					return _received.ToString();
+				}
+			}
+		}
+
+		public void Report(string value)
+		{
+			lock (_gate)
+			{
+				_ = _received.Append(value);
+			}
+		}
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

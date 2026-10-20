@@ -669,6 +669,42 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task SendsAForkSourceAsOwnerColonBranchInTheCreateBodyAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repos/contoso/example-repo/pulls", HttpStatusCode.Created, Fixture("github-pullrequest-created.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		_ = await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+			.FromFork("my-fork-owner".As<GitProviderOwner>(), "fix/thing".As<GitBranchName>())
+			.Into("main".As<GitBranchName>())
+			.Titled("Fix thing".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		string body = handler.Requests[0].Body!;
+		StringAssert.Contains(body, "\"head\":\"my-fork-owner:fix/thing\"");
+		StringAssert.Contains(body, "\"base\":\"main\"");
+	}
+
+	[TestMethod]
+	public async Task SendsASameRepositorySourceAsTheBareBranchInTheCreateBodyAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/repos/contoso/example-repo/pulls", HttpStatusCode.Created, Fixture("github-pullrequest-created.json"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		_ = await provider.CreatePullRequest("example-repo".As<GitRepositoryName>())
+			.From("fix/thing".As<GitBranchName>())
+			.Into("main".As<GitBranchName>())
+			.Titled("Fix thing".As<GitPullRequestTitle>())
+			.ExecuteAsync(TestContext.CancellationTokenSource.Token)
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(handler.Requests[0].Body!, "\"head\":\"fix/thing\"");
+	}
+
+	[TestMethod]
 	public async Task TranslatesAnUnauthorizedResponseToGitHostingAuthenticationExceptionAsync()
 	{
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
@@ -735,7 +771,7 @@ public sealed class GitHubProviderTests
 		// Octokit routes a 403 whose body names a secondary rate limit to
 		// SecondaryRateLimitExceededException, which derives from ForbiddenException. It must
 		// therefore be matched before the ForbiddenException arm, or it would be reported as an
-		// authentication failure. GitHub sends no reset time with it, so ResetsAt is null.
+		// authentication failure. This response carries no Retry-After, so ResetsAt is null.
 		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
 			.Respond(
 				(HttpStatusCode)403,
@@ -750,6 +786,35 @@ public sealed class GitHubProviderTests
 		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
 		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
 		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ReadsResetsAtFromRetryAfterOnASecondaryRateLimitResponseAsync()
+	{
+		// SecondaryRateLimitExceededException has no reset property of its own, but GitHub may send
+		// Retry-After with it. Without that delay a caller can only guess when to retry, and GitHub
+		// escalates the limit for clients that retry too early. Bracketed rather than exact, because
+		// the mapping anchors to UtcNow.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"You have exceeded a secondary rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "60"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.AreEqual((HttpStatusCode)403, exception.StatusCode);
+		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsInRange(before.AddSeconds(60), after.AddSeconds(60), exception.ResetsAt.Value);
 	}
 
 	[TestMethod]
@@ -831,6 +896,97 @@ public sealed class GitHubProviderTests
 			.ConfigureAwait(false);
 
 		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		Assert.IsNull(exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ReadsResetsAtFromXRateLimitResetOnATooManyRequestsResponseWithASpentQuotaAsync()
+	{
+		// GitHub may answer a spent primary quota with a 429 rather than a 403. Octokit builds
+		// RateLimitExceededException, which carries Reset, only for a 403, so this arrives as a plain
+		// ApiException with no Retry-After. The reset instant is still in the headers.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("X-RateLimit-Remaining", "0"),
+				("X-RateLimit-Reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(HttpStatusCode.TooManyRequests, exception.StatusCode);
+		Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1798800000), exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task ReadsResetsAtFromXRateLimitResetOnASecondaryRateLimitResponseWithASpentQuotaAsync()
+	{
+		// GitHub's documented order for a secondary limit is Retry-After, then X-RateLimit-Reset when
+		// X-RateLimit-Remaining is 0.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				(HttpStatusCode)403,
+				"{\"message\":\"You have exceeded a secondary rate limit\"}",
+				("Content-Type", "application/json"),
+				("x-ratelimit-remaining", "0"),
+				("x-ratelimit-reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
+		Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1798800000), exception.ResetsAt);
+	}
+
+	[TestMethod]
+	public async Task PrefersRetryAfterOverXRateLimitResetAsync()
+	{
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("Retry-After", "90"),
+				("X-RateLimit-Remaining", "0"),
+				("X-RateLimit-Reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		DateTimeOffset before = DateTimeOffset.UtcNow;
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		DateTimeOffset after = DateTimeOffset.UtcNow;
+
+		Assert.IsNotNull(exception.ResetsAt);
+		Assert.IsInRange(before.AddSeconds(90), after.AddSeconds(90), exception.ResetsAt.Value);
+	}
+
+	[TestMethod]
+	public async Task LeavesResetsAtNullWhenTheQuotaIsNotReportedSpentAsync()
+	{
+		// GitHub sends X-RateLimit-Reset on every response. The reset of a quota that still has
+		// requests left says nothing about when this one may be retried.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.Respond(
+				HttpStatusCode.TooManyRequests,
+				"{\"message\":\"You have exceeded a rate limit\"}",
+				("Content-Type", "application/json"),
+				("X-RateLimit-Remaining", "4999"),
+				("X-RateLimit-Reset", "1798800000"));
+		GitHubProvider provider = new() { Owner = "contoso".As<GitProviderOwner>(), Handler = handler };
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
 		Assert.IsNull(exception.ResetsAt);
 	}
 

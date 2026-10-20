@@ -106,6 +106,41 @@ public class GitCommitBuilderTests
 	}
 
 	[TestMethod]
+	[DataRow("Foo <x", "e@x", "name")]
+	[DataRow("Foo >x", "e@x", "name")]
+	[DataRow("Ann", "a@b> <c@d", "email")]
+	[DataRow("Ann\nB", "e@x", "name")]
+	[DataRow("Ann\rB", "e@x", "name")]
+	[DataRow("Ann\0B", "e@x", "name")]
+	[DataRow("Ann", "e@x\n", "email")]
+	[DataRow("Ann", "e\t@x", "email")]
+	public void RejectsAuthorValuesGitWouldRewrite(string name, string email, string badParameter)
+	{
+		RecordingGitProcessRunner runner = new();
+		GitCommitBuilder builder = new(runner, TestPaths.Root, Message);
+
+		ArgumentException ex = Assert.ThrowsExactly<ArgumentException>(
+			() => _ = builder.WithAuthor(name.As<GitAuthorName>(), email.As<GitAuthorEmail>()));
+
+		// The message names the value so a caller passing identities through can see which one failed.
+		Assert.AreEqual(badParameter, ex.ParamName);
+		Assert.Contains(badParameter == "name" ? name : email, ex.Message);
+	}
+
+	[TestMethod]
+	[DataRow("O'Brien, Jr.", "obrien@example.com")]
+	[DataRow("Zoë Ñúñez 李", "zoe+tag@例え.jp")]
+	public void AcceptsOrdinaryAuthorValues(string name, string email)
+	{
+		RecordingGitProcessRunner runner = new();
+		GitCommitBuilder builder = new(runner, TestPaths.Root, Message);
+
+		_ = builder.WithAuthor(name.As<GitAuthorName>(), email.As<GitAuthorEmail>());
+
+		CollectionAssert.Contains(builder.BuildArguments().ToArray(), $"--author={name} <{email}>");
+	}
+
+	[TestMethod]
 	public void ConfigurationMethodsReturnTheSameBuilderForChaining()
 	{
 		RecordingGitProcessRunner runner = new();

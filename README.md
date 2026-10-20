@@ -632,9 +632,12 @@ IGitHostingProvider github = new GitHubProvider
 IReadOnlyList<GitRepository> repositories = await github.GetRepositoriesAsync();
 ```
 
-`GitHubProvider.GetRepositoriesAsync` returns only `Owner`'s **public** repositories — GitHub's
-`GET /users/{login}/repos` does not honour authentication to reveal private ones. Azure DevOps has
-no equivalent restriction: it returns everything the resolved credential can see.
+`GitHubProvider.GetRepositoriesAsync` routes by what `Owner` turns out to be. Authenticated, an
+organisation's repositories come from `GET /orgs/{org}/repos` and the credential's own account from
+`GET /user/repos`, so both include the private repositories the credential can see. Any other user
+falls back to the public `GET /users/{login}/repos` route, which is all GitHub offers for that
+case, and an unauthenticated provider always uses it. See [`GitHubProvider`](#githubprovider) for
+how the route is chosen. Azure DevOps returns everything the resolved credential can see.
 
 ```csharp
 using ktsu.GitIntegration;
@@ -839,7 +842,7 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `Remotes()` | `IGitRemoteListBuilder` | Builds `git remote -v`. |
 | `Submodules()` | `IGitSubmoduleListBuilder` | Reads `git ls-files --stage -z` for the recorded gitlinks and `git submodule status` for what is checked out. |
 | `Worktrees()` | `IGitWorktreeListBuilder` | Builds `git worktree list --porcelain -z` (without `-z` below git 2.36). |
-| `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision. |
+| `RevParse(GitRefName)` | `IGitRevParseBuilder` | Builds `git rev-parse --verify` for a revision, peeled to the commit it names. |
 | `RevList(GitRefName)` | `IGitRevListBuilder` | Builds `git rev-list --count`, counting commits without listing them. |
 | `Divergence(GitRefName, GitRefName)` | `IGitRevListDivergenceBuilder` | Builds `git rev-list --count --left-right`, reporting ahead and behind for any two revisions. |
 | `Add()` | `IGitAddBuilder` | Builds `git add`. |
@@ -942,7 +945,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | Type | Description |
 |------|-------------|
 | `GitStatus` | `Branch`, `Upstream`, `Ahead`, `Behind`, `IsDetached`, `Entries`, `IsClean`. |
-| `GitStatusEntry` | `IndexState`, `WorkTreeState`, `Path`, `OriginalPath` for one changed path. |
+| `GitStatusEntry` | `IndexState`, `WorkTreeState`, `Path`, `OriginalPath`, `IsDirectory` (an untracked or ignored directory git collapsed to one record) for one changed path. |
 | `GitCommit` | `Sha`, `TreeSha`, `ParentShas`, `Author`, `Committer`, `Subject`, `Body`. |
 | `GitSignature` | `Name`, `Email`, `Timestamp` recorded on a commit. |
 | `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`. |
@@ -1052,14 +1055,15 @@ with more open pull requests than one page costs more than one request and is ne
 
 ### `IGitPullRequestCreateBuilder`
 
-Collects a pull request's details before submitting it. `From`, `Into`, and `Titled` are required;
-`Describing` and `AsDraft` are optional. A missing required value throws `InvalidOperationException`
-from `ExecuteAsync`, not from the setter that left it unset, since parts may be supplied in any
-order.
+Collects a pull request's details before submitting it. `From` (or `FromFork`), `Into`, and
+`Titled` are required; `Describing` and `AsDraft` are optional. A missing required value throws
+`InvalidOperationException` from `ExecuteAsync`, not from the setter that left it unset, since
+parts may be supplied in any order.
 
 | Name | Return Type | Description |
 |------|-------------|-------------|
 | `From(GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the source branch. |
+| `FromFork(GitProviderOwner, GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the source branch in another owner's fork. GitHub receives `owner:branch` as the head; Azure DevOps throws `NotSupportedException` from `ExecuteAsync`. |
 | `Into(GitBranchName)` | `IGitPullRequestCreateBuilder` | Sets the target branch. |
 | `Titled(GitPullRequestTitle)` | `IGitPullRequestCreateBuilder` | Sets the title. |
 | `Describing(string)` | `IGitPullRequestCreateBuilder` | Sets the description. |

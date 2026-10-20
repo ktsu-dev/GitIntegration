@@ -196,7 +196,11 @@ public class GitRepository
 		return new GitRestoreBuilder(RequireRunner(), RequireLocalPath(), path);
 	}
 
-	/// <summary>Resolves a revision to the object id it names.</summary>
+	/// <summary>Resolves a revision to the id of the commit it names.</summary>
+	/// <remarks>
+	/// The revision is peeled to a commit, so an annotated tag resolves to the commit it points at
+	/// rather than to the tag object, and a revision naming a tree or blob fails as unresolvable.
+	/// </remarks>
 	/// <param name="revision">The revision to resolve.</param>
 	/// <returns>A fresh builder.</returns>
 	/// <exception cref="ArgumentNullException"><paramref name="revision"/> is <see langword="null"/>.</exception>
@@ -501,6 +505,28 @@ public class GitRepository
 			return;
 		}
 
+		(LaunchBrowser ?? LaunchInDefaultBrowser)(uri);
+	}
+
+	/// <summary>
+	/// Gets or initializes the launcher <see cref="OpenWebClient"/> hands an accepted URI to, or
+	/// <see langword="null"/> to open it in the default browser.
+	/// </summary>
+	/// <remarks>
+	/// Internal rather than public, so the launch mechanism stays out of this library's public API,
+	/// and the test project injects a recorder through <c>InternalsVisibleTo</c>, the same seam
+	/// <see cref="GitProvider.Handler"/> provides. It is reached only after
+	/// <see cref="IsBrowsableUri"/> has accepted the value, which is what lets a test prove that a
+	/// rejected value never gets this far.
+	/// </remarks>
+	internal Action<Uri>? LaunchBrowser { get; init; }
+
+	/// <summary>
+	/// Opens <paramref name="uri"/> in the default browser.
+	/// </summary>
+	/// <param name="uri">An absolute <c>http</c> or <c>https</c> URI.</param>
+	private static void LaunchInDefaultBrowser(Uri uri)
+	{
 		// UseShellExecute with the URI as FileName is the portable form. The previous
 		// implementation hardcoded "explorer", which does not exist on Linux or macOS.
 		_ = Process.Start(new ProcessStartInfo

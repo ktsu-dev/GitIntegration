@@ -67,10 +67,27 @@ internal static class GitFetchParser
 		{
 			Kind = ToKind(flag),
 			Reference = GitParseValues.ToSemantic<GitRefName>(fields[2], "fetched reference"),
-			OldSha = GitParseValues.ToSemantic<GitCommitSha>(fields[0], "fetched old object id"),
-			NewSha = GitParseValues.ToSemantic<GitCommitSha>(fields[1], "fetched new object id"),
+			OldSha = ReadObjectId(fields[0], "fetched old object id"),
+			NewSha = ReadObjectId(fields[1], "fetched new object id"),
 		};
 	}
+
+	/// <summary>
+	/// Converts one side of a fetch record to a commit id, or <see langword="null"/> for git's null id.
+	/// </summary>
+	/// <remarks>
+	/// git writes the null id for whichever side of the update does not exist: the old side of a
+	/// created ref and the new side of a pruned one. Reporting it as <see langword="null"/> matches
+	/// what <c>Push()</c> returns for the same kinds of update, and what the worktree and submodule
+	/// parsers do with the null id.
+	/// </remarks>
+	/// <param name="objectId">The object id git printed.</param>
+	/// <param name="description">What the field holds, for the parse error.</param>
+	/// <returns>The commit id, or <see langword="null"/> when git printed the null id.</returns>
+	private static GitCommitSha? ReadObjectId(string objectId, string description) =>
+		GitParseValues.IsNullObjectId(objectId)
+			? null
+			: GitParseValues.ToSemantic<GitCommitSha>(objectId, description);
 
 	private static GitRefUpdateKind ToKind(char flag) => flag switch
 	{

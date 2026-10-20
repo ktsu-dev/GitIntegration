@@ -73,6 +73,30 @@ public class GitCloneBuilderTests
 	}
 
 	[TestMethod]
+	public void PairsADepthWithNoLocalSoALocalPathCloneIsShallow()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
+
+		_ = builder.WithDepth(1);
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int marker = Array.IndexOf(arguments, "--end-of-options");
+
+		Assert.Contains("--no-local", arguments);
+		Assert.IsLessThan(marker, Array.IndexOf(arguments, "--no-local"));
+	}
+
+	[TestMethod]
+	public void LeavesLocalCloneOptimisationsOnWithoutADepth()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
+
+		Assert.DoesNotContain("--no-local", builder.BuildArguments());
+	}
+
+	[TestMethod]
 	public void RejectsANonPositiveDepth()
 	{
 		RecordingGitProcessRunner runner = new();
@@ -203,4 +227,19 @@ public class GitCloneBuilderTests
 	}
 
 	public TestContext TestContext { get; set; } = null!;
+
+	[TestMethod]
+	public void PassesProgressOnlyWhenASinkIsAttached()
+	{
+		// git writes transfer progress to a redirected standard error only when asked (issue #154),
+		// and the flag stays off without a sink so a failure's diagnostic stays short.
+		RecordingGitProcessRunner runner = new();
+		GitCloneBuilder builder = new(runner, EmptyFileSystem(), Source, Destination);
+
+		CollectionAssert.DoesNotContain(builder.BuildArguments().ToArray(), "--progress");
+
+		_ = builder.ReportingProgress(new Progress<string>(static _ => { }));
+
+		CollectionAssert.Contains(builder.BuildArguments().ToArray(), "--progress");
+	}
 }

@@ -62,6 +62,9 @@ public sealed record GitSignature
 	/// <remarks>
 	/// Parsed from git's strict ISO-8601 output, so the original offset is preserved rather than
 	/// normalized to UTC — the local time a commit was made in is information a caller may want.
+	/// The one exception is an offset beyond ±14:00, which git accepts but
+	/// <see cref="DateTimeOffset"/> cannot hold: that timestamp is reported in UTC, with the same
+	/// instant.
 	/// </remarks>
 	public required DateTimeOffset Timestamp { get; init; }
 }

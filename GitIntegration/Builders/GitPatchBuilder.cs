@@ -228,7 +228,10 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 			AppendOperands(arguments, _revisions);
 		}
 
-		if (_paths.Count > 0)
+		// After a revision even with no paths, as in GitLogBuilder: without it git guesses whether
+		// the operand is a revision or a path, so a missing revision that matches a directory returns
+		// that directory's working-tree diff instead of failing (ktsu-dev/GitIntegration#168).
+		if (_revisions.Length > 0 || _paths.Count > 0)
 		{
 			arguments.Add("--");
 

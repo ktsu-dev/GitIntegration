@@ -338,6 +338,28 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task CommitWithAuthorRecordsAnOrdinaryAuthorAsGivenAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		GitAuthorName name = "Zoë O'Brien, Jr.".As<GitAuthorName>();
+		GitAuthorEmail email = "zoe+tag@example.com".As<GitAuthorEmail>();
+
+		GitCommit commit = await repository
+			.Commit("c1".As<GitCommitMessage>())
+			.AllowEmpty()
+			.WithAuthor(name, email)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(name, commit.Author.Name);
+		Assert.AreEqual(email, commit.Author.Email);
+	}
+
+	[TestMethod]
 	public async Task LogAndCommitIgnoreTheHostsShowSignatureSettingAsync()
 	{
 		// log.showSignature is common among people who sign commits, and with it git prints each signed
@@ -468,6 +490,36 @@ public class GitRoundTripTests
 		temporary.WriteFile("untracked.txt", "two\n");
 		GitStatus dirty = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
 		Assert.IsFalse(dirty.IsClean);
+	}
+
+	[TestMethod]
+	public async Task StatusTellsAnUntrackedDirectoryFromAnUntrackedFileAsync()
+	{
+		// The default untracked mode collapses a directory with no tracked files to one record, so
+		// newdir/ and a file named newfile would both come back as a bare untracked path without a
+		// directory flag.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("newdir/x.txt", "two\n");
+		temporary.WriteFile("newfile", "three\n");
+
+		GitStatus status = await repository.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitStatusEntry directory = status.Entries.Single(entry => entry.Path == "newdir".As<RelativeFilePath>());
+		Assert.AreEqual(GitFileState.Untracked, directory.WorkTreeState);
+		Assert.IsTrue(directory.IsDirectory);
+
+		GitStatusEntry file = status.Entries.Single(entry => entry.Path == "newfile".As<RelativeFilePath>());
+		Assert.AreEqual(GitFileState.Untracked, file.WorkTreeState);
+		Assert.IsFalse(file.IsDirectory);
 	}
 
 	[TestMethod]
@@ -825,6 +877,136 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task RevParsePeelsAnAnnotatedTagToItsCommitAsync()
+	{
+		// rev-parse returns the object a revision names, and for an annotated tag that is the tag
+		// object, not the commit. RevParse promises a GitCommitSha, so it has to peel; otherwise
+		// "is v1 at HEAD?" compares a tag id against a commit id and quietly answers no.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit commit = await repository.Commit("c1".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.CreateTag("v1".As<GitTagName>())
+			.Annotating("release 1".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommitSha tagged = await repository.RevParse("v1".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommitSha head = await repository.RevParse("HEAD".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(commit.Sha, tagged);
+		Assert.AreEqual(head, tagged);
+	}
+
+	[TestMethod]
+	public async Task RevParseResolvesACommitMessageSearchAsync()
+	{
+		// git reads everything after ":/" as the message to search for, so a peel suffix appended
+		// to the expression would become part of the search and match nothing (#265).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit wanted = await repository.Commit("fix nasty bug".As<GitCommitMessage>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommitSha found = await repository.RevParse(":/fix nasty".As<GitRefName>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(wanted.Sha, found);
+	}
+
+	[TestMethod]
+	public async Task RevParseRefusesARevisionThatNamesNoCommitAsync()
+	{
+		// A tree is not a commit, so handing its id back typed as GitCommitSha would be a lie. It
+		// fails the way any revision that resolves to no commit does.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitResult<GitCommitSha> result = await repository.RevParse("HEAD^{tree}".As<GitRefName>())
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
+	public async Task LogReturnsAnEmptyListBeforeTheFirstCommitAsync()
+	{
+		// An unborn HEAD makes git log exit 128, with different text depending on whether HEAD was
+		// implied or named, while --all on the same repository exits 0 with no output. A history
+		// view opened on a fresh repository should see no commits whichever options it chose.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		IGitLogBuilder[] builders =
+		[
+			repository.Log(),
+			repository.Log().ForPath("a.txt".As<RelativeFilePath>()),
+			repository.Log().ExcludingRemoteTrackingRefs(),
+			repository.Log().IncludingAllRefs(),
+		];
+
+		foreach (IGitLogBuilder builder in builders)
+		{
+			IReadOnlyList<GitCommit> commits = await builder.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+			Assert.AreEqual(0, commits.Count);
+		}
+
+		GitResult<IReadOnlyList<GitCommit>> result =
+			await repository.Log().TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(result.Success);
+		Assert.AreEqual(0, result.Value!.Count);
+	}
+
+	[TestMethod]
+	public async Task LogStillRefusesAnUnknownRevisionBeforeTheFirstCommitAsync()
+	{
+		// Only the implied HEAD is forgiven. A revision the caller named is a question about that
+		// revision, and on an empty repository it does not exist.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await repository.Log().ForRevision("does-not-exist".As<GitRefName>())
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		GitResult<IReadOnlyList<GitCommit>> result = await repository.Log().ForRevision("does-not-exist".As<GitRefName>())
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsFalse(result.Success);
+	}
+
+	[TestMethod]
 	public async Task DiffReportsLineCountsFromARealRepositoryAsync()
 	{
 		// The parser tests pin the shape of git's output; this pins that git really does emit that
@@ -1028,6 +1210,38 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task BranchesListsARemoteBranchNamedReleaseHeadButNotTheRemoteHeadAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository source = new();
+		GitRepository origin = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
+
+		source.WriteFile("a.txt", "one\n");
+		_ = await origin.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await origin.Commit("first".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await origin.CreateBranch("release/HEAD".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository destinationRoot = new();
+		AbsoluteDirectoryPath destination =
+			Path.Combine(destinationRoot.RootPath, "copy").As<AbsoluteDirectoryPath>();
+
+		// A clone always writes the symbolic refs/remotes/origin/HEAD, so both cases are present.
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.Clone(source.RootPath.As<GitRepositoryRemotePath>(), destination)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> remotes =
+			await clone.Branches().RemoteOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		string[] names = [.. remotes.Select(branch => branch.Name.WeakString)];
+		CollectionAssert.Contains(names, "origin/release/HEAD");
+		CollectionAssert.Contains(names, "origin/main");
+		CollectionAssert.DoesNotContain(names, "origin/HEAD");
+	}
+
+	[TestMethod]
 	public async Task CloneRefusesANonEmptyDestinationAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
@@ -1076,6 +1290,77 @@ public class GitRoundTripTests
 		Assert.AreEqual("before.txt".As<RelativeFilePath>(), changes[0].OriginalPath);
 		Assert.AreEqual("after.txt".As<RelativeFilePath>(), changes[0].Path);
 		Assert.AreEqual(100, changes[0].SimilarityPercent);
+	}
+
+	[TestMethod]
+	public async Task RevisionVerbsReadABranchNamedLikeADirectoryAsTheBranchAsync()
+	{
+		// --end-of-options settles that an operand is not a flag, but git still guesses whether it is
+		// a revision or a path until it sees --. A branch sharing a tracked directory's name is both,
+		// and without the -- every one of these verbs died with "ambiguous argument"
+		// (ktsu-dev/GitIntegration#168).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("docs/a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.CreateBranch("docs".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("docs/a.txt", "two\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRefName docs = "docs".As<GitRefName>();
+
+		// Compared as a typed path rather than as text, since the path type spells separators
+		// natively and the text differs on Windows.
+		RelativeFilePath changed = "docs/a.txt".As<RelativeFilePath>();
+
+		IReadOnlyList<GitCommit> log = await repository.Log().ForRevision(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.HasCount(1, log, "Log() should list the docs branch's one commit.");
+
+		int count = await repository.RevList(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(1, count);
+
+		IReadOnlyList<GitDiffEntry> diff = await repository.Diff().Against(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.Contains(entry => entry.Path == changed, diff);
+
+		GitPatch patch = await repository.Patch().Against(docs).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.Contains(file => file.Path == changed, patch.Files);
+	}
+
+	[TestMethod]
+	public async Task RevisionVerbsRejectAMissingRevisionThatMatchesAPathAsync()
+	{
+		// With no such revision, git used to fall back to reading the operand as a path and exit 0:
+		// Diff() returned the working-tree diff limited to docs/, and Log() HEAD's history limited to
+		// it, a confident wrong answer instead of an unknown revision (ktsu-dev/GitIntegration#168).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("docs/a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		temporary.WriteFile("docs/a.txt", "two\n");
+
+		GitRefName docs = "docs".As<GitRefName>();
+
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.Diff().Against(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.Patch().Against(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.Log().ForRevision(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			() => repository.RevList(docs).ExecuteAsync(cancellationToken)).ConfigureAwait(false);
 	}
 
 	public TestContext TestContext { get; set; } = null!;

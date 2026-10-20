@@ -367,4 +367,19 @@ public class GitPullBuilderTests
 	}
 
 	public TestContext TestContext { get; set; } = null!;
+
+	[TestMethod]
+	public void PassesProgressOnlyWhenASinkIsAttached()
+	{
+		// git writes transfer progress to a redirected standard error only when asked (issue #154),
+		// and the flag stays off without a sink so a failure's diagnostic stays short.
+		RecordingGitProcessRunner runner = new();
+		GitPullBuilder builder = new(runner, TestPaths.Root);
+
+		CollectionAssert.DoesNotContain(builder.BuildArguments().ToArray(), "--progress");
+
+		_ = builder.ReportingProgress(new Progress<string>(static _ => { }));
+
+		CollectionAssert.Contains(builder.BuildArguments().ToArray(), "--progress");
+	}
 }

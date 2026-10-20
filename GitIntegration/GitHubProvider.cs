@@ -260,10 +260,15 @@ public sealed class GitHubProvider : GitProvider
 		try
 		{
 			// Source maps to head and Target maps to base: NewPullRequest's positional constructor
-			// takes (title, head, base), the same order GitHub's own API expects. Built inside the
+			// takes (title, head, base), the same order GitHub's own API expects. A fork's branch is
+			// spelled owner:branch, GitHub's own form for a cross-repository head. Built inside the
 			// try, after the transport already exists, so its own argument validation can never leak
 			// the transport this method just acquired.
-			NewPullRequest newPullRequest = new(specification.Title.WeakString, specification.Source.WeakString, specification.Target.WeakString)
+			string head = specification.SourceOwner is null
+				? specification.Source.WeakString
+				: $"{specification.SourceOwner.WeakString}:{specification.Source.WeakString}";
+
+			NewPullRequest newPullRequest = new(specification.Title.WeakString, head, specification.Target.WeakString)
 			{
 				Body = specification.Description,
 				Draft = specification.IsDraft,
@@ -584,9 +589,9 @@ public sealed class GitHubProvider : GitProvider
 		return exception switch
 		{
 			RateLimitExceededException rateLimit => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, rateLimit.Reset, exception),
-			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, resetsAt: null, exception),
+			SecondaryRateLimitExceededException => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, TryGetResetTime(exception), exception),
 			AbuseException abuse => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(abuse.RetryAfterSeconds), exception),
-			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, ToResetTime(TryGetRetryAfterSeconds(exception)), exception),
+			{ StatusCode: HttpStatusCode.TooManyRequests } => new GitHostingRateLimitException(exception.Message, Name, exception.StatusCode, responseBody, TryGetResetTime(exception), exception),
 			AuthorizationException => new GitHostingAuthenticationException(authenticationMessage, Name, exception.StatusCode, responseBody, exception),
 			ForbiddenException => new GitHostingAuthenticationException(authenticationMessage, Name, exception.StatusCode, responseBody, exception),
 			NotFoundException => new GitHostingNotFoundException(exception.Message, Name, exception.StatusCode, responseBody, exception),
@@ -595,11 +600,12 @@ public sealed class GitHubProvider : GitProvider
 	}
 
 	/// <summary>
-	/// Converts an abuse-detection <c>Retry-After</c> delay into the absolute reset time
+	/// Converts a <c>Retry-After</c> delay into the absolute reset time
 	/// <see cref="GitHostingRateLimitException.ResetsAt"/> reports.
 	/// </summary>
 	/// <remarks>
-	/// <see cref="AbuseException.RetryAfterSeconds"/> is a relative delay, and
+	/// <see cref="AbuseException.RetryAfterSeconds"/> and the <c>Retry-After</c> header a secondary
+	/// rate limit or a bare <c>429</c> may carry are relative delays, and
 	/// <see cref="GitHostingRateLimitException.ResetsAt"/> is an absolute instant, because that is
 	/// what <see cref="RateLimitExceededException.Reset"/> and Azure DevOps's
 	/// <c>X-RateLimit-Reset</c> both report. Anchoring to <see cref="DateTimeOffset.UtcNow"/> loses
@@ -611,6 +617,58 @@ public sealed class GitHubProvider : GitProvider
 	/// <returns>The absolute reset time, or <see langword="null"/> when no delay was reported.</returns>
 	private static DateTimeOffset? ToResetTime(int? retryAfterSeconds) =>
 		retryAfterSeconds is int seconds ? DateTimeOffset.UtcNow.AddSeconds(seconds) : null;
+
+	/// <summary>
+	/// Reads when a rate-limited response says the limit lifts, for the arms whose exception carries
+	/// no reset of its own.
+	/// </summary>
+	/// <remarks>
+	/// The order is GitHub's documented one. A <c>Retry-After</c> delay comes first. Failing that, a
+	/// response that reports its quota spent (<c>X-RateLimit-Remaining: 0</c>) carries the instant it
+	/// refills in <c>X-RateLimit-Reset</c>. That is how a primary limit answered with a <c>429</c>
+	/// arrives: Octokit builds <see cref="RateLimitExceededException"/>, with its
+	/// <see cref="RateLimitExceededException.Reset"/>, only for a <c>403</c>, so without the fallback the
+	/// same exhausted quota reported a reset time at one status and none at the other.
+	/// </remarks>
+	/// <param name="exception">The failure Octokit reported.</param>
+	/// <returns>The absolute reset time, or <see langword="null"/> when neither header is usable.</returns>
+	private static DateTimeOffset? TryGetResetTime(ApiException exception) =>
+		ToResetTime(TryGetRetryAfterSeconds(exception)) ?? TryGetRateLimitReset(exception);
+
+	/// <summary>
+	/// Reads the instant a spent quota refills from a failed response's <c>X-RateLimit-Reset</c> header.
+	/// </summary>
+	/// <remarks>
+	/// Read only when <c>X-RateLimit-Remaining</c> is <c>0</c>, because GitHub sends both headers on
+	/// every response and the reset time of a quota that is not spent says nothing about when this
+	/// request may be retried. Scanned case-insensitively for the reason
+	/// <see cref="TryGetRetryAfterSeconds"/> gives, and range-checked as Azure DevOps's reading of the
+	/// same header is, so a value <see cref="DateTimeOffset"/> cannot hold yields <see langword="null"/>
+	/// rather than an exception thrown out of the translation of another one.
+	/// </remarks>
+	/// <param name="exception">The failure Octokit reported.</param>
+	/// <returns>The reset instant, or <see langword="null"/> when the quota is not reported spent or the header is absent or unusable.</returns>
+	private static DateTimeOffset? TryGetRateLimitReset(ApiException exception)
+	{
+		if (exception.HttpResponse?.Headers is not IReadOnlyDictionary<string, string> headers)
+		{
+			return null;
+		}
+
+		string? HeaderValue(string name) => headers
+			.FirstOrDefault(candidate => candidate.Key.Equals(name, StringComparison.OrdinalIgnoreCase))
+			.Value;
+
+		bool spent = long.TryParse(HeaderValue("X-RateLimit-Remaining"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long remaining)
+			&& remaining == 0;
+
+		return spent
+			&& long.TryParse(HeaderValue("X-RateLimit-Reset"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long epochSeconds)
+			&& epochSeconds >= DateTimeOffset.MinValue.ToUnixTimeSeconds()
+			&& epochSeconds <= DateTimeOffset.MaxValue.ToUnixTimeSeconds()
+			? DateTimeOffset.FromUnixTimeSeconds(epochSeconds)
+			: null;
+	}
 
 	/// <summary>
 	/// Reads a failed response's <c>Retry-After</c> delay, in seconds.
