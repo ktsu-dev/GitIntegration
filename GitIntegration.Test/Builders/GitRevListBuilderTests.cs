@@ -29,6 +29,9 @@ public class GitRevListBuilderTests
 			"--count",
 			"--end-of-options",
 			"a..b",
+
+			// Always present, so the revision is never read as a path (#168).
+			"--",
 		];
 		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
 	}

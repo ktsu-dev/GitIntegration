@@ -206,9 +206,11 @@ public class GitLogBuilderTests
 
 		string[] arguments = [.. builder.BuildArguments()];
 
-		Assert.AreEqual("HEAD", arguments[^1]);
-		Assert.AreEqual("--end-of-options", arguments[^2]);
-		Assert.IsTrue(Array.LastIndexOf(arguments, "--not") < arguments.Length - 2);
+		// The trailing -- keeps HEAD from being read as a file named HEAD (#168).
+		Assert.AreEqual("--", arguments[^1]);
+		Assert.AreEqual("HEAD", arguments[^2]);
+		Assert.AreEqual("--end-of-options", arguments[^3]);
+		Assert.IsTrue(Array.LastIndexOf(arguments, "--not") < arguments.Length - 3);
 	}
 
 	[TestMethod]
