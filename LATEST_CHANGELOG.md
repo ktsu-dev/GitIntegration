@@ -26,6 +26,8 @@ Changes since v4.1.0:
 - Keep remote branches whose name ends in /HEAD in Branches() [patch] (Claude)
 - Mark collapsed untracked and ignored directories in Status() [minor] (matt-edmondson)
 - Pass --progress to network verbs when a progress sink is attached [patch] (Claude)
+- Compare the changed path as a typed path so the test holds on Windows [patch] (Claude)
+- Close revision operands with -- in Log, RevList, Diff and Patch [patch] (Claude)
 - Cover the fetch rejection exception and unreadable-output path [patch] (Claude)
 - Report a refused reference from Fetch() instead of an empty error [minor] (Claude)
 - Reject branch names git forbids in GitBranchName [patch] (Claude)
