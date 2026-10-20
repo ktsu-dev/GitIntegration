@@ -2,13 +2,18 @@
 
 Changes since v4.1.0:
 
+- Replace the nested ternary in ReadTimestamp with statements (Claude)
+- Read a commit timestamp whose offset is beyond 14 hours instead of failing Log() [patch] (Claude)
+- Resolve a :/ message search in RevParse by peeling the resolved id [patch] (Claude)
 - Read Retry-After on GitHub secondary rate limits [patch] (Claude)
+- Merge main into fix/233-log-unborn-head (Claude)
 - Serialize contained progress reports so a failed sink is never re-entered [patch] (Claude)
 - Let OutOfMemoryException escape the contained progress sink [patch] (Claude)
 - Describe GitHubProvider's owner-type routing and the worktree and patch verbs in the docs [patch] (Claude)
 - Contain an exception thrown by a progress sink instead of faulting the verb [patch] (Claude)
 - Route OpenWebClient's launch through an internal seam so tests can observe it [patch] (Claude)
 - Refuse author values git would rewrite in WithAuthor (Claude)
+- Return an empty Log() on a repository with no commits yet [patch] (Claude)
 - Peel RevParse to the commit a revision names [patch] (Claude)
 - Add FromFork so GitHub pull requests can be opened from a fork [minor] (Claude)
 - Fall back to Retry-After for the Azure DevOps rate-limit reset time [patch] (Claude)
