@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System;
+using System.Reflection;
 
 using ktsu.Semantics.Strings;
 
@@ -176,15 +177,84 @@ public class SemanticTypeTests
 	}
 
 	[TestMethod]
+	public void FindsTheLibrarysSemanticStringTypes()
+	{
+		// Guards the reflection below: if it found nothing, the distinctness test would pass vacuously.
+		Type[] types = PublicSemanticStringTypes();
+
+		Assert.Contains(typeof(GitBranchName), types);
+		Assert.Contains(typeof(GitRemoteName), types);
+		Assert.Contains(typeof(GitCommitSha), types);
+		Assert.Contains(typeof(GitRepositoryName), types);
+	}
+
+	[TestMethod]
 	public void SemanticTypesAreDistinctAtCompileTime()
 	{
-		GitBranchName branch = "main".As<GitBranchName>();
+		// A semantic type is only worth having if the compiler refuses to accept one where another is
+		// expected. Two things would quietly undo that: one type deriving from another, or an implicit
+		// conversion between them, which leaves the runtime types distinct while making every call site
+		// interchangeable. Every public semantic-string type in the library is checked against every
+		// other, so a new type is covered without editing this test.
+		Type[] types = PublicSemanticStringTypes();
+		List<string> violations = [];
 
-		// Asserting inequality of the two values would pass against any implementation, including
-		// one where both types were aliases for the same thing. The type identity is the invariant
-		// worth checking, so check that instead.
-		Assert.IsNotInstanceOfType<GitRemoteName>(branch);
+		foreach (Type from in types)
+		{
+			foreach (Type to in types)
+			{
+				if (from == to)
+				{
+					continue;
+				}
+
+				if (to.IsAssignableFrom(from))
+				{
+					violations.Add($"{from.Name} is assignable to {to.Name}");
+				}
+
+				if (DeclaresImplicitConversion(from, to))
+				{
+					violations.Add($"an implicit conversion turns {from.Name} into {to.Name}");
+				}
+			}
+		}
+
+		Assert.IsEmpty(violations, string.Join("; ", violations.Distinct()));
 	}
+
+	private static Type[] PublicSemanticStringTypes() =>
+		[.. typeof(GitBranchName).Assembly.GetExportedTypes()
+			.Where(type => !type.IsAbstract && IsSemanticString(type))
+			.OrderBy(type => type.FullName, StringComparer.Ordinal)];
+
+	private static bool IsSemanticString(Type type)
+	{
+		for (Type? current = type.BaseType; current is not null; current = current.BaseType)
+		{
+			if (current.IsGenericType && current.GetGenericTypeDefinition() == typeof(SemanticString<>))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/// <summary>
+	/// Reports whether <paramref name="declaringType"/>, or a base it inherits operators from, declares
+	/// an <c>op_Implicit</c> from <paramref name="from"/> to <paramref name="to"/>.
+	/// </summary>
+	private static bool DeclaresImplicitConversion(Type declaringType, Type from, Type to) =>
+		declaringType
+			.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
+			.Any(method => method.Name == "op_Implicit"
+				&& method.ReturnType == to
+				&& method.GetParameters() is [{ } parameter]
+				&& parameter.ParameterType == from);
+
+	private static bool DeclaresImplicitConversion(Type from, Type to) =>
+		DeclaresImplicitConversion(from, from, to) || DeclaresImplicitConversion(to, from, to);
 
 	[TestMethod]
 	public void GitRepositoryNameAcceptsAnOrdinarySingleSegmentName()
