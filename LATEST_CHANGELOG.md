@@ -2,6 +2,12 @@
 
 Changes since v4.1.0:
 
+- Use the MSTest assertions the analyzers suggest in the distinctness tests (Claude)
+- Use the MSTest assertions the analyzers suggest in the new clone tests (Claude)
+- Check every pair of semantic types for distinctness, not one [patch] (Claude)
+- Make Clone().WithDepth shallow for a local-path source too [patch] (Claude)
+- Report a fetch's null object id as null, as Push() does [patch] (Claude)
+- Fall back to X-RateLimit-Reset for a GitHub 429 or secondary limit with no Retry-After [patch] (Claude)
 - Replace the nested ternary in ReadTimestamp with statements (Claude)
 - Read a commit timestamp whose offset is beyond 14 hours instead of failing Log() [patch] (Claude)
 - Resolve a :/ message search in RevParse by peeling the resolved id [patch] (Claude)
