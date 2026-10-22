@@ -2,6 +2,7 @@
 
 Changes since v4.1.0:
 
+- Merge remote-tracking branch 'origin/main' into fix/190-ignore-submodules-none (matt-edmondson)
 - Use the MSTest assertions the analyzers suggest in the distinctness tests (Claude)
 - Use the MSTest assertions the analyzers suggest in the new clone tests (Claude)
 - Check every pair of semantic types for distinctness, not one [patch] (Claude)
@@ -27,7 +28,9 @@ Changes since v4.1.0:
 - Mark collapsed untracked and ignored directories in Status() [minor] (matt-edmondson)
 - Pass --progress to network verbs when a progress sink is attached [patch] (Claude)
 - Compare the changed path as a typed path so the test holds on Windows [patch] (Claude)
+- Compare the submodule's path as a typed path so the test holds on Windows [patch] (Claude)
 - Close revision operands with -- in Log, RevList, Diff and Patch [patch] (Claude)
+- Pin --ignore-submodules=none in Status, Diff and Patch [patch] (Claude)
 - Cover the fetch rejection exception and unreadable-output path [patch] (Claude)
 - Report a refused reference from Fetch() instead of an empty error [minor] (Claude)
 - Reject branch names git forbids in GitBranchName [patch] (Claude)
