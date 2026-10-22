@@ -194,6 +194,11 @@ internal sealed class GitDiffBuilder(IGitProcessRunner runner, AbsoluteDirectory
 
 		arguments.Add("-z");
 
+		// diff.ignoreSubmodules=all in a host's config would drop a moved or dirty submodule from the
+		// list entirely, so the same working copy reports different changes on different machines
+		// (ktsu-dev/GitIntegration#190).
+		arguments.Add("--ignore-submodules=none");
+
 		if (_staged)
 		{
 			arguments.Add("--cached");

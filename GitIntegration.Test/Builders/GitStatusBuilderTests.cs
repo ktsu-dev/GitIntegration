@@ -33,6 +33,10 @@ public class GitStatusBuilderTests
 			// status.showUntrackedFiles, and a host that sets it to "no" would report a working copy
 			// with untracked files in it as clean.
 			"--untracked-files=normal",
+
+			// The same for submodules: a host's diff.ignoreSubmodules=all would hide a submodule's
+			// unpushed commits and untracked files.
+			"--ignore-submodules=none",
 		];
 		CollectionAssert.AreEqual(expectedArguments, arguments.ToArray());
 	}

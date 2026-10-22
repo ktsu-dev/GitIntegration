@@ -380,6 +380,9 @@ Non-obvious, load-bearing design points:
     `GitCommandBuilder.BuildArguments` already pins — same reasoning, and this was the one verb still
     leaving a host-configurable default unspecified. `WithUntrackedFiles(...)` replaces the default
     rather than joining it, so the vector never carries two `--untracked-files` values.
+    `Status()`, `Diff()` and `Patch()` likewise pin `--ignore-submodules=none`: a host's
+    `diff.ignoreSubmodules=all` would otherwise hide a submodule's new commits and untracked files,
+    and `Status()` would report clean over unpushed submodule work (#190).
 
 15. **`Log()` passes `--no-show-signature`.** With `log.showSignature=true`, which is common among
     people who sign commits, git prints each signed commit's verification to standard output ahead

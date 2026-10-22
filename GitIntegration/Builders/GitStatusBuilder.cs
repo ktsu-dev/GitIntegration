@@ -98,6 +98,12 @@ internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirecto
 		// beside --no-pager, core.quotepath and color.ui rather than left to the host.
 		arguments.Add("--untracked-files=" + ToOptionValue(_untrackedFiles));
 
+		// Same reasoning, for submodules. diff.ignoreSubmodules=all in a host's config (status reads
+		// it too) hides a submodule's new commits and untracked files, so the superproject reports
+		// IsClean == true over unpushed work. Pinning "none" reports the submodule however the host
+		// is configured (ktsu-dev/GitIntegration#190).
+		arguments.Add("--ignore-submodules=none");
+
 		if (_includeIgnored)
 		{
 			// "matching" rather than "traditional": it lists the ignored paths themselves instead of

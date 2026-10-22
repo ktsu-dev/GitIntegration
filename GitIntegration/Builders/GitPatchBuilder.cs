@@ -206,6 +206,10 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		// Only the short form is a gitlink patch that stages (ktsu-dev/GitIntegration#124).
 		arguments.Add("--submodule=short");
 
+		// And diff.ignoreSubmodules=all would leave the gitlink out of the patch altogether, so the
+		// submodule's change could never be staged from it (ktsu-dev/GitIntegration#190).
+		arguments.Add("--ignore-submodules=none");
+
 		if (_staged)
 		{
 			arguments.Add("--cached");
