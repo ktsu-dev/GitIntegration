@@ -123,6 +123,59 @@ public class GitDiffParserTests
 	}
 
 	[TestMethod]
+	public void ReportsATextConflictOnceAsUnmerged()
+	{
+		// Captured from git 2.43 mid-merge: a binary, a modify/delete and a text conflict. git follows
+		// the text conflict's unmerged record with an M record for the same path.
+		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.Parse(
+			"U" + Nul + "bin.dat" + Nul + "U" + Nul + "d.txt" + Nul + "U" + Nul + "t.txt" + Nul + "M" + Nul + "t.txt" + Nul);
+
+		Assert.AreEqual(3, entries.Count);
+		Assert.AreEqual("t.txt".As<RelativeFilePath>(), entries[2].Path);
+		Assert.AreEqual(GitChangeKind.Unmerged, entries[2].Kind);
+	}
+
+	[TestMethod]
+	public void ReportsATextConflictOnceWithLineCountsAndDropsItsNumstatRecord()
+	{
+		// Captured from git 2.43 for the same tree. The M record's counts are the conflict markers.
+		string output =
+			":000000 100644 0000000 0000000 U\0bin.dat\0" +
+			":000000 100644 0000000 0000000 U\0d.txt\0" +
+			":000000 100644 0000000 0000000 U\0t.txt\0" +
+			":100644 100644 1ed2302 0000000 M\0t.txt\0" +
+			":100644 100644 3b18e51 3b18e51 M\0u.txt\0" +
+			"0\t0\tbin.dat\0" +
+			"0\t0\td.txt\0" +
+			"0\t0\tt.txt\0" +
+			"4\t0\tt.txt\0" +
+			"1\t2\tu.txt\0";
+
+		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.ParseWithLineCounts(output);
+
+		Assert.AreEqual(4, entries.Count);
+		Assert.AreEqual(GitChangeKind.Unmerged, entries[2].Kind);
+		Assert.AreEqual("t.txt", entries[2].Path.WeakString);
+		Assert.AreEqual(0, entries[2].Insertions);
+
+		// The record after the dropped one keeps its own counts.
+		Assert.AreEqual(GitChangeKind.Modified, entries[3].Kind);
+		Assert.AreEqual("u.txt", entries[3].Path.WeakString);
+		Assert.AreEqual(1, entries[3].Insertions);
+		Assert.AreEqual(2, entries[3].Deletions);
+	}
+
+	[TestMethod]
+	public void KeepsARecordAfterAnUnmergedOneForADifferentPath()
+	{
+		IReadOnlyList<GitDiffEntry> entries = GitDiffParser.Parse(
+			"U" + Nul + "a.txt" + Nul + "M" + Nul + "b.txt" + Nul);
+
+		Assert.AreEqual(2, entries.Count);
+		Assert.AreEqual(GitChangeKind.Modified, entries[1].Kind);
+	}
+
+	[TestMethod]
 	public void ParsesTheRawAndNumstatSectionsRunTogether()
 	{
 		// Captured verbatim from git 2.43. The two sections are emitted back to back with no
