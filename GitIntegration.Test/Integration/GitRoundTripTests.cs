@@ -1210,6 +1210,43 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task RemotesReadsAPartialCloneAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository source = new();
+		GitRepository origin = await InitializeAsync(source, cancellationToken).ConfigureAwait(false);
+
+		source.WriteFile("a.txt", "one\n");
+		_ = await origin.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await origin.Commit("first".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(
+			origin.ProcessRunner!, origin.LocalPath, "config", "uploadpack.allowFilter", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository destinationRoot = new();
+		string destination = Path.Combine(destinationRoot.RootPath, "copy");
+
+		// A file:// URL rather than a plain path: git ignores --filter for a local-path clone. The
+		// filter leaves remote.origin.partialclonefilter set, so remote -v appends " [blob:none]".
+		string sourceUrl = new Uri(source.RootPath).AbsoluteUri;
+		_ = await new GitTextBuilder(
+			origin.ProcessRunner!, origin.LocalPath, "clone", "--filter=blob:none", sourceUrl, destination)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository clone = await IntegrationGitFixture.CreateClient()
+			.OpenAsync(destination.As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitRemote> remotes =
+			await clone.Remotes().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, remotes.Count);
+		Assert.AreEqual("origin".As<GitRemoteName>(), remotes[0].Name);
+		Assert.AreEqual(sourceUrl.As<GitRepositoryRemotePath>(), remotes[0].FetchUrl);
+	}
+
+	[TestMethod]
 	public async Task BranchesListsARemoteBranchNamedReleaseHeadButNotTheRemoteHeadAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

@@ -138,6 +138,30 @@ public class GitRemoteParserTests
 	}
 
 	[TestMethod]
+	[DataRow("blob:none")]
+	[DataRow("tree:0")]
+	[DataRow("blob:limit=1m")]
+	public void ReadsAFetchLineEndingInAPartialCloneFilter(string filter)
+	{
+		string output =
+			"origin" + Tab + "C:/dev/my repos/upstream.git (fetch) [" + filter + "]\n" +
+			"origin" + Tab + "git@github.com:ktsu-dev/GitIntegration.git (push)\n";
+
+		IReadOnlyList<GitRemote> remotes = GitRemoteParser.Parse(output);
+
+		Assert.AreEqual(1, remotes.Count);
+		Assert.AreEqual("C:/dev/my repos/upstream.git".As<GitRepositoryRemotePath>(), remotes[0].FetchUrl);
+		Assert.AreEqual("git@github.com:ktsu-dev/GitIntegration.git".As<GitRepositoryRemotePath>(), remotes[0].PushUrl);
+	}
+
+	[TestMethod]
+	public void RejectsABracketedSuffixWithNoDirectionMarker()
+	{
+		Assert.ThrowsExactly<GitParseException>(
+			() => GitRemoteParser.Parse("origin" + Tab + "https://example.com/repo.git [blob:none]\n"));
+	}
+
+	[TestMethod]
 	public void RejectsALineWithNoTabSeparator()
 	{
 		Assert.ThrowsExactly<GitParseException>(
