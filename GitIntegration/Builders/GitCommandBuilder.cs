@@ -126,6 +126,33 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		}
 	}
 
+	/// <summary>
+	/// Appends <c>--</c> followed by each path, the pathspec tail of a verb that takes revisions and
+	/// paths.
+	/// </summary>
+	/// <remarks>
+	/// Any revision has to be appended first: git reads everything after <c>--</c> as a filename. The
+	/// <c>--</c> is written even with no paths, so a revision before it is never read as a path
+	/// (ktsu-dev/GitIntegration#168). Each caller decides whether the tail is written at all.
+	/// </remarks>
+	/// <param name="arguments">The vector being assembled.</param>
+	/// <param name="paths">The paths to limit the command to, possibly none.</param>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="arguments"/> or <paramref name="paths"/> is <see langword="null"/>.
+	/// </exception>
+	private protected static void AppendPathspecs(ICollection<string> arguments, IEnumerable<RelativeFilePath> paths)
+	{
+		Ensure.NotNull(arguments);
+		Ensure.NotNull(paths);
+
+		arguments.Add("--");
+
+		foreach (RelativeFilePath path in paths)
+		{
+			arguments.Add(path.WeakString);
+		}
+	}
+
 	/// <inheritdoc />
 	public IReadOnlyList<string> BuildArguments()
 	{
