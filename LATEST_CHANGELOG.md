@@ -2,6 +2,10 @@
 
 Changes since v4.1.0:
 
+- Read a commit zone whose minutes are 60 or more instead of throwing [patch] (Claude)
+- Factor the pathspec tail out of the four revision-and-path builders [patch] (matt-edmondson)
+- Report a text conflict once in Diff() instead of as Unmerged and Modified [patch] (Claude)
+- Read a partial clone's remotes instead of rejecting the filter suffix [patch] (Claude)
 - Merge remote-tracking branch 'origin/main' into fix/190-ignore-submodules-none (matt-edmondson)
 - Use the MSTest assertions the analyzers suggest in the distinctness tests (Claude)
 - Use the MSTest assertions the analyzers suggest in the new clone tests (Claude)
