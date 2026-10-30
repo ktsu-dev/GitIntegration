@@ -93,6 +93,23 @@ public class GitCommitBuilderTests
 	}
 
 	[TestMethod]
+	public void OverridesTheHostsIgnoredSubmodulesWhenStagingTrackedFiles()
+	{
+		// commit --all honours diff.ignoreSubmodules, which would leave a moved submodule out.
+		RecordingGitProcessRunner runner = new();
+		GitCommitBuilder builder = new(runner, TestPaths.Root, Message);
+		_ = builder.StageTrackedFiles();
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int commit = Array.IndexOf(arguments, "commit");
+		int setting = Array.IndexOf(arguments, "diff.ignoreSubmodules=none");
+
+		Assert.IsGreaterThan(0, setting, "commit --all must override the host's diff.ignoreSubmodules.");
+		Assert.AreEqual("-c", arguments[setting - 1]);
+		Assert.IsLessThan(commit, setting, "A -c is read only ahead of the subcommand.");
+	}
+
+	[TestMethod]
 	public void FormatsTheAuthorOverrideAsGitExpects()
 	{
 		// --author takes a single "Name <email>" string. Splitting it into two arguments makes git

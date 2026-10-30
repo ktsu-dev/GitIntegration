@@ -467,6 +467,55 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
+	[DataRow(false)]
+	[DataRow(true)]
+	public async Task CommitAllRecordsASubmoduleTheHostIgnoresAsync(bool alongsideAFile)
+	{
+		// commit --all reads diff.ignoreSubmodules, so "all" left the moved gitlink out: alone it
+		// aborted as nothing to commit, and beside another change it was silently dropped
+		// (ktsu-dev/GitIntegration#290).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(
+			super.ProcessRunner!, super.LocalPath, "config", "diff.ignoreSubmodules", "all")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository checkout = new()
+		{
+			LocalPath = Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
+			ProcessRunner = super.ProcessRunner,
+		};
+		await IntegrationGitFixture.ConfigureIdentityAsync(checkout, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+		GitCommitSha moved = await CommitInSubmoduleAsync(checkout, superDirectory, Main, "two\n", cancellationToken)
+			.ConfigureAwait(false);
+
+		if (alongsideAFile)
+		{
+			superDirectory.WriteFile("m.txt", "two\n");
+		}
+
+		_ = await super.Commit("commit all".As<GitCommitMessage>()).StageTrackedFiles()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitSubmodule> submodules =
+			await super.Submodules().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(moved, submodules.Single().Sha, "The commit left out the submodule's new gitlink.");
+
+		GitStatus status = await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(status.IsClean, "Status() still reports a change the commit should have recorded.");
+	}
+
+	[TestMethod]
 	public async Task ReportsNoSubmodulesForARepositoryWithNoneAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

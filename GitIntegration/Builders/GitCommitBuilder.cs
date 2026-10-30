@@ -145,6 +145,18 @@ internal sealed class GitCommitBuilder(
 	{
 		Ensure.NotNull(arguments);
 
+		// commit --all reads diff.ignoreSubmodules and has no --ignore-submodules of its own, so a
+		// host's "all" would leave a moved submodule out of the commit, or abort a submodule-only
+		// commit as having nothing to commit, while Status() reports the submodule as changed
+		// (ktsu-dev/GitIntegration#290). A -c on the vector beats every config file, and has to
+		// precede the subcommand. A repository's own submodule.<name>.ignore still takes precedence,
+		// as it does for Status().
+		if (_stageTrackedFiles)
+		{
+			arguments.Add("-c");
+			arguments.Add("diff.ignoreSubmodules=none");
+		}
+
 		arguments.Add("commit");
 
 		if (_stageTrackedFiles)
