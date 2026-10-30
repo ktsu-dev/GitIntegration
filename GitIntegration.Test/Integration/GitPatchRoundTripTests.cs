@@ -322,6 +322,41 @@ public class GitPatchRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task KeepsNearbyChangesInSeparateHunksUnderInterHunkContextConfigurationAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+
+		// diff.interHunkContext=10 makes git fuse hunks up to ten lines apart, which turned the two
+		// edits below into one hunk (ktsu-dev/GitIntegration#286).
+		GitRepository seeded = await SeedAsync(client, repository, [("diff.interHunkContext", "10")]).ConfigureAwait(false);
+
+		string[] lines = [.. Enumerable.Range(1, 30).Select(number => $"{number}")];
+		repository.WriteFile("f.txt", string.Join('\n', lines) + "\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		lines[4] = "5 changed";
+		lines[14] = "15 changed";
+		repository.WriteFile("f.txt", string.Join('\n', lines) + "\n");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+		GitFilePatch file = (await opened.Patch().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+
+		Assert.AreEqual(2, file.Hunks.Count, "The host's diff.interHunkContext fused two independent edits into one hunk.");
+
+		_ = await opened.Apply(file.PatchFor([file.Hunks[0]])).ToIndex().ExecuteAsync().ConfigureAwait(false);
+
+		GitFilePatch staged = (await opened.Patch().Staged().ExecuteAsync().ConfigureAwait(false)).Files.Single();
+		string[] stagedChanges = [.. staged.Hunks.SelectMany(hunk => hunk.Lines)
+			.Where(line => line.Kind == GitPatchLineKind.Added)
+			.Select(line => line.Text)];
+
+		Assert.AreEqual("5 changed", stagedChanges.Single(), "Staging the first hunk must stage line 5 alone.");
+	}
+
+	[TestMethod]
 	[DataRow("true")]
 	[DataRow("false")]
 	[DataRow("copies")]

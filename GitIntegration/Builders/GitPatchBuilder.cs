@@ -101,6 +101,7 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 	private string[] _revisions = [];
 	private bool _staged;
 	// Git's stock default, pinned so diff.context in a config file cannot change the hunk shape.
+	// diff.interHunkContext is pinned beside it in AppendVerbArguments, for the same reason.
 	private const int DefaultContextLines = 3;
 
 	private int? _contextLines;
@@ -218,6 +219,11 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		// Always emitted. diff.context=0 would otherwise give a zero-context patch, which is the
 		// shape WithContext refuses because Apply can never stage it.
 		arguments.Add($"-U{_contextLines ?? DefaultContextLines}");
+
+		// diff.interHunkContext moves hunk boundaries too: a host value of 10 fuses two edits ten
+		// lines apart into one hunk, so PatchFor could no longer stage one without the other. Zero is
+		// git's stock default (ktsu-dev/GitIntegration#286).
+		arguments.Add("--inter-hunk-context=0");
 
 		// Git detects renames by default, and diff.renames=copies adds copy headers this parser
 		// does not read, so the host's setting is overridden in both directions.

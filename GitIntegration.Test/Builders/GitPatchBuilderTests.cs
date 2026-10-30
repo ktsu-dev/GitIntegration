@@ -34,6 +34,7 @@ public class GitPatchBuilderTests
 			"--submodule=short",
 			"--ignore-submodules=none",
 			"-U3",
+			"--inter-hunk-context=0",
 			"--no-renames",
 		];
 
@@ -55,6 +56,26 @@ public class GitPatchBuilderTests
 			arguments.Contains("--no-renames"),
 			"Left out, git's default rename detection and diff.renames=copies decide the patch shape instead of DetectRenames.");
 		Assert.IsFalse(arguments.Contains("--find-renames"));
+	}
+
+	[TestMethod]
+	public void PinsInterHunkContextWhateverTheContextLines()
+	{
+		RecordingGitProcessRunner runner = new();
+
+		GitPatchBuilder plain = new(runner, TestPaths.Root);
+		GitPatchBuilder widened = new(runner, TestPaths.Root);
+		_ = widened.WithContext(7);
+
+		foreach (GitPatchBuilder builder in new[] { plain, widened })
+		{
+			IReadOnlyList<string> arguments = builder.BuildArguments();
+			Assert.AreEqual(
+				1,
+				arguments.Count(argument => argument.StartsWith("--inter-hunk-context", StringComparison.Ordinal)),
+				"Left out, diff.interHunkContext in the host's config fuses nearby hunks, so one change can no longer be staged alone.");
+			Assert.IsTrue(arguments.Contains("--inter-hunk-context=0"));
+		}
 	}
 
 	[TestMethod]
