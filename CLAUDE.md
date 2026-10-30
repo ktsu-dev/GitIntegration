@@ -382,7 +382,8 @@ Non-obvious, load-bearing design points:
     rather than joining it, so the vector never carries two `--untracked-files` values.
     `Status()`, `Diff()` and `Patch()` likewise pin `--ignore-submodules=none`: a host's
     `diff.ignoreSubmodules=all` would otherwise hide a submodule's new commits and untracked files,
-    and `Status()` would report clean over unpushed submodule work (#190).
+    and `Status()` would report clean over unpushed submodule work (#190). `Commit().StageTrackedFiles()`
+    has no such flag, so it passes `-c diff.ignoreSubmodules=none` ahead of `commit --all` instead (#290).
 
 15. **`Log()` passes `--no-show-signature`.** With `log.showSignature=true`, which is common among
     people who sign commits, git prints each signed commit's verification to standard output ahead
