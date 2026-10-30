@@ -67,9 +67,8 @@ public class GitPatchBuilderTests
 		GitPatchBuilder widened = new(runner, TestPaths.Root);
 		_ = widened.WithContext(7);
 
-		foreach (GitPatchBuilder builder in new[] { plain, widened })
+		foreach (IReadOnlyList<string> arguments in new[] { plain, widened }.Select(builder => builder.BuildArguments()))
 		{
-			IReadOnlyList<string> arguments = builder.BuildArguments();
 			Assert.AreEqual(
 				1,
 				arguments.Count(argument => argument.StartsWith("--inter-hunk-context", StringComparison.Ordinal)),
