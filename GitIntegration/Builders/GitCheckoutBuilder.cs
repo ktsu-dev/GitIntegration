@@ -46,7 +46,9 @@ public interface IGitCheckoutBuilder : IGitCommandBuilder<GitCompleted>
 	/// <para>
 	/// Without this flag, checkout leaves the submodules alone entirely, so their working trees will
 	/// disagree with the newly checked-out superproject until something updates them —
-	/// <c>UpdateSubmodules()</c> being the explicit way to do that.
+	/// <c>UpdateSubmodules()</c> being the explicit way to do that. This holds whatever the host's
+	/// <c>submodule.recurse</c> says: checkout honours that setting when the command carries no
+	/// recursion flag, so the builder emits <c>--no-recurse-submodules</c> instead.
 	/// </para>
 	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -143,10 +145,11 @@ internal sealed class GitCheckoutBuilder(
 			arguments.Add("--detach");
 		}
 
-		if (_recursingSubmodules)
-		{
-			arguments.Add("--recurse-submodules");
-		}
+		// Always one or the other. With no flag at all, git falls back to the host's
+		// submodule.recurse, and a host that sets it to true would make a plain checkout recurse —
+		// and Force() discard uncommitted work inside a submodule — although the caller never asked
+		// for recursion.
+		arguments.Add(_recursingSubmodules ? "--recurse-submodules" : "--no-recurse-submodules");
 
 		// Checkout is the one verb that cannot use AppendOperands, and the reason is a git bug rather
 		// than a design choice here.

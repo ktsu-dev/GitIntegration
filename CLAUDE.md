@@ -382,7 +382,10 @@ Non-obvious, load-bearing design points:
     rather than joining it, so the vector never carries two `--untracked-files` values.
     `Status()`, `Diff()` and `Patch()` likewise pin `--ignore-submodules=none`: a host's
     `diff.ignoreSubmodules=all` would otherwise hide a submodule's new commits and untracked files,
-    and `Status()` would report clean over unpushed submodule work (#190).
+    and `Status()` would report clean over unpushed submodule work (#190). `Checkout()` pins
+    `--no-recurse-submodules` unless `RecursingSubmodules()` was called: checkout honours a host's
+    `submodule.recurse=true`, which would otherwise make `Force()` discard uncommitted work inside a
+    submodule the caller never asked to touch (#285).
 
 15. **`Log()` passes `--no-show-signature`.** With `log.showSignature=true`, which is common among
     people who sign commits, git prints each signed commit's verification to standard output ahead
