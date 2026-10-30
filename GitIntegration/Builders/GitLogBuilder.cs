@@ -247,12 +247,7 @@ internal sealed class GitLogBuilder(IGitProcessRunner runner, AbsoluteDirectoryP
 			// guessing at --. Without it, a branch named like a directory fails as "ambiguous
 			// argument", and a missing revision that matches a path returns that path's history
 			// instead of failing (ktsu-dev/GitIntegration#168). GitCheckoutBuilder does the same.
-			arguments.Add("--");
-
-			foreach (RelativeFilePath path in _paths)
-			{
-				arguments.Add(path.WeakString);
-			}
+			AppendPathspecs(arguments, _paths);
 		}
 	}
 

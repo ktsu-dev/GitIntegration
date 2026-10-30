@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using ktsu.Semantics.Paths;
 using ktsu.Semantics.Strings;
 
 [TestClass]
@@ -210,5 +211,42 @@ public class GitPatchBuilderTests
 			"git apply refuses a zero-context patch without --unidiff-zero, which IGitApplyBuilder does not offer, so this is the one pairing of the library's own two verbs that could never work.");
 
 		StringAssert.Contains(thrown.Message, "--unidiff-zero", StringComparison.Ordinal);
+	}
+
+	[TestMethod]
+	public void PutsPathsAfterTheRevisionsAndADoubleDash()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder
+			.Between("main".As<GitRefName>(), "feature/x".As<GitRefName>())
+			.ForPath("docs/plan.md".As<RelativeFilePath>())
+			.ForPath("src/app.cs".As<RelativeFilePath>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		string[] expectedTail =
+		[
+			"--end-of-options", "main", "feature/x",
+			"--",
+			"docs/plan.md".As<RelativeFilePath>().WeakString,
+			"src/app.cs".As<RelativeFilePath>().WeakString,
+		];
+
+		Assert.AreSequenceEqual(expectedTail, arguments[^expectedTail.Length..]);
+	}
+
+	[TestMethod]
+	public void WritesTheDoubleDashAfterARevisionWithNoPaths()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitPatchBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.Against("main".As<GitRefName>());
+
+		string[] arguments = [.. builder.BuildArguments()];
+		string[] expectedTail = ["--end-of-options", "main", "--"];
+
+		Assert.AreSequenceEqual(expectedTail, arguments[^expectedTail.Length..]);
 	}
 }

@@ -233,12 +233,7 @@ internal sealed class GitPatchBuilder(IGitProcessRunner runner, AbsoluteDirector
 		// that directory's working-tree diff instead of failing (ktsu-dev/GitIntegration#168).
 		if (_revisions.Length > 0 || _paths.Count > 0)
 		{
-			arguments.Add("--");
-
-			foreach (RelativeFilePath path in _paths)
-			{
-				arguments.Add(path.WeakString);
-			}
+			AppendPathspecs(arguments, _paths);
 		}
 	}
 
