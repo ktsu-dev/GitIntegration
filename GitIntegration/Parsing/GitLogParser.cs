@@ -109,12 +109,14 @@ internal static class GitLogParser
 	}
 
 	/// <summary>
-	/// Reads a timestamp whose offset is beyond the ±14:00 that <see cref="DateTimeOffset"/> can hold.
+	/// Reads a timestamp whose offset <see cref="DateTimeOffset"/> refuses: one beyond ±14:00, or one
+	/// whose minutes are 60 or more.
 	/// </summary>
 	/// <remarks>
 	/// git stores a commit's zone as an arbitrary <c>±hhmm</c> and prints it unchanged, so imported
-	/// history and misconfigured clocks produce values such as <c>+15:00</c> that git itself accepts
-	/// (ktsu-dev/GitIntegration#262). The instant is still exact, so it is returned in UTC rather
+	/// history and misconfigured clocks produce values such as <c>+15:00</c> (ktsu-dev/GitIntegration#262)
+	/// or <c>+00:99</c> (ktsu-dev/GitIntegration#287) that git itself accepts. git reads the digits as
+	/// <c>hh * 60 + mm</c> minutes, so the instant is still exact, and it is returned in UTC rather
 	/// than failing the whole log for one record.
 	/// </remarks>
 	private static bool TryReadOutOfRangeOffset(string value, out DateTimeOffset timestamp)
@@ -140,15 +142,15 @@ internal static class GitLogParser
 			return false;
 		}
 
-		TimeSpan offset = new(hours, minutes, 0);
+		TimeSpan offset = TimeSpan.FromMinutes((hours * 60) + minutes);
 		if (offsetPart[0] == '-')
 		{
 			offset = offset.Negate();
 		}
 
-		// Only the case DateTimeOffset refuses is handled here: an in-range offset that still failed
+		// Only the cases DateTimeOffset refuses are handled here: an in-range offset that still failed
 		// to parse is malformed for some other reason.
-		if (offset.Duration() <= TimeSpan.FromHours(14))
+		if (minutes < 60 && offset.Duration() <= TimeSpan.FromHours(14))
 		{
 			return false;
 		}

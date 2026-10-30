@@ -412,6 +412,56 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task LogReadsACommitWhoseZoneMinutesAreSixtyOrMoreAsync()
+	{
+		// git accepts any ±hhmm digits for a zone (git fsck is clean for "+0099") and prints them
+		// unchanged, as "+00:99", which imported history carries and DateTimeOffset refuses (#287).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Commit("c1".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IGitProcessRunner runner = repository.ProcessRunner!;
+		string original = await new GitTextBuilder(runner, repository.LocalPath, "cat-file", "commit", "HEAD")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// An identity line ends "<email> <seconds> <zone>"; keep everything up to the email.
+		string[] lines = original.Split('\n');
+		for (int index = 0; index < lines.Length; index++)
+		{
+			string line = lines[index];
+			string? zone = line.StartsWith("author ", StringComparison.Ordinal) ? "+0099"
+				: line.StartsWith("committer ", StringComparison.Ordinal) ? "+1260"
+				: null;
+			if (zone is not null)
+			{
+				lines[index] = line[..(line.LastIndexOf('>') + 1)] + " 1700000000 " + zone;
+			}
+		}
+
+		// Written inside .git so the forged object never shows up as working-tree content.
+		temporary.WriteFile(".git/forged-commit", string.Join('\n', lines));
+		string forgedSha = await new GitTextBuilder(
+			runner, repository.LocalPath, "hash-object", "-t", "commit", "-w", ".git/forged-commit")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "update-ref", "HEAD", forgedSha)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> history = await repository.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, history.Count);
+		Assert.AreEqual(forgedSha, history[0].Sha.WeakString);
+		DateTimeOffset expected = DateTimeOffset.FromUnixTimeSeconds(1700000000);
+		Assert.AreEqual(expected, history[0].Author.Timestamp);
+		Assert.AreEqual(expected, history[0].Committer.Timestamp);
+	}
+
+	[TestMethod]
 	public async Task LogForPathIgnoresTheHostsFollowSettingAsync()
 	{
 		// With log.follow=true git follows renames whenever exactly one path is given, so the history of

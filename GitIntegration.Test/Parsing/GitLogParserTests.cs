@@ -193,6 +193,25 @@ public class GitLogParserTests
 	}
 
 	[TestMethod]
+	[DataRow("2023-11-14T23:52:20+00:99", DisplayName = "+00:99")]
+	[DataRow("2023-11-15T11:13:20+12:60", DisplayName = "+12:60")]
+	[DataRow("2023-11-14T09:13:20-12:60", DisplayName = "-12:60")]
+	public void ReadsATimestampWhoseOffsetMinutesAreSixtyOrMore(string timestamp)
+	{
+		// git reads a "+0099" zone as 99 minutes and prints it unchanged as "+00:99", which
+		// DateTimeOffset refuses. One such commit must not fail the whole log (#287).
+		string record = MergeCommit
+			.Replace("2026-08-20T00:05:20+10:00", timestamp, StringComparison.Ordinal)
+			.Replace("2026-08-21T09:00:00-04:00", timestamp, StringComparison.Ordinal);
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		DateTime expected = DateTimeOffset.FromUnixTimeSeconds(1700000000).UtcDateTime;
+		Assert.AreEqual(expected, commits[0].Author.Timestamp.UtcDateTime);
+		Assert.AreEqual(expected, commits[0].Committer.Timestamp.UtcDateTime);
+	}
+
+	[TestMethod]
 	[DataRow("2023-11-15T13:13:20+15:0x", DisplayName = "Malformed offset")]
 	[DataRow("2023-13-15T13:13:20+15:00", DisplayName = "Invalid month")]
 	[DataRow("+15:00", DisplayName = "Offset only")]
