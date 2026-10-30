@@ -67,6 +67,8 @@ internal static class GitRemoteParser
 				order.Add(name);
 			}
 
+			remainder = WithoutPartialCloneFilter(remainder);
+
 			// Anchored on the suffix rather than the last space: a local remote is a filesystem
 			// path and may legitimately contain spaces.
 			if (remainder.EndsWith(FetchSuffix, StringComparison.Ordinal))
@@ -125,5 +127,27 @@ internal static class GitRemoteParser
 		}
 
 		return remotes;
+	}
+
+	/// <summary>
+	/// Drops the partial-clone filter git appends to a fetch line, as in
+	/// <c>url (fetch) [blob:none]</c>, when <c>remote.&lt;name&gt;.partialclonefilter</c> is set.
+	/// </summary>
+	/// <param name="remainder">The line after the remote name and its tab.</param>
+	/// <returns>The line ending in the direction marker, or <paramref name="remainder"/> unchanged.</returns>
+	private static string WithoutPartialCloneFilter(string remainder)
+	{
+		if (!remainder.EndsWith(']'))
+		{
+			return remainder;
+		}
+
+		int open = remainder.LastIndexOf(" [", StringComparison.Ordinal);
+
+		// Only a filter that follows the fetch marker is dropped, so a URL that happens to end in a
+		// bracket is not cut short and a line with no marker is still rejected.
+		return open >= 0 && remainder[..open].EndsWith(FetchSuffix, StringComparison.Ordinal)
+			? remainder[..open]
+			: remainder;
 	}
 }
