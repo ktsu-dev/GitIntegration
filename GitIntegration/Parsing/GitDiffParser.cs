@@ -42,7 +42,12 @@ internal static class GitDiffParser
 				continue;
 			}
 
-			entries.Add(ReadEntry(tokens, ref index, status));
+			GitDiffEntry entry = ReadEntry(tokens, ref index, status);
+
+			if (!RepeatsAConflict(entries, entry))
+			{
+				entries.Add(entry);
+			}
 		}
 
 		return entries;
@@ -100,17 +105,43 @@ internal static class GitDiffParser
 				$"git reported {entries.Count} raw diff records but {counts.Count} numstat records.");
 		}
 
+		// The counts are paired with the raw records first, and only then is a conflict's second record
+		// dropped, so the positional pairing never goes out of step and its numstat record goes with it.
+		List<GitDiffEntry> counted = [];
+
 		for (int entry = 0; entry < entries.Count; entry++)
 		{
-			entries[entry] = entries[entry] with
+			if (RepeatsAConflict(counted, entries[entry]))
+			{
+				continue;
+			}
+
+			counted.Add(entries[entry] with
 			{
 				Insertions = counts[entry].Insertions,
 				Deletions = counts[entry].Deletions,
-			};
+			});
 		}
 
-		return entries;
+		return counted;
 	}
+
+	/// <summary>
+	/// Tells whether a record is the second one git prints for a path with a content conflict.
+	/// </summary>
+	/// <remarks>
+	/// For a text file with a content conflict, git prints the unmerged record and then the stage 2
+	/// against the working tree as an ordinary <c>M</c>, whose line counts are the conflict markers.
+	/// Keeping only the unmerged record holds the result to one entry per path, as <c>Patch()</c> does.
+	/// </remarks>
+	/// <param name="entries">The entries kept so far.</param>
+	/// <param name="entry">The record just read.</param>
+	/// <returns>True if the record follows an unmerged record for the same path.</returns>
+	private static bool RepeatsAConflict(List<GitDiffEntry> entries, GitDiffEntry entry) =>
+		entry.Kind != GitChangeKind.Unmerged
+		&& entries.Count > 0
+		&& entries[^1].Kind == GitChangeKind.Unmerged
+		&& entries[^1].Path == entry.Path;
 
 	/// <summary>
 	/// Reads the raw section, stopping at the first token that is not a raw header.

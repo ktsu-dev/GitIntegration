@@ -476,6 +476,58 @@ public class GitPatchRoundTripTests
 		Assert.IsTrue(patch.Files.All(file => file.Hunks.Count == 0));
 	}
 
+	[TestMethod]
+	public async Task DiffReportsATextConflictOnceAlongsideABinaryAndAModifyDeleteConflictAsync()
+	{
+		await IntegrationGitFixture.RequireGitAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		using TemporaryRepository repository = new();
+		GitClient client = IntegrationGitFixture.CreateClient();
+		GitRepository seeded = await SeedAsync(client, repository, []).ConfigureAwait(false);
+
+		// t.txt is a plain text conflict, for which git prints an unmerged record and then an M record
+		// for the same path. bin.dat and d.txt are the conflicts that print only the unmerged record.
+		repository.WriteFile("t.txt", "a\nb\n");
+		repository.WriteFile("bin.dat", "\0\u0001base");
+		repository.WriteFile("d.txt", "1\n2\n3\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		await RunGitAsync(seeded, "checkout", "-q", "-b", "other").ConfigureAwait(false);
+		repository.WriteFile("t.txt", "a\nother\n");
+		repository.WriteFile("bin.dat", "\0\u0001other");
+		repository.WriteFile("d.txt", "1\n2\n3\n4\n");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		await RunGitAsync(seeded, "checkout", "-q", "main").ConfigureAwait(false);
+		repository.WriteFile("t.txt", "a\nmain\n");
+		repository.WriteFile("bin.dat", "\0\u0001main");
+		repository.DeleteFile("d.txt");
+		await CommitAllAsync(seeded).ConfigureAwait(false);
+
+		GitProcessResult merged = await seeded.ProcessRunner!.RunAsync(
+			new GitProcessRequest { Arguments = ["-C", repository.RootPath, "merge", "--no-edit", "other"] },
+			TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsFalse(merged.Success, "the merge was expected to conflict but succeeded");
+
+		GitRepository opened = await client.OpenAsync(repository.Root).ConfigureAwait(false);
+
+		IReadOnlyList<GitDiffEntry> diff = await opened.Diff().ExecuteAsync().ConfigureAwait(false);
+		IReadOnlyList<GitDiffEntry> counted = await opened.Diff().WithLineCounts().ExecuteAsync().ConfigureAwait(false);
+		GitPatch patch = await opened.Patch().ExecuteAsync().ConfigureAwait(false);
+
+		string[] expected = ["bin.dat", "d.txt", "t.txt"];
+
+		foreach (IReadOnlyList<GitDiffEntry> entries in new[] { diff, counted })
+		{
+			Assert.AreEqual(patch.Files.Count, entries.Count);
+			Assert.IsTrue(entries.All(entry => entry.Kind == GitChangeKind.Unmerged));
+			CollectionAssert.AreEqual(
+				expected,
+				entries.Select(entry => entry.Path.WeakString).Order(StringComparer.Ordinal).ToArray());
+		}
+	}
+
 	/// <summary>Runs a git command this library has no verb for, failing the test if git fails.</summary>
 	/// <param name="repository">The repository to run in.</param>
 	/// <param name="arguments">The git arguments, after <c>-C &lt;root&gt;</c>.</param>
