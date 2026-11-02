@@ -122,9 +122,12 @@ internal sealed class GitCommitBuilder(
 	/// </summary>
 	/// <remarks>
 	/// Git splits "Name &lt;email&gt;" at the first <c>&lt;</c> and the first <c>&gt;</c> after it, and
-	/// strips <c>&lt;</c>, <c>&gt;</c> and newlines from the name, all without failing. Checked here
-	/// rather than on <see cref="GitAuthorName"/> and <see cref="GitAuthorEmail"/> because those types
-	/// also carry identities read back from history, which must stay readable whatever they hold.
+	/// strips <c>&lt;</c>, <c>&gt;</c> and newlines from the name, all without failing. It also
+	/// trims what <c>ident.c</c> calls crud from both ends of the name and the email: whitespace and
+	/// <c>,</c> <c>:</c> <c>;</c> <c>"</c> <c>'</c> <c>\</c>, so <c>"Doe, John"</c> is recorded as
+	/// <c>Doe, John</c>. The same characters inside a value are kept. Checked here rather than on
+	/// <see cref="GitAuthorName"/> and <see cref="GitAuthorEmail"/> because those types also carry
+	/// identities read back from history, which must stay readable whatever they hold.
 	/// </remarks>
 	private static void RequireIdentValue(string value, string parameterName)
 	{
@@ -138,7 +141,29 @@ internal sealed class GitCommitBuilder(
 					parameterName);
 			}
 		}
+
+		if (value.Length > 0 && (IsIdentCrud(value[0]) || IsIdentCrud(value[^1])))
+		{
+			throw new ArgumentException(
+				$"The author value \"{value}\" starts or ends with whitespace or one of , : ; \" ' \\, " +
+				"which git would strip, recording a different author than the one asked for.",
+				parameterName);
+		}
 	}
+
+	/// <summary>
+	/// Reports whether git trims this character from either end of an author name or email.
+	/// </summary>
+	/// <remarks>
+	/// Mirrors <c>crud()</c> in git's <c>ident.c</c>, less the characters
+	/// <see cref="RequireIdentValue"/> already refuses anywhere. Git compares bytes at or below
+	/// 0x20, so of the characters that survive the control-character check only the ASCII space
+	/// counts; a non-ASCII space such as U+00A0 is kept. <c>.</c> is not crud, so "Jr." is
+	/// recorded as given.
+	/// </remarks>
+	/// <param name="c">The first or last character of the value.</param>
+	/// <returns><see langword="true"/> when git would strip it.</returns>
+	private static bool IsIdentCrud(char c) => c is ' ' or ',' or ':' or ';' or '"' or '\'' or '\\';
 
 	/// <inheritdoc />
 	protected override void AppendVerbArguments(ICollection<string> arguments)

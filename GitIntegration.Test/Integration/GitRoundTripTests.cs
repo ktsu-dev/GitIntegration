@@ -360,6 +360,33 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	[DataRow("Doe, \"Johnny\" John", "j;o:h'n@example.com")]
+	[DataRow("Ann Jr.", "e@example.com.")]
+	[DataRow("\u00A0Ann\u00A0", "e@example.com")]
+	public async Task CommitWithAuthorRecordsCrudCharactersInsideAValueAsGivenAsync(string nameValue, string emailValue)
+	{
+		// git trims , : ; " ' \ and whitespace only from the ends of a name or email, so WithAuthor
+		// accepts them inside a value. Every value it accepts must come back exactly as given.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		GitAuthorName name = nameValue.As<GitAuthorName>();
+		GitAuthorEmail email = emailValue.As<GitAuthorEmail>();
+
+		GitCommit commit = await repository
+			.Commit("c1".As<GitCommitMessage>())
+			.AllowEmpty()
+			.WithAuthor(name, email)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(name, commit.Author.Name);
+		Assert.AreEqual(email, commit.Author.Email);
+	}
+
+	[TestMethod]
 	public async Task LogAndCommitIgnoreTheHostsShowSignatureSettingAsync()
 	{
 		// log.showSignature is common among people who sign commits, and with it git prints each signed
