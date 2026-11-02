@@ -104,9 +104,12 @@ public interface IGitClient
 	/// Both <see cref="GitRepository.RemotePath"/> and <see cref="GitRepository.LocalPath"/> must be
 	/// set. A repository straight from a hosting provider carries the first and not the second — it
 	/// has never been cloned, so there is no local path to report and the providers no longer invent
-	/// one under the process's current directory. Supply a destination with
-	/// <c>repository with { LocalPath = … }</c>, or use
-	/// <see cref="Clone(GitRepositoryRemotePath, AbsoluteDirectoryPath)"/> directly.
+	/// one under the process's current directory. For such a repository, use
+	/// <see cref="Clone(GitRepository, AbsoluteDirectoryPath)"/> and pass the destination there.
+	/// </para>
+	/// <para>
+	/// The repository the clone returns carries the source's <see cref="GitRepository.Name"/>,
+	/// <see cref="GitRepository.HostRepositoryId"/> and <see cref="GitRepository.WebURI"/>.
 	/// </para>
 	/// </remarks>
 	/// <param name="repository">The repository to clone, carrying a non-null
@@ -118,4 +121,26 @@ public interface IGitClient
 	/// <see cref="GitRepository.LocalPath"/>.
 	/// </exception>
 	public IGitCloneBuilder Clone(GitRepository repository);
+
+	/// <summary>
+	/// Clones the repository a hosting provider described into the given destination.
+	/// </summary>
+	/// <remarks>
+	/// The form to use for a repository from <c>GetRepositoriesAsync</c>, which carries a
+	/// <see cref="GitRepository.RemotePath"/> but no <see cref="GitRepository.LocalPath"/>.
+	/// <paramref name="destination"/> is used whether or not <paramref name="repository"/> has a
+	/// <see cref="GitRepository.LocalPath"/>. The repository the clone returns carries the source's
+	/// <see cref="GitRepository.Name"/>, <see cref="GitRepository.HostRepositoryId"/> and
+	/// <see cref="GitRepository.WebURI"/>, so it can still be opened in a browser and passed back to
+	/// the provider that enumerated it.
+	/// </remarks>
+	/// <param name="repository">The repository to clone, carrying a non-null
+	/// <see cref="GitRepository.RemotePath"/>.</param>
+	/// <param name="destination">Where the working copy should go.</param>
+	/// <returns>A fresh builder.</returns>
+	/// <exception cref="ArgumentNullException">
+	/// <paramref name="repository"/> or <paramref name="destination"/> is <see langword="null"/>.
+	/// </exception>
+	/// <exception cref="ArgumentException"><paramref name="repository"/> has no <see cref="GitRepository.RemotePath"/>.</exception>
+	public IGitCloneBuilder Clone(GitRepository repository, AbsoluteDirectoryPath destination);
 }

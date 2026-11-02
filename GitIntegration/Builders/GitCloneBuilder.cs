@@ -69,16 +69,23 @@ public interface IGitCloneBuilder : IGitCommandBuilder<GitRepository>
 /// <param name="fileSystem">Checks the destination before the clone starts.</param>
 /// <param name="source">The repository to clone.</param>
 /// <param name="destination">Where the working copy should go.</param>
+/// <param name="hostedRepository">
+/// The hosting-provider record the clone was requested from, whose <see cref="GitRepository.Name"/>,
+/// <see cref="GitRepository.HostRepositoryId"/> and <see cref="GitRepository.WebURI"/> the returned
+/// repository carries; <see langword="null"/> when the clone was requested from a bare remote path.
+/// </param>
 internal sealed class GitCloneBuilder(
 	IGitProcessRunner runner,
 	IFileSystemProvider fileSystem,
 	GitRepositoryRemotePath source,
-	AbsoluteDirectoryPath destination)
+	AbsoluteDirectoryPath destination,
+	GitRepository? hostedRepository = null)
 	: GitCommandBuilder<GitRepository>(runner, repositoryPath: null), IGitCloneBuilder
 {
 	private readonly IFileSystemProvider _fileSystem = Ensure.NotNull(fileSystem);
 	private readonly GitRepositoryRemotePath _source = Ensure.NotNull(source);
 	private readonly AbsoluteDirectoryPath _destination = Ensure.NotNull(destination);
+	private readonly GitRepository? _hostedRepository = hostedRepository;
 	private GitBranchName? _branch;
 	private int? _depth;
 	private bool _bare;
@@ -167,12 +174,17 @@ internal sealed class GitCloneBuilder(
 	{
 		Ensure.NotNull(result);
 
-		// Nothing to parse: git clone writes only progress prose, all of it to standard error.
+		// Nothing to parse: git clone writes only progress prose, all of it to standard error. The
+		// hosting metadata is carried over so a repository cloned from a provider's record can still
+		// be opened in a browser and handed back to that provider's pull-request APIs.
 		return new GitRepository
 		{
 			LocalPath = _destination,
 			RemotePath = _source,
 			ProcessRunner = Runner,
+			Name = _hostedRepository?.Name,
+			HostRepositoryId = _hostedRepository?.HostRepositoryId,
+			WebURI = _hostedRepository?.WebURI,
 		};
 	}
 

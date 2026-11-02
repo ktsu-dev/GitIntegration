@@ -814,6 +814,7 @@ The entry point to the local layer: finds and opens repositories, and reports on
 | `Init(AbsoluteDirectoryPath)` | `IGitInitBuilder` | Creates a repository at a path. Probes first, so the result's `AlreadyExisted` can tell a caller whether one was already there. |
 | `Clone(GitRepositoryRemotePath, AbsoluteDirectoryPath)` | `IGitCloneBuilder` | Clones a repository into a local working copy. |
 | `Clone(GitRepository)` | `IGitCloneBuilder` | Clones the repository a hosting provider described, using its `RemotePath` and intended `LocalPath`. |
+| `Clone(GitRepository, AbsoluteDirectoryPath)` | `IGitCloneBuilder` | Clones the repository a hosting provider described into the given destination. The result keeps its `Name`, `HostRepositoryId` and `WebURI`. |
 
 ### `GitRepository`
 
