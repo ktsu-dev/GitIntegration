@@ -57,7 +57,7 @@ public class GitCloneFromProviderTests
 
 		using TemporaryRepository destinationRoot = new();
 		AbsoluteDirectoryPath destination =
-			Path.Combine(destinationRoot.RootPath, "copy").As<AbsoluteDirectoryPath>();
+			Path.Join(destinationRoot.RootPath, "copy").As<AbsoluteDirectoryPath>();
 
 		GitRepository clone = await IntegrationGitFixture.CreateClient()
 			.Clone(enumerated, destination)
