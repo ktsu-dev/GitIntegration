@@ -355,6 +355,67 @@ public sealed class GitHubProviderTests
 	}
 
 	[TestMethod]
+	public async Task ReportsASecondaryRateLimitOnTheIdentityProbeInsteadOfFallingBackAsync()
+	{
+		// SecondaryRateLimitExceededException derives from ForbiddenException, the same type a
+		// GitHub App token's GET /user raises. Treating it as "no user identity" would take the
+		// public-only route, which a secondary limit often leaves reachable, and report success with
+		// every private repository of the credential's own account missing.
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/users/octocat", HttpStatusCode.OK, AccountPayload("octocat", "User"), ("Content-Type", "application/json"))
+			.RespondToPath("/user", HttpStatusCode.Forbidden, "{\"message\":\"You have exceeded a secondary rate limit\"}", ("Content-Type", "application/json"))
+			.RespondToPath("/users/octocat/repos", HttpStatusCode.OK, SingleRepositoryArray("public-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromToken("ghp_abc123"),
+		};
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		StringAssert.Contains(exception.ResponseBody, "secondary rate limit");
+		// GET /users/octocat and GET /user only: the public-only repos route is never requested.
+		Assert.HasCount(2, handler.Requests);
+		Assert.AreEqual("/user", handler.Requests[1].Uri.AbsolutePath);
+	}
+
+	[TestMethod]
+	public async Task ReportsAPrimaryRateLimitOnTheIdentityProbeInsteadOfFallingBackAsync()
+	{
+		// RateLimitExceededException is the other ForbiddenException subtype GET /user can raise.
+		// Reporting it from the probe carries the reset instant of the call that actually hit it.
+		DateTimeOffset resetsAt = DateTimeOffset.FromUnixTimeSeconds(1798800000);
+		using FakeHttpMessageHandler handler = new FakeHttpMessageHandler()
+			.RespondToPath("/users/octocat", HttpStatusCode.OK, AccountPayload("octocat", "User"), ("Content-Type", "application/json"))
+			.RespondToPath(
+				"/user",
+				HttpStatusCode.Forbidden,
+				"{\"message\":\"API rate limit exceeded\"}",
+				("Content-Type", "application/json"),
+				("X-RateLimit-Limit", "5000"),
+				("X-RateLimit-Remaining", "0"),
+				("X-RateLimit-Reset", "1798800000"))
+			.RespondToPath("/users/octocat/repos", HttpStatusCode.OK, SingleRepositoryArray("public-repo"), ("Content-Type", "application/json"));
+		GitHubProvider provider = new()
+		{
+			Owner = "octocat".As<GitProviderOwner>(),
+			Handler = handler,
+			CredentialSource = () => HostingCredential.FromToken("ghp_abc123"),
+		};
+
+		GitHostingRateLimitException exception = await Assert.ThrowsExactlyAsync<GitHostingRateLimitException>(
+			async () => await provider.GetRepositoriesAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(resetsAt, exception.ResetsAt);
+		Assert.HasCount(2, handler.Requests);
+		Assert.AreEqual("/user", handler.Requests[1].Uri.AbsolutePath);
+	}
+
+	[TestMethod]
 	public async Task ReportsNoLocalPathForAnEnumeratedRepositoryAsync()
 	{
 		// An enumerated repository has never been cloned, so there is no local path to report. This
