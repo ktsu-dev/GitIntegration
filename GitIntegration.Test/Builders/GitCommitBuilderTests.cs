@@ -114,6 +114,19 @@ public class GitCommitBuilderTests
 	[DataRow("Ann\0B", "e@x", "name")]
 	[DataRow("Ann", "e@x\n", "email")]
 	[DataRow("Ann", "e\t@x", "email")]
+	[DataRow("\"Doe, John\"", "john@x.com", "name")]
+	[DataRow("Chris O'Neil'", "c@x.com", "name")]
+	[DataRow("Smith;", "s@x.com", "name")]
+	[DataRow(":Ann", "e@x", "name")]
+	[DataRow("Ann,", "e@x", "name")]
+	[DataRow("Ann\\", "e@x", "name")]
+	[DataRow(" Ann", "e@x", "name")]
+	[DataRow("Ann ", "e@x", "name")]
+	[DataRow("Ann", "'c@x.com'", "email")]
+	[DataRow("Ann", "\"e@x\"", "email")]
+	[DataRow("Ann", "e@x;", "email")]
+	[DataRow("Ann", "\\e@x", "email")]
+	[DataRow("Ann", " e@x", "email")]
 	public void RejectsAuthorValuesGitWouldRewrite(string name, string email, string badParameter)
 	{
 		RecordingGitProcessRunner runner = new();
@@ -130,6 +143,9 @@ public class GitCommitBuilderTests
 	[TestMethod]
 	[DataRow("O'Brien, Jr.", "obrien@example.com")]
 	[DataRow("Zoë Ñúñez 李", "zoe+tag@例え.jp")]
+	[DataRow("Doe, \"Johnny\" John", "j;o:h'n@example.com")]
+	[DataRow("Ann Jr.", "e@example.com.")]
+	[DataRow("\u00A0Ann\u00A0", "e@example.com")]
 	public void AcceptsOrdinaryAuthorValues(string name, string email)
 	{
 		RecordingGitProcessRunner runner = new();
