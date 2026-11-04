@@ -2,6 +2,14 @@
 
 Changes since v4.1.0:
 
+- Refuse author values git would trim at either end [patch] (#303) (matt-edmondson)
+- Clone a provider's repository to a chosen destination and keep its hosting metadata [minor] (#302) (matt-edmondson)
+- Report a rate limit on the GET /user identity probe instead of hiding it [patch] (#301) (matt-edmondson)
+- Use the US spellings in the README and CLAUDE.md, and test the builder table [patch] (#299) (matt-edmondson)
+- Refuse Status().IncludeIgnored() with WithUntrackedFiles(No) before git does [patch] (#296) (matt-edmondson)
+- Pin --inter-hunk-context=0 in Patch so host config cannot fuse hunks [patch] (#293) (matt-edmondson)
+- Pin --no-recurse-submodules in Checkout unless recursion is requested [patch] (#292) (matt-edmondson)
+- Suppress the Polyfill type-forward diffs that fail package validation [patch] (#291) (matt-edmondson)
 - Read a commit zone whose minutes are 60 or more instead of throwing [patch] (Claude)
 - Factor the pathspec tail out of the four revision-and-path builders [patch] (matt-edmondson)
 - Report a text conflict once in Diff() instead of as Unmerged and Modified [patch] (Claude)
