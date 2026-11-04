@@ -34,5 +34,9 @@
     <!-- Captured git diff output. Copied so Parsing/GitPatchParserTests.cs can load it by relative
          path from the test output directory. -->
     <None Include="Fixtures\**\*.txt" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- The README itself. Copied so Docs/ReadmeBuilderTableTests.cs can hold its builder options
+         table to the public API. -->
+    <None Include="..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

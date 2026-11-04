@@ -335,7 +335,7 @@ Non-obvious, load-bearing design points:
     with three contradictory `Sha` values, each carrying forty zeroes as its `CheckedOutSha`.
     `ParseGitlinks` collapses to one entry per path — stage `0` when present, otherwise `2` ("ours")
     then `3` then `1`, since a submodule deleted on one side produces `1` and `3` with no `2` — and
-    `Apply` treats an all-zero object id the way it already treats `Uninitialised`. Two details worth
+    `Apply` treats an all-zero object id the way it already treats `Uninitialized`. Two details worth
     keeping: the mode filter runs *before* the stage is validated, so an unmerged blob (most of any
     real conflict) is skipped rather than held to a gitlink's expectations; and the stages are a
     closed set where a fifth throws, unlike `submodule status`'s marker characters, because
@@ -384,6 +384,9 @@ Non-obvious, load-bearing design points:
     `diff.ignoreSubmodules=all` would otherwise hide a submodule's new commits and untracked files,
     and `Status()` would report clean over unpushed submodule work (#190). `Commit().StageTrackedFiles()`
     has no such flag, so it passes `-c diff.ignoreSubmodules=none` ahead of `commit --all` instead (#290).
+    `Checkout()` pins `--no-recurse-submodules` unless `RecursingSubmodules()` was called: checkout
+    honours a host's `submodule.recurse=true`, which would otherwise make `Force()` discard uncommitted
+    work inside a submodule the caller never asked to touch (#285).
 
 15. **`Log()` passes `--no-show-signature`.** With `log.showSignature=true`, which is common among
     people who sign commits, git prints each signed commit's verification to standard output ahead
@@ -410,7 +413,7 @@ entry".** A resolved `CredentialWithNothing` is an entry that means "proceed una
 subtype `ResolveCredential` does not recognise is one no request can ever carry. Both report `false`.
 The unrecognised case is *reported* rather than thrown, because a property getter that throws makes a
 plain `if (provider.IsAuthenticated)` a hazard, and CA1065 rightly objects. Both it and
-`ResolveCredential` go through one private `ResolveRecognisedCredential`, whose only difference is
+`ResolveCredential` go through one private `ResolveRecognizedCredential`, whose only difference is
 that it returns `null` for an unrecognised subtype where `ResolveCredential` throws — so the two
 answers cannot drift apart as `Credential` subtypes are added.
 
