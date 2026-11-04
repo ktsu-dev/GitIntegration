@@ -358,7 +358,7 @@ foreach (GitSubmodule submodule in submodules)
 
 // Check out the recorded commits, initialising any submodule added upstream since this clone.
 await repository.UpdateSubmodules()
-    .Initialise()
+    .Initialize()
     .Recursive()
     .ExecuteAsync();
 ```
@@ -907,7 +907,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `IGitFetchBuilder` | `FromRemote(GitRemoteName)`, `AllRemotes()`, `Prune()`, `WithTags()`, `WithDepth(int)`, `RecursingSubmodules(GitSubmoduleRecursion)`, `ReportingProgress(IProgress<string>)` | `GitFetchResult` |
 | `IGitPullBuilder` | `FromRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `FastForwardOnly()`, `Rebase()`, `Merge()`, `Prune()`, `RecursingSubmodules(GitSubmoduleRecursion)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
 | `IGitPushBuilder` | `ToRemote(GitRemoteName)`, `WithBranch(GitBranchName)`, `SettingUpstream()`, `Force()`, `ForceWithLease()`, `DeletingRemoteBranch()`, `DryRun()`, `CheckingSubmodules(GitSubmodulePushCheck)`, `ReportingProgress(IProgress<string>)` | `GitPushResult` |
-| `IGitSubmoduleUpdateBuilder` | `Initialise()`, `Recursive()`, `FromRemote()`, `Force()`, `WithDepth(int)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
+| `IGitSubmoduleUpdateBuilder` | `Initialize()`, `Recursive()`, `FromRemote()`, `Force()`, `WithDepth(int)`, `ReportingProgress(IProgress<string>)` | `GitCompleted` |
 | `IGitWorktreeAddBuilder` | `CheckingOut(GitBranchName)`, `CreatingBranch(GitBranchName)`, `CreatingOrResettingBranch(GitBranchName)`, `Detached()`, `From(GitRefName)`, `Force()`, `WithoutCheckout()` | `GitCompleted` |
 | `IGitWorktreeRemoveBuilder` | `Force()` | `GitCompleted` |
 | `IGitWorktreePruneBuilder` | *(none)* | `GitCompleted` |
