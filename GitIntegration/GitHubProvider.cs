@@ -180,7 +180,11 @@ public sealed class GitHubProvider : GitProvider
 		{
 			authenticatedLogin = (await client.User.Current().ConfigureAwait(false)).Login;
 		}
-		catch (ForbiddenException)
+		// Only a plain 403 means "this credential has no user identity" (a GitHub App installation
+		// token). RateLimitExceededException, SecondaryRateLimitExceededException and AbuseException
+		// all derive from ForbiddenException too, and swallowing one would silently take the
+		// public-only route and drop the account's private repositories; let them reach Translate.
+		catch (ForbiddenException exception) when (exception is not RateLimitExceededException and not SecondaryRateLimitExceededException and not AbuseException)
 		{
 			authenticatedLogin = null;
 		}
