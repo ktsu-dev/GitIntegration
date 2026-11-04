@@ -25,10 +25,29 @@ public class GitCheckoutBuilderTests
 			"-c", "core.quotepath=false",
 			"-c", "color.ui=false",
 			"checkout",
+			"--no-recurse-submodules",
 			"main",
 			"--",
 		];
 		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
+	}
+
+	[TestMethod]
+	public void PinsSubmoduleRecursionOneWayOrTheOther()
+	{
+		// Without either flag git reads the host's submodule.recurse, which would let a host setting
+		// recurse into submodules the caller asked to leave alone.
+		RecordingGitProcessRunner runner = new();
+
+		string[] plain = [.. new GitCheckoutBuilder(runner, TestPaths.Root, Main).BuildArguments()];
+		CollectionAssert.Contains(plain, "--no-recurse-submodules");
+		CollectionAssert.DoesNotContain(plain, "--recurse-submodules");
+
+		GitCheckoutBuilder recursing = new(runner, TestPaths.Root, Main);
+		_ = recursing.RecursingSubmodules();
+		string[] recursed = [.. recursing.BuildArguments()];
+		CollectionAssert.Contains(recursed, "--recurse-submodules");
+		CollectionAssert.DoesNotContain(recursed, "--no-recurse-submodules");
 	}
 
 	[TestMethod]

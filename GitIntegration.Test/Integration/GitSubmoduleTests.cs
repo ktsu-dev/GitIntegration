@@ -466,6 +466,87 @@ public class GitSubmoduleTests
 		Assert.Contains(file => file.Path == submodulePath, patch.Files, "Patch() dropped the submodule.");
 	}
 
+	/// <summary>
+	/// Sets up the scenario of ktsu-dev/GitIntegration#285: branch <c>other</c> records the
+	/// submodule's first commit, <c>main</c> records its second, the submodule sits on the second with
+	/// an uncommitted edit, and the superproject's config sets <c>submodule.recurse=true</c>.
+	/// </summary>
+	private static async Task<(GitRepository Super, GitRepository Checkout, GitCommitSha Moved)> CreateRecursingHostAsync(
+		TemporaryRepository subDirectory,
+		TemporaryRepository superDirectory,
+		CancellationToken cancellationToken)
+	{
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+		_ = await super.CreateBranch("other".As<GitBranchName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository checkout = new()
+		{
+			LocalPath = Path.Join(superDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>(),
+			ProcessRunner = super.ProcessRunner,
+		};
+		await IntegrationGitFixture.ConfigureIdentityAsync(checkout, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+
+		GitCommitSha moved = await CommitInSubmoduleAsync(checkout, superDirectory, Main, "two\n", cancellationToken)
+			.ConfigureAwait(false);
+		_ = await super.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await super.Commit("record c2".As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		superDirectory.WriteFile("libs/sub/s.txt", "dirty\n");
+
+		// Written into the superproject's own config, the nearest scope, so the host is left alone.
+		_ = await new GitTextBuilder(super.ProcessRunner!, super.LocalPath, "config", "submodule.recurse", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return (super, checkout, moved);
+	}
+
+	[TestMethod]
+	public async Task ForcedCheckoutLeavesADirtySubmoduleAloneWhenTheHostRecursesAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		(GitRepository super, GitRepository checkout, GitCommitSha moved) =
+			await CreateRecursingHostAsync(subDirectory, superDirectory, cancellationToken).ConfigureAwait(false);
+
+		_ = await super.Checkout("other".As<GitRefName>()).Force().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Recursing would have moved the submodule back to its first commit and reset the edit.
+		GitCommitSha head = await checkout.RevParse("HEAD".As<GitRefName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(moved, head, "Force() moved the submodule although recursion was not requested.");
+		string contents = await File.ReadAllTextAsync(
+			Path.Join(superDirectory.RootPath, "libs", "sub", "s.txt"), cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual("dirty\n", contents, "Force() discarded the submodule's uncommitted edit.");
+	}
+
+	[TestMethod]
+	public async Task CheckoutSucceedsPastADirtySubmoduleWhenTheHostRecursesAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		(GitRepository super, GitRepository checkout, GitCommitSha moved) =
+			await CreateRecursingHostAsync(subDirectory, superDirectory, cancellationToken).ConfigureAwait(false);
+
+		// Recursing, git refuses: "Entry 'libs/sub/s.txt' not uptodate. Cannot merge."
+		GitResult<GitCompleted> result = await super.Checkout("other".As<GitRefName>())
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(result.Success, $"checkout failed: {result.Error?.StandardError}");
+
+		GitCommitSha head = await checkout.RevParse("HEAD".As<GitRefName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(moved, head);
+	}
+
 	[TestMethod]
 	public async Task ReportsNoSubmodulesForARepositoryWithNoneAsync()
 	{
