@@ -68,6 +68,27 @@ public class GitClientMutatingTests
 		GitRepository noRemote = new() { LocalPath = Target };
 
 		Assert.ThrowsExactly<ArgumentException>(() => _ = ClientOn(runner).Clone(noRemote));
+		Assert.ThrowsExactly<ArgumentException>(() => _ = ClientOn(runner).Clone(noRemote, Target));
+	}
+
+	[TestMethod]
+	public void CloneFromARepositoryToADestinationUsesThatDestination()
+	{
+		// A repository a hosting provider enumerated has no LocalPath, so the destination comes from
+		// the call. One that does have a LocalPath still clones where the call says.
+		RecordingGitProcessRunner runner = new();
+		GitRepository enumerated = new() { RemotePath = Url };
+		GitRepository withLocalPath = new() { RemotePath = Url, LocalPath = Target };
+		AbsoluteDirectoryPath elsewhere =
+			(OperatingSystem.IsWindows() ? @"C:\dev\elsewhere" : "/dev/elsewhere").As<AbsoluteDirectoryPath>();
+
+		string[] arguments = [.. ClientOn(runner).Clone(enumerated, Target).BuildArguments()];
+		string[] redirected = [.. ClientOn(runner).Clone(withLocalPath, elsewhere).BuildArguments()];
+
+		CollectionAssert.Contains(arguments, Url.WeakString);
+		CollectionAssert.Contains(arguments, Target.WeakString);
+		CollectionAssert.Contains(redirected, elsewhere.WeakString);
+		CollectionAssert.DoesNotContain(redirected, Target.WeakString);
 	}
 
 	[TestMethod]
@@ -77,9 +98,11 @@ public class GitClientMutatingTests
 		GitClient client = ClientOn(runner);
 
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Init(null!));
-		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Clone(null!, Target));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Clone((GitRepositoryRemotePath)null!, Target));
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Clone(Url, null!));
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Clone(null!));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Clone((GitRepository)null!, Target));
+		Assert.ThrowsExactly<ArgumentNullException>(() => _ = client.Clone(new GitRepository { RemotePath = Url }, null!));
 		Assert.ThrowsExactly<ArgumentNullException>(() => _ = new GitClient(runner, null!));
 	}
 

@@ -154,12 +154,7 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 	{
 		Ensure.NotNull(repository);
 
-		// Reported at the call rather than left to fail inside git, where an empty source argument
-		// produces a message about the destination instead.
-		GitRepositoryRemotePath source = repository.RemotePath
-			?? throw new ArgumentException(
-				"The repository has no RemotePath, so there is nothing to clone from.",
-				nameof(repository));
+		GitRepositoryRemotePath source = RequireRemotePath(repository);
 
 		// LocalPath is nullable, and a repository a hosting provider enumerated has none: it has
 		// never been cloned, and the providers no longer invent a path under the process's current
@@ -173,6 +168,27 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 				"explicit destination.",
 				nameof(repository));
 
-		return Clone(source, destination);
+		return new GitCloneBuilder(_runner, _fileSystem, source, destination, repository);
 	}
+
+	/// <inheritdoc />
+	public IGitCloneBuilder Clone(GitRepository repository, AbsoluteDirectoryPath destination)
+	{
+		Ensure.NotNull(repository);
+		Ensure.NotNull(destination);
+
+		return new GitCloneBuilder(_runner, _fileSystem, RequireRemotePath(repository), destination, repository);
+	}
+
+	/// <summary>Reads the remote path a repository-sourced clone needs.</summary>
+	/// <param name="repository">The repository to clone.</param>
+	/// <returns>The repository's <see cref="GitRepository.RemotePath"/>.</returns>
+	/// <exception cref="ArgumentException"><paramref name="repository"/> has no remote path.</exception>
+	private static GitRepositoryRemotePath RequireRemotePath(GitRepository repository) =>
+		// Reported at the call rather than left to fail inside git, where an empty source argument
+		// produces a message about the destination instead.
+		repository.RemotePath
+			?? throw new ArgumentException(
+				"The repository has no RemotePath, so there is nothing to clone from.",
+				nameof(repository));
 }
