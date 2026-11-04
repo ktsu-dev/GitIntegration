@@ -92,6 +92,50 @@ public class GitStatusBuilderTests
 	}
 
 	[TestMethod]
+	public void RejectsIncludeIgnoredWithUntrackedFilesSwitchedOff()
+	{
+		// git exits 128 with "Unsupported combination of ignored and untracked-files arguments", an
+		// error that names neither builder call. Refusing it before a process starts names both, and
+		// the guard must fire whichever order the caller chained them in.
+		RecordingGitProcessRunner runner = new();
+
+		GitStatusBuilder ignoredFirst = new(runner, TestPaths.Root);
+		_ = ignoredFirst.IncludeIgnored().WithUntrackedFiles(GitUntrackedFilesMode.No);
+		InvalidOperationException exception = Assert.ThrowsExactly<InvalidOperationException>(() => _ = ignoredFirst.BuildArguments());
+		Assert.Contains("IncludeIgnored", exception.Message);
+		Assert.Contains("WithUntrackedFiles", exception.Message);
+
+		GitStatusBuilder untrackedFirst = new(runner, TestPaths.Root);
+		_ = untrackedFirst.WithUntrackedFiles(GitUntrackedFilesMode.No).IncludeIgnored();
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = untrackedFirst.BuildArguments());
+	}
+
+	[TestMethod]
+	public async Task RejectsIncludeIgnoredWithUntrackedFilesSwitchedOffWithoutStartingGitAsync()
+	{
+		RecordingGitProcessRunner runner = new();
+		GitStatusBuilder builder = new(runner, TestPaths.Root);
+		_ = builder.WithUntrackedFiles(GitUntrackedFilesMode.No).IncludeIgnored();
+
+		_ = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => builder.ExecuteAsync(TestContext.CancellationTokenSource.Token)).ConfigureAwait(false);
+		Assert.IsNull(runner.LastRequest, "The contradictory pair reached git instead of being refused up front.");
+	}
+
+	[TestMethod]
+	public void AllowsIncludeIgnoredWithEveryOtherUntrackedFilesMode()
+	{
+		RecordingGitProcessRunner runner = new();
+
+		GitStatusBuilder normal = new(runner, TestPaths.Root);
+		_ = normal.WithUntrackedFiles(GitUntrackedFilesMode.Normal).IncludeIgnored();
+		CollectionAssert.Contains(normal.BuildArguments().ToArray(), "--ignored=matching");
+
+		GitStatusBuilder all = new(runner, TestPaths.Root);
+		_ = all.WithUntrackedFiles(GitUntrackedFilesMode.All).IncludeIgnored();
+		CollectionAssert.Contains(all.BuildArguments().ToArray(), "--ignored=matching");
+	}
+
+	[TestMethod]
 	public void ConfigurationMethodsReturnTheSameBuilderForChaining()
 	{
 		RecordingGitProcessRunner runner = new();

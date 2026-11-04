@@ -20,6 +20,13 @@ public interface IGitStatusBuilder : IGitCommandBuilder<GitStatus>
 	/// Without this call the command reports untracked files the way
 	/// <see cref="GitUntrackedFilesMode.Normal"/> describes, whatever the host's
 	/// <c>status.showUntrackedFiles</c> is set to.
+	/// <para>
+	/// <see cref="GitUntrackedFilesMode.No"/> cannot be combined with <see cref="IncludeIgnored"/>:
+	/// git refuses the pair with "Unsupported combination of ignored and untracked-files arguments".
+	/// A caller may set both in either order, so only the finished configuration can detect the
+	/// contradiction; <c>BuildArguments</c> throws <see cref="InvalidOperationException"/> when both
+	/// are set, before a process is even spawned.
+	/// </para>
 	/// </remarks>
 	/// <param name="mode">The reporting mode.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -29,6 +36,18 @@ public interface IGitStatusBuilder : IGitCommandBuilder<GitStatus>
 	/// <summary>
 	/// Includes ignored files in the reported entries.
 	/// </summary>
+	/// <remarks>
+	/// Emits <c>--ignored=matching</c>, which reports a wholly ignored directory once, as a single
+	/// entry for the directory itself, rather than one entry per file inside it. That holds under
+	/// <see cref="GitUntrackedFilesMode.All"/> too: <c>.gitignore</c> naming <c>build/</c> yields a
+	/// single <c>build</c> entry however many files <c>build/</c> holds. A file ignored by a pattern that
+	/// names files rather than its directory is still reported on its own.
+	/// <para>
+	/// Cannot be combined with <see cref="WithUntrackedFiles"/> set to
+	/// <see cref="GitUntrackedFilesMode.No"/>: git refuses the pair, so <c>BuildArguments</c> throws
+	/// <see cref="InvalidOperationException"/> when both are set.
+	/// </para>
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitStatusBuilder IncludeIgnored();
 }
@@ -81,6 +100,18 @@ internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirecto
 	{
 		Ensure.NotNull(arguments);
 
+		// git refuses this pair with "fatal: Unsupported combination of ignored and untracked-files
+		// arguments", which reaches the caller as a GitCommandException that names neither builder
+		// call. --ignored=traditional is no way out: under -uno git exits 0 and lists no ignored
+		// entries, a silent wrong answer. So refuse it here, naming both calls, as the Add, Pull,
+		// Checkout and Diff builders refuse their contradictory pairs (ktsu-dev/GitIntegration#295).
+		if (_includeIgnored && _untrackedFiles == GitUntrackedFilesMode.No)
+		{
+			throw new InvalidOperationException(
+				"IncludeIgnored and WithUntrackedFiles(GitUntrackedFilesMode.No) cannot both be requested: " +
+				"git refuses to list ignored files while untracked files are switched off.");
+		}
+
 		arguments.Add("status");
 
 		// Porcelain v2 is the documented, version-stable machine format; --branch adds the header
@@ -106,9 +137,10 @@ internal sealed class GitStatusBuilder(IGitProcessRunner runner, AbsoluteDirecto
 
 		if (_includeIgnored)
 		{
-			// "matching" rather than "traditional": it lists the ignored paths themselves instead of
-			// collapsing an ignored directory to a single entry, which is what a caller asking for
-			// ignored files almost always wants.
+			// "matching" reports the paths an ignore pattern actually names, so an ignored directory is
+			// one entry for the directory even under --untracked-files=all ("traditional" would list
+			// every file inside it there). That keeps the result proportional to the ignore rules
+			// rather than to the size of a build or package folder, and IncludeIgnored's docs say so.
 			arguments.Add("--ignored=matching");
 		}
 	}
