@@ -2,6 +2,7 @@
 
 Changes since v4.1.0:
 
+- Override the host's diff.ignoreSubmodules in Commit().StageTrackedFiles() [patch] (#294) (matt-edmondson)
 - Refuse author values git would trim at either end [patch] (#303) (matt-edmondson)
 - Clone a provider's repository to a chosen destination and keep its hosting metadata [minor] (#302) (matt-edmondson)
 - Report a rate limit on the GET /user identity probe instead of hiding it [patch] (#301) (matt-edmondson)
