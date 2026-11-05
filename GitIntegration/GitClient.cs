@@ -86,7 +86,12 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 
 	private async Task<GitRepository?> DiscoverCoreAsync(AbsoluteDirectoryPath startingPath, CancellationToken cancellationToken)
 	{
+		// The root is a path, so only git's line terminator comes off it: a trailing space is part
+		// of a POSIX directory name (#277).
 		GitResult<string> topLevel = await new GitTextBuilder(_runner, startingPath, "rev-parse", "--show-toplevel")
+		{
+			PreservesWhitespace = true,
+		}
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		// git refuses a repository owned by another user unless safe.directory admits it. That
@@ -130,6 +135,9 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 		CancellationToken cancellationToken)
 	{
 		GitResult<string> originUrl = await new GitTextBuilder(_runner, localPath, "remote", "get-url", "origin")
+		{
+			PreservesWhitespace = true,
+		}
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		// A repository with no origin exits 2 here. That is an ordinary state, not a failure, so
