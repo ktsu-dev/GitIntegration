@@ -40,6 +40,23 @@ public class GitBareRepositoryTests
 		return temporary.Root;
 	}
 
+	/// <summary>
+	/// Asserts that git's path names the expected directory.
+	/// </summary>
+	/// <remarks>
+	/// git reports the resolved path (<c>/private/var/...</c> for macOS's <c>/var/...</c> temp
+	/// root), so the check is on the part below the temp root and on the directory existing, not on
+	/// the spelling of the temp root.
+	/// </remarks>
+	private static void AssertNamesDirectory(AbsoluteDirectoryPath expected, AbsoluteDirectoryPath? actual)
+	{
+		Assert.IsNotNull(actual);
+		StringAssert.EndsWith(
+			actual.WeakString.Replace('\\', '/').TrimEnd('/'),
+			Path.GetRelativePath(Path.GetTempPath(), expected.WeakString).Replace('\\', '/').TrimEnd('/'));
+		Assert.IsTrue(Directory.Exists(actual.WeakString));
+	}
+
 	[TestMethod]
 	public async Task ABareCloneIsClonedAndCanBeReopenedAsync()
 	{
@@ -60,7 +77,7 @@ public class GitBareRepositoryTests
 		Assert.IsTrue(await clone.IsClonedAsync(cancellationToken).ConfigureAwait(false));
 
 		GitRepository opened = await client.OpenAsync(destination, cancellationToken).ConfigureAwait(false);
-		Assert.AreEqual(destination, opened.LocalPath);
+		AssertNamesDirectory(destination, opened.LocalPath);
 
 		IReadOnlyList<GitBranch> branches =
 			await opened.Branches().LocalOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
@@ -84,7 +101,7 @@ public class GitBareRepositoryTests
 			.DiscoverAsync(Path.Join(temporary.RootPath, "refs").As<AbsoluteDirectoryPath>(), cancellationToken)
 			.ConfigureAwait(false);
 		Assert.IsNotNull(discovered);
-		Assert.AreEqual(temporary.Root, discovered.LocalPath);
+		AssertNamesDirectory(temporary.Root, discovered.LocalPath);
 
 		// A subdirectory of a bare repository is not itself a clone.
 		GitRepository below = new()
