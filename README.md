@@ -863,7 +863,7 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `AddWorktree(AbsoluteDirectoryPath)` | `IGitWorktreeAddBuilder` | Builds `git worktree add`. |
 | `RemoveWorktree(AbsoluteDirectoryPath)` | `IGitWorktreeRemoveBuilder` | Builds `git worktree remove <path>`. |
 | `PruneWorktrees()` | `IGitWorktreePruneBuilder` | Builds `git worktree prune`. |
-| `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree. |
+| `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree or a bare repository. |
 | `OpenWebClient()` | `void` | Opens `WebURI` in the default browser, when it is an absolute `http`/`https` URI. |
 
 ### `IGitCommandBuilder<TResult>`
@@ -931,7 +931,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitTimeoutException` | Git did not complete within the configured `GitOptions.Timeout`. |
 | `GitParseException` | Git succeeded but produced output the parser could not interpret. |
 | `GitCommandException` | Git ran and exited non-zero. Carries `ExitCode`, `Arguments`, and `StandardError`. |
-| `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree. |
+| `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree or a bare repository. |
 | `GitNothingToCommitException` | A `GitCommandException` specialization: `git commit` was run with nothing staged. The one `commit` failure that is an ordinary program state rather than a fault. |
 | `GitPushRejectedException` | A `GitCommandException` specialization: git refused at least one reference during `push`. Carries the parsed `Result` (`GitPushResult`) so the rejection detail is not lost. |
 | `GitPullConflictException` | A `GitCommandException` specialization: `pull` left conflicts in the working tree. Use `Status()` to see which paths are unmerged. |
