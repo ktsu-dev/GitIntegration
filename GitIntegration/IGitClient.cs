@@ -39,18 +39,20 @@ public interface IGitClient
 	/// The returned repository's <see cref="GitRepository.LocalPath"/> is the working tree root, not
 	/// necessarily <paramref name="path"/>, and its
 	/// <see cref="GitRepository.RemotePath"/> is back-filled from <c>origin</c> when one is
-	/// configured.
+	/// configured. In a bare repository, which has no working tree, it is the bare repository's own
+	/// directory. A non-bare repository's <c>.git</c> directory is not opened as a repository.
 	/// </remarks>
 	/// <param name="path">A path inside the repository.</param>
 	/// <param name="cancellationToken">Cancels the invocation.</param>
 	/// <returns>The opened repository.</returns>
-	/// <exception cref="GitRepositoryNotFoundException">The path is not inside a working tree.</exception>
+	/// <exception cref="GitRepositoryNotFoundException">The path is not inside a working tree or a bare repository.</exception>
 	/// <exception cref="GitCommandException">
 	/// git refused the repository as dubious ownership; <see cref="GitCommandException.StandardError"/>
 	/// carries git's <c>safe.directory</c> advice.
 	/// </exception>
 	/// <exception cref="GitParseException">
-	/// git reported a working-tree root that is not an absolute directory path.
+	/// git reported a working-tree root, or a bare repository directory, that is not an absolute
+	/// directory path.
 	/// </exception>
 	public Task<GitRepository> OpenAsync(AbsoluteDirectoryPath path, CancellationToken cancellationToken = default);
 
@@ -67,7 +69,8 @@ public interface IGitClient
 	/// as <see langword="null"/>.
 	/// </exception>
 	/// <exception cref="GitParseException">
-	/// git reported a working-tree root that is not an absolute directory path.
+	/// git reported a working-tree root, or a bare repository directory, that is not an absolute
+	/// directory path.
 	/// </exception>
 	public Task<GitRepository?> DiscoverAsync(AbsoluteDirectoryPath startingPath, CancellationToken cancellationToken = default);
 

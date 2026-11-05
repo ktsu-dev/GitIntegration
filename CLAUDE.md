@@ -195,7 +195,10 @@ at once without a project-wide suppression.
 **Local layer.** `GitClient` implements `IGitClient` by running everything through an
 `IGitProcessRunner`. Repository discovery is delegated to `git rev-parse --show-toplevel`, which
 performs the upward directory walk itself — this is why `GitClient` needs no filesystem abstraction
-of its own. Every verb builder (`GitStatusBuilder`, `GitLogBuilder`, `GitDiffBuilder`, etc.) derives
+of its own. A bare repository has no working tree for it to print, so when git answers "this
+operation must be run in a work tree" discovery falls back to `rev-parse --is-bare-repository
+--absolute-git-dir`, and `IsClonedAsync`'s probe likewise accepts a bare repository's root (#263). A
+non-bare repository's `.git` directory is neither. Every verb builder (`GitStatusBuilder`, `GitLogBuilder`, `GitDiffBuilder`, etc.) derives
 from `GitCommandBuilder<TResult>`, which owns argument assembly, execution, and failure translation.
 A builder is single-use and not thread-safe; the underlying `IGitProcessRunner` is a shared,
 thread-safe singleton.
