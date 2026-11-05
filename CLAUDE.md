@@ -223,7 +223,11 @@ Non-obvious, load-bearing design points:
    `rev-parse --is-bare-repository --git-dir --show-cdup` check) is the only way to know either
    fact. `--git-dir` alone is not enough: it prints an absolute path both for an ancestor
    repository and for a submodule, linked worktree or `--separate-git-dir` repository rooted at the
-   target, and only the empty `--show-cdup` tells the second apart.
+   target, and only the empty `--show-cdup` tells the second apart. The same probe refuses
+   `Init(path).Bare()` on a working-tree root (#278): `git init --bare` there writes a second
+   repository's `HEAD`, `config`, `objects/` and the rest into the working tree and exits 0, so the
+   builder fails with exit code -1 before git runs. A bare repository, or a non-bare `Init` on one,
+   is re-initialized as git does.
 
 5. **`Clone`'s destination check is advisory.** Git enforces the same rule itself; the pre-check
    exists only so a doomed clone fails before paying its network cost, and it is deliberately racy —
