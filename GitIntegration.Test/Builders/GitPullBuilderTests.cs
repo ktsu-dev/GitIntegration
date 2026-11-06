@@ -65,8 +65,10 @@ public class GitPullBuilderTests
 	}
 
 	[TestMethod]
-	public void MergeEmitsNoRebaseImmediatelyAfterThePullVerb()
+	public void MergeEmitsNoRebaseThenFfImmediatelyAfterThePullVerb()
 	{
+		// --ff overrides a host's merge.ff=only (or merge.ff=false), which --no-rebase alone leaves
+		// in force for the merge pull runs.
 		RecordingGitProcessRunner runner = new();
 		GitPullBuilder builder = new(runner, TestPaths.Root);
 
@@ -80,6 +82,7 @@ public class GitPullBuilderTests
 			"-c", "color.ui=false",
 			"pull",
 			"--no-rebase",
+			"--ff",
 		];
 		CollectionAssert.AreEqual(expectedArguments, builder.BuildArguments().ToArray());
 	}
@@ -108,6 +111,9 @@ public class GitPullBuilderTests
 		GitPullBuilder builder = new(runner, TestPaths.Root);
 
 		_ = builder.Merge().FastForwardOnly();
+
+		// No --ff here: git takes the last of --ff/--ff-only, so emitting it would quietly undo
+		// FastForwardOnly.
 
 		string[] expectedArguments =
 		[

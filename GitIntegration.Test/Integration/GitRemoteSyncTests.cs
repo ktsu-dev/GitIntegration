@@ -702,6 +702,46 @@ public class GitRemoteSyncTests
 	}
 
 	[TestMethod]
+	public async Task MergeReconcilesDivergedBranchesOnAHostWithMergeFfOnlyAsync()
+	{
+		// Merge() promises a merge commit when one is needed. --no-rebase alone leaves the merge
+		// honouring merge.ff, so with merge.ff=only git aborts with "Not possible to fast-forward".
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository firstDirectory = new();
+		using TemporaryRepository secondDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+
+		GitRepository first = await CreateWorkingCopyAsync(firstDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(first, firstDirectory, "base.txt", "base\n", "base", cancellationToken).ConfigureAwait(false);
+		_ = await first.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository second = await CreateWorkingCopyAsync(secondDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await second.Pull().FromRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit theirs = await CommitFileAsync(second, secondDirectory, "theirs.txt", "theirs\n", "theirs", cancellationToken).ConfigureAwait(false);
+		_ = await second.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitCommit mine = await CommitFileAsync(first, firstDirectory, "mine.txt", "mine\n", "mine", cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(first.ProcessRunner!, first.LocalPath!, "config", "merge.ff", "only")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await first.Pull().FromRemote(Origin).WithBranch(Main).Merge()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> history =
+			await first.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// The merge commit on top, with both diverged commits beneath it.
+		Assert.AreEqual(4, history.Count);
+		Assert.IsTrue(history.Any(commit => commit.Sha == mine.Sha));
+		Assert.IsTrue(history.Any(commit => commit.Sha == theirs.Sha));
+	}
+
+	[TestMethod]
 	public async Task StatusReportsAnUpstreamDeletedOnTheRemoteAsGoneAsync()
 	{
 		// Once the remote branch is deleted, git can no longer count ahead/behind and reports neither,
