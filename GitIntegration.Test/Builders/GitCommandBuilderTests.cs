@@ -206,6 +206,32 @@ public class GitCommandBuilderTests
 	}
 
 	[TestMethod]
+	public void ClassifiesTheEdgeCasesOfTheGitfileForm()
+	{
+		// No scoped directory, or nothing named after the colon: nothing to compare, so the
+		// phrase keeps its old meaning.
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound("fatal: not a git repository: x\n", null));
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound("fatal: not a git repository: \n", TestPaths.Root));
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound("fatal: not a git repository\n", TestPaths.Root));
+
+		// A gitfile with no gitdir line gives nothing to compare against either.
+		using TemporaryRepository broken = new();
+		broken.WriteFile(".git", "not a gitfile\n");
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository: sub/../.git/modules/sub\n", broken.Root));
+
+		// A relative gitdir, as a submodule checkout writes it, reported relative to the top of the
+		// working tree from a subdirectory.
+		using TemporaryRepository submodule = new();
+		submodule.WriteFile(".git", "gitdir: ../.git/modules/sub\n");
+		AbsoluteDirectoryPath deep = Path.Join(submodule.RootPath, "deep").As<AbsoluteDirectoryPath>();
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository: ../.git/modules/sub\n", deep));
+		Assert.IsFalse(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository: ../.git/modules/other\n", deep));
+	}
+
+	[TestMethod]
 	public async Task TryExecuteReturnsErrorInsteadOfThrowingAsync()
 	{
 		RecordingGitProcessRunner runner = new() { ExitCode = 1, StandardError = "boom" };
