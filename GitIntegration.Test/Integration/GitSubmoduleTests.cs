@@ -108,7 +108,9 @@ public class GitSubmoduleTests
 
 		GitCommandException status = await Assert.ThrowsExactlyAsync<GitCommandException>(
 			async () => await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
-		StringAssert.Contains(status.Message, ".git/modules/libs/sub");
+		// git 2.43 names the missing .git/modules/libs/sub; git 2.56 names the submodule's gitfile,
+		// libs/sub/.git. Either way the message points at the broken submodule.
+		StringAssert.Contains(status.Message, "libs/sub");
 
 		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
 			async () => await super.Diff().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
