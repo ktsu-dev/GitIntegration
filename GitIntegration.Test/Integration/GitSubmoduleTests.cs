@@ -90,6 +90,37 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
+	public async Task StatusAndDiffReportAMissingSubmoduleGitDirectoryAsACommandFailureAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		// A copy or bind mount that left out .git/modules.
+		Directory.Delete(Path.Join(superDirectory.RootPath, ".git", "modules", "libs", "sub"), recursive: true);
+
+		GitCommandException status = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+		StringAssert.Contains(status.Message, ".git/modules/libs/sub");
+
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await super.Diff().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+
+		// A directory outside any repository is still reported as one.
+		using TemporaryRepository outside = new();
+		GitRepository nothing = new() { LocalPath = outside.Root, ProcessRunner = super.ProcessRunner };
+		_ = await Assert.ThrowsExactlyAsync<GitRepositoryNotFoundException>(
+			async () => await nothing.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+	}
+
+	[TestMethod]
 	public async Task ReportsASynchronisedSubmoduleAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

@@ -3,9 +3,11 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 
 using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
 
 [TestClass]
 public class GitCommandBuilderTests
@@ -141,6 +143,66 @@ public class GitCommandBuilderTests
 
 		await Assert.ThrowsExactlyAsync<GitRepositoryNotFoundException>(
 			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public async Task ExecuteThrowsACommandFailureWhenASubmoduleGitDirectoryIsMissingAsync()
+	{
+		// Captured from git 2.43: status in a superproject whose submodule lost .git/modules/sub.
+		// The superproject is a good repository, so this must not read as "no repository here".
+		using TemporaryRepository temporary = new();
+		_ = Directory.CreateDirectory(Path.Join(temporary.RootPath, ".git"));
+
+		RecordingGitProcessRunner runner = new()
+		{
+			ExitCode = 128,
+			StandardError = "fatal: not a git repository: sub/../.git/modules/sub\n",
+		};
+		EchoBuilder builder = new(runner, temporary.Root);
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+
+		StringAssert.Contains(exception.Message, "sub/../.git/modules/sub");
+	}
+
+	[TestMethod]
+	public async Task ExecuteThrowsRepositoryNotFoundWhenTheRepositoryOwnGitDirectoryIsMissingAsync()
+	{
+		// A linked worktree whose administrative directory has gone: the gitfile names it, and git
+		// reports exactly that path.
+		using TemporaryRepository temporary = new();
+		string gitDirectory = Path.Join(temporary.RootPath, "main", ".git", "worktrees", "wt");
+		temporary.WriteFile(".git", $"gitdir: {gitDirectory}\n");
+
+		RecordingGitProcessRunner runner = new()
+		{
+			ExitCode = 128,
+			StandardError = $"fatal: not a git repository: {gitDirectory}\n",
+		};
+		EchoBuilder builder = new(runner, Path.Join(temporary.RootPath, "deep").As<AbsoluteDirectoryPath>());
+
+		await Assert.ThrowsExactlyAsync<GitRepositoryNotFoundException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false)).ConfigureAwait(false);
+	}
+
+	[TestMethod]
+	public void ClassifiesBothDiagnosticForms()
+	{
+		using TemporaryRepository temporary = new();
+		_ = Directory.CreateDirectory(Path.Join(temporary.RootPath, ".git"));
+
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository (or any of the parent directories): .git\n", temporary.Root));
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository (or any parent up to mount point /mnt)\n", temporary.Root));
+		Assert.IsTrue(GitCommandBuilder<string>.IsRepositoryNotFound(
+			$"fatal: not a git repository: {Path.Join(temporary.RootPath, ".git")}\n", temporary.Root));
+		Assert.IsFalse(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository: sub/../.git/modules/sub\n", temporary.Root));
+		Assert.IsFalse(GitCommandBuilder<string>.IsRepositoryNotFound(
+			"fatal: not a git repository: /elsewhere/.git/modules/sub\n", temporary.Root));
+		Assert.IsFalse(GitCommandBuilder<string>.IsRepositoryNotFound("fatal: boom\n", temporary.Root));
 	}
 
 	[TestMethod]
