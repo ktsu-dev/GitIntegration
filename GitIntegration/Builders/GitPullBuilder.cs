@@ -31,6 +31,8 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	/// branch before the remote, so only the finished configuration knows whether the pair is
 	/// complete. <c>BuildArguments</c> therefore throws <see cref="InvalidOperationException"/> for a
 	/// branch with no remote — a configuration error, not I/O, so its purity is intact.
+	/// The branch is passed to git as <c>refs/heads/&lt;name&gt;</c>, so a remote tag of the same
+	/// name is never merged in its place.
 	/// </remarks>
 	/// <param name="name">The branch to pull.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -269,7 +271,9 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			return;
 		}
 
-		AppendOperands(arguments, _remote.WeakString, _branch.WeakString);
+		// Qualified for the same reason as push: a bare name could resolve to a remote tag, which
+		// git would then merge or fast-forward to.
+		AppendOperands(arguments, _remote.WeakString, GitPushBuilder.QualifiedBranch(_branch));
 	}
 
 	/// <inheritdoc />
