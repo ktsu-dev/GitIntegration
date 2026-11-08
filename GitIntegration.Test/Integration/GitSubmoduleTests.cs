@@ -104,7 +104,7 @@ public class GitSubmoduleTests
 		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
 
 		// A copy or bind mount that left out .git/modules.
-		Directory.Delete(Path.Join(superDirectory.RootPath, ".git", "modules", "libs", "sub"), recursive: true);
+		superDirectory.DeleteDirectory(Path.Join(".git", "modules", "libs", "sub"));
 
 		GitCommandException status = await Assert.ThrowsExactlyAsync<GitCommandException>(
 			async () => await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
