@@ -73,6 +73,15 @@ public interface IGitSubmoduleUpdateBuilder : IGitCommandBuilder<GitCompleted>
 	public IGitSubmoduleUpdateBuilder Force();
 
 	/// <summary>Fetches only this many commits of history for a submodule being cloned.</summary>
+	/// <remarks>
+	/// Has no effect for a submodule whose URL is a plain local path, such as <c>/srv/repos/lib</c>
+	/// or <c>../lib</c>. git clones such a submodule locally, ignores the depth with only a warning
+	/// (<c>--depth is ignored in local clones; use file:// instead.</c>), still exits 0, and leaves a
+	/// full clone. Give the submodule a <c>file://</c> URL to get a shallow clone. <c>git submodule
+	/// update</c> has no <c>--no-local</c>, unlike <c>git clone</c>, so there is no flag this
+	/// builder could add instead. git only clones a local-path submodule when
+	/// <c>protocol.file.allow</c> is <c>always</c>, which fixtures pointing at local repositories set.
+	/// </remarks>
 	/// <param name="depth">The number of commits to fetch. Must be positive.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
 	/// <exception cref="ArgumentOutOfRangeException"><paramref name="depth"/> is not positive.</exception>

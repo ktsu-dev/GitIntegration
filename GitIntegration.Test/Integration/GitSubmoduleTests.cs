@@ -235,6 +235,92 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
+	public async Task WithDepthIsIgnoredForALocalPathSubmoduleButNotForAFileUrlAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+
+		// Three commits, so a shallow clone and a full one differ.
+		foreach (string message in new[] { "c2", "c3" })
+		{
+			subDirectory.WriteFile("s.txt", message + "\n");
+			_ = await sub.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+			_ = await sub.Commit(message.As<GitCommitMessage>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		// The documented limit: a local-path URL makes git clone locally, and the depth is dropped.
+		(GitProcessResult local, string localShallow, string localCount) =
+			await CloneAndUpdateWithDepthOneAsync(super, superDirectory, url: null, cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(local.Success, $"submodule update failed: {local.StandardError}");
+		StringAssert.Contains(local.StandardError, "--depth is ignored in local clones");
+		Assert.AreEqual("false", localShallow);
+		Assert.AreEqual("3", localCount);
+
+		// The remedy the remarks give: the same submodule through a file:// URL is shallow.
+		string fileUrl = new System.Uri(subDirectory.RootPath).AbsoluteUri;
+		(GitProcessResult file, string fileShallow, string fileCount) =
+			await CloneAndUpdateWithDepthOneAsync(super, superDirectory, fileUrl, cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(file.Success, $"submodule update failed: {file.StandardError}");
+		Assert.AreEqual("true", fileShallow);
+		Assert.AreEqual("1", fileCount);
+	}
+
+	/// <summary>
+	/// Clones <paramref name="super"/> without its submodule, optionally points the submodule at
+	/// <paramref name="url"/>, then runs <c>UpdateSubmodules().Initialize().WithDepth(1)</c>.
+	/// </summary>
+	private static async Task<(GitProcessResult Update, string IsShallow, string Count)> CloneAndUpdateWithDepthOneAsync(
+		GitRepository super,
+		TemporaryRepository superDirectory,
+		string? url,
+		CancellationToken cancellationToken)
+	{
+		using TemporaryRepository cloneDirectory = new();
+		IGitProcessRunner runner = super.ProcessRunner!;
+
+		GitProcessResult cloned = await runner.RunAsync(
+			new GitProcessRequest { Arguments = ["clone", "--", superDirectory.RootPath, cloneDirectory.RootPath] },
+			cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(cloned.Success, $"clone failed: {cloned.StandardError}");
+
+		GitRepository clone = new() { LocalPath = cloneDirectory.Root, ProcessRunner = runner };
+
+		if (url is not null)
+		{
+			_ = await new GitTextBuilder(runner, clone.LocalPath, "config", "-f", ".gitmodules", "submodule.libs/sub.url", url)
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		GitProcessResult updated = await runner.RunAsync(
+			new GitProcessRequest
+			{
+				Arguments =
+				[
+					"-C", cloneDirectory.RootPath,
+					"-c", "protocol.file.allow=always",
+					.. clone.UpdateSubmodules().Initialize().WithDepth(1).BuildArguments(),
+				],
+			},
+			cancellationToken).ConfigureAwait(false);
+
+		AbsoluteDirectoryPath checkout = System.IO.Path.Join(cloneDirectory.RootPath, "libs", "sub").As<AbsoluteDirectoryPath>();
+		string shallow = await new GitTextBuilder(runner, checkout, "rev-parse", "--is-shallow-repository")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		string count = await new GitTextBuilder(runner, checkout, "rev-list", "--count", "HEAD")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		return (updated, shallow, count);
+	}
+
+	[TestMethod]
 	public async Task ReportsAnUninitializedSubmoduleAndThenUpdatesItAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
