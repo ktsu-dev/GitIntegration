@@ -949,7 +949,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitStatusEntry` | `IndexState`, `WorkTreeState`, `Path`, `OriginalPath`, `IsDirectory` (an untracked or ignored directory git collapsed to one record) for one changed path. |
 | `GitCommit` | `Sha`, `TreeSha`, `ParentShas`, `Author`, `Committer`, `Subject`, `Body`. |
 | `GitSignature` | `Name`, `Email`, `Timestamp` recorded on a commit. |
-| `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`. |
+| `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`, `IsUpstreamGone`. |
 | `GitRemote` | `Name`, `FetchUrl`, `PushUrl` (the first push URL), `PushUrls` (every push URL, in git's order). |
 | `GitDiffEntry` | `Kind`, `Path`, `OriginalPath`, `SimilarityPercent`. |
 | `GitWorktree` | `Path`, `Head`, `Branch`, `IsMain`, `IsBare`, `IsDetached`, `IsLocked`, `LockReason`, `IsPrunable`, `PrunableReason` for one working tree. `IsMain` is positional: true only for the first record git emits, since git's porcelain has no attribute for it. |
