@@ -51,6 +51,10 @@ internal sealed class TemporaryRepository : IDisposable
 	/// <param name="relativePath">The path relative to the repository root.</param>
 	public void DeleteFile(string relativePath) => File.Delete(CombineUnderRoot(relativePath));
 
+	/// <summary>Deletes a directory inside the repository, including git's read-only object files.</summary>
+	/// <param name="relativePath">The path relative to the repository root.</param>
+	public void DeleteDirectory(string relativePath) => DeleteRecursively(CombineUnderRoot(relativePath));
+
 	/// <summary>
 	/// Joins a relative path onto <see cref="RootPath"/>, refusing a rooted one.
 	/// </summary>
