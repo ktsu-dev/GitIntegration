@@ -31,4 +31,16 @@ public sealed record GitBranch
 	/// branch once shortened.
 	/// </remarks>
 	public bool IsRemote { get; init; }
+
+	/// <summary>
+	/// Gets a value indicating whether this branch is configured to track an
+	/// <see cref="Upstream"/> that does not exist, because the remote branch was deleted or never
+	/// fetched.
+	/// </summary>
+	/// <remarks>
+	/// The same state as <see cref="GitStatus.IsUpstreamGone"/>, which covers only the checked-out
+	/// branch, and the state <c>git branch -vv</c> shows as <c>[gone]</c>. Always
+	/// <see langword="false"/> for a branch with no upstream and for a remote-tracking branch.
+	/// </remarks>
+	public bool IsUpstreamGone { get; init; }
 }

@@ -90,6 +90,39 @@ public class GitSubmoduleTests
 	}
 
 	[TestMethod]
+	public async Task StatusAndDiffReportAMissingSubmoduleGitDirectoryAsACommandFailureAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository subDirectory = new();
+		using TemporaryRepository superDirectory = new();
+
+		GitRepository sub = await CreateRepositoryAsync(subDirectory, "s.txt", cancellationToken).ConfigureAwait(false);
+		GitRepository super = await CreateRepositoryAsync(superDirectory, "m.txt", cancellationToken).ConfigureAwait(false);
+
+		await AddSubmoduleAsync(super, sub.LocalPath!, "libs/sub", cancellationToken).ConfigureAwait(false);
+
+		// A copy or bind mount that left out .git/modules.
+		superDirectory.DeleteDirectory(Path.Join(".git", "modules", "libs", "sub"));
+
+		GitCommandException status = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await super.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+		// git 2.43 names the missing .git/modules/libs/sub; git 2.56 names the submodule's gitfile,
+		// libs/sub/.git. Either way the message points at the broken submodule.
+		StringAssert.Contains(status.Message, "libs/sub");
+
+		_ = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await super.Diff().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+
+		// A directory outside any repository is still reported as one.
+		using TemporaryRepository outside = new();
+		GitRepository nothing = new() { LocalPath = outside.Root, ProcessRunner = super.ProcessRunner };
+		_ = await Assert.ThrowsExactlyAsync<GitRepositoryNotFoundException>(
+			async () => await nothing.Status().ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+	}
+
+	[TestMethod]
 	public async Task ReportsASynchronisedSubmoduleAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

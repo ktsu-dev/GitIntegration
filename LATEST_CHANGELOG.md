@@ -2,6 +2,11 @@
 
 Changes since v4.1.0:
 
+- Refuse a bare Init on an existing working-tree root [patch] (#305) (matt-edmondson)
+- Recognise a bare repository in IsClonedAsync, OpenAsync and DiscoverAsync [patch] (#306) (matt-edmondson)
+- Keep a trailing space in a discovered repository root and origin path [patch] (#307) (matt-edmondson)
+- Report a submodule's missing git directory as a command failure, not a missing repository [patch] (#311) (matt-edmondson)
+- Report a gone upstream on every branch Branches() lists [minor] (#315) (matt-edmondson)
 - Override the host's diff.ignoreSubmodules in Commit().StageTrackedFiles() [patch] (#294) (matt-edmondson)
 - Refuse author values git would trim at either end [patch] (#303) (matt-edmondson)
 - Clone a provider's repository to a chosen destination and keep its hosting metadata [minor] (#302) (matt-edmondson)
