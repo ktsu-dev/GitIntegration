@@ -742,6 +742,46 @@ public class GitRemoteSyncTests
 	}
 
 	[TestMethod]
+	public async Task BranchesReportsOnlyTheBranchWhoseUpstreamWasDeletedAsGoneAsync()
+	{
+		// The cleanup job "delete local branches whose upstream is gone" needs this for every
+		// branch, not only the checked-out one Status() describes.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+		IGitProcessRunner runner = repository.ProcessRunner!;
+		GitBranchName side = "side".As<GitBranchName>();
+		GitBranchName untracked = "untracked".As<GitBranchName>();
+
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "first", cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateBranch(side).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateBranch(untracked).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push().ToRemote(Origin).WithBranch(Main).SettingUpstream().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.Push().ToRemote(Origin).WithBranch(side).SettingUpstream().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> tracking = await repository.Branches().LocalOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsFalse(tracking.Any(branch => branch.IsUpstreamGone));
+
+		// Deleting through the same repository also removes refs/remotes/origin/side, which is
+		// what a fetch --prune would do after someone else deleted it.
+		_ = await new GitTextBuilder(runner, repository.LocalPath, "push", "origin", "--delete", "side")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		IReadOnlyList<GitBranch> branches = await repository.Branches().LocalOnly().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitBranch gone = branches.Single(branch => branch.Name == side);
+		Assert.AreEqual("origin/side".As<GitBranchName>(), gone.Upstream);
+		Assert.IsTrue(gone.IsUpstreamGone);
+		Assert.IsFalse(branches.Single(branch => branch.Name == Main).IsUpstreamGone);
+		Assert.IsFalse(branches.Single(branch => branch.Name == untracked).IsUpstreamGone);
+	}
+
+	[TestMethod]
 	public async Task StatusReportsAnUpstreamDeletedOnTheRemoteAsGoneAsync()
 	{
 		// Once the remote branch is deleted, git can no longer count ahead/behind and reports neither,

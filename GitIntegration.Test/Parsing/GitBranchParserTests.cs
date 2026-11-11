@@ -18,19 +18,37 @@ public class GitBranchParserTests
 	// Captured from a fresh clone. Note refs/remotes/origin/HEAD, the only record with a
 	// %(symref), and the single space %(HEAD) emits for a branch that is not checked out.
 	private const string FreshClone =
-		"refs/heads/main" + Us + "main" + Us + LocalSha + Us + "origin/main" + Us + "*" + Us + "\n" +
-		"refs/remotes/origin/HEAD" + Us + "origin/HEAD" + Us + LocalSha + Us + Us + " " + Us + "refs/remotes/origin/main\n" +
-		"refs/remotes/origin/feature/x" + Us + "origin/feature/x" + Us + RemoteSha + Us + Us + " " + Us + "\n" +
-		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " " + Us + "\n";
+		"refs/heads/main" + Us + "main" + Us + LocalSha + Us + "origin/main" + Us + "*" + Us + Us + "\n" +
+		"refs/remotes/origin/HEAD" + Us + "origin/HEAD" + Us + LocalSha + Us + Us + " " + Us + "refs/remotes/origin/main" + Us + "\n" +
+		"refs/remotes/origin/feature/x" + Us + "origin/feature/x" + Us + RemoteSha + Us + Us + " " + Us + Us + "\n" +
+		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " " + Us + Us + "\n";
 
 	private const string LocalBranchNamedLikeARemote =
-		"refs/heads/origin/main" + Us + "origin/main" + Us + LocalSha + Us + Us + " " + Us + "\n";
+		"refs/heads/origin/main" + Us + "origin/main" + Us + LocalSha + Us + Us + " " + Us + Us + "\n";
 
 	// A real branch called release/HEAD on the remote, beside the symbolic origin/HEAD.
 	private const string RemoteBranchEndingInHead =
-		"refs/remotes/origin/HEAD" + Us + "origin/HEAD" + Us + RemoteSha + Us + Us + " " + Us + "refs/remotes/origin/main\n" +
-		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " " + Us + "\n" +
-		"refs/remotes/origin/release/HEAD" + Us + "origin/release/HEAD" + Us + LocalSha + Us + Us + " " + Us + "\n";
+		"refs/remotes/origin/HEAD" + Us + "origin/HEAD" + Us + RemoteSha + Us + Us + " " + Us + "refs/remotes/origin/main" + Us + "\n" +
+		"refs/remotes/origin/main" + Us + "origin/main" + Us + RemoteSha + Us + Us + " " + Us + Us + "\n" +
+		"refs/remotes/origin/release/HEAD" + Us + "origin/release/HEAD" + Us + LocalSha + Us + Us + " " + Us + Us + "\n";
+
+	// A branch tracking origin/side after origin/side was deleted and pruned, one whose upstream
+	// is ahead of it, and one that tracks nothing.
+	private const string GoneUpstream =
+		"refs/heads/x" + Us + "x" + Us + LocalSha + Us + "origin/side" + Us + " " + Us + Us + "gone\n" +
+		"refs/heads/main" + Us + "main" + Us + LocalSha + Us + "origin/main" + Us + "*" + Us + Us + "behind 1\n" +
+		"refs/heads/local" + Us + "local" + Us + LocalSha + Us + Us + " " + Us + Us + "\n";
+
+	[TestMethod]
+	public void ReportsABranchWhoseUpstreamIsGone()
+	{
+		IReadOnlyList<GitBranch> branches = GitBranchParser.Parse(GoneUpstream);
+
+		Assert.AreEqual("origin/side".As<GitBranchName>(), branches[0].Upstream);
+		Assert.IsTrue(branches[0].IsUpstreamGone);
+		Assert.IsFalse(branches[1].IsUpstreamGone);
+		Assert.IsFalse(branches[2].IsUpstreamGone);
+	}
 
 	[TestMethod]
 	public void ReadsTheCurrentBranchWithItsUpstream()
@@ -104,7 +122,7 @@ public class GitBranchParserTests
 	[TestMethod]
 	public void ToleratesCarriageReturnLineEndings()
 	{
-		string output = "refs/heads/main" + Us + "main" + Us + LocalSha + Us + Us + "*" + Us + "\r\n";
+		string output = "refs/heads/main" + Us + "main" + Us + LocalSha + Us + Us + "*" + Us + Us + "\r\n";
 
 		IReadOnlyList<GitBranch> branches = GitBranchParser.Parse(output);
 
