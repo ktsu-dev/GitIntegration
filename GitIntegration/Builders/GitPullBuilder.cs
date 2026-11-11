@@ -65,11 +65,16 @@ public interface IGitPullBuilder : IGitCommandBuilder<GitCompleted>
 	public IGitPullBuilder Rebase();
 
 	/// <summary>
-	/// Reconciles by creating a merge commit when needed, regardless of any <c>pull.rebase</c> the
-	/// host has configured.
+	/// Reconciles by creating a merge commit when needed, regardless of any <c>pull.rebase</c>,
+	/// <c>merge.ff</c> or <c>branch.&lt;name&gt;.mergeOptions</c> the host has configured.
 	/// </summary>
 	/// <remarks>
-	/// Emits <c>--no-rebase</c>, git's own counterpart to <see cref="Rebase"/>. Without either flag,
+	/// Emits <c>--no-rebase</c>, git's own counterpart to <see cref="Rebase"/>, followed by
+	/// <c>--ff</c> unless <see cref="FastForwardOnly"/> is also set. <c>--no-rebase</c> alone still
+	/// leaves the merge to honour <c>merge.ff</c>, so a host with <c>merge.ff=only</c> would abort a
+	/// diverged pull, and one with <c>merge.ff=false</c> would force a merge commit where a
+	/// fast-forward is possible. <c>--ff</c> overrides both: it fast-forwards when it can and merges
+	/// when it must. Without either flag,
 	/// a host with no <c>pull.rebase</c> configured refuses to pull divergent branches at all; this
 	/// is the way to express merge semantics through the library instead of reaching around it to
 	/// configure git directly. Cannot be combined with <see cref="Rebase"/>: <c>BuildArguments</c>
@@ -234,6 +239,16 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		if (_merge)
 		{
 			arguments.Add("--no-rebase");
+
+			// --no-rebase picks merge over rebase, but the merge pull then runs still honours
+			// merge.ff and branch.<name>.mergeOptions. --ff pins it back to "fast-forward when
+			// possible, merge otherwise", which is what Merge() promises. FastForwardOnly already
+			// emitted --ff-only, and git takes the last of --ff/--ff-only/--no-ff, so --ff is left
+			// out then rather than silently overriding the caller's stricter request.
+			if (!_fastForwardOnly)
+			{
+				arguments.Add("--ff");
+			}
 		}
 
 		if (_rebase)
