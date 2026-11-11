@@ -38,6 +38,8 @@ public interface IGitPushBuilder : IGitCommandBuilder<GitPushResult>
 	/// branch before the remote, so only the finished configuration knows whether the pair is
 	/// complete. <c>BuildArguments</c> therefore throws <see cref="InvalidOperationException"/> for
 	/// a branch with no remote — a configuration error, not I/O, so its purity is intact.
+	/// The branch is passed to git as <c>refs/heads/&lt;name&gt;</c>, so a tag of the same name is
+	/// never pushed in its place.
 	/// </remarks>
 	/// <param name="name">The branch to push.</param>
 	/// <returns>The same builder, to allow chaining.</returns>
@@ -60,6 +62,11 @@ public interface IGitPushBuilder : IGitCommandBuilder<GitPushResult>
 	public IGitPushBuilder ForceWithLease();
 
 	/// <summary>Deletes the named branch on the remote rather than updating it.</summary>
+	/// <remarks>
+	/// Requires <see cref="WithBranch"/>. <c>BuildArguments</c> throws
+	/// <see cref="InvalidOperationException"/> when no branch is named. Only a branch is deleted: a
+	/// remote tag of the same name is left alone.
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitPushBuilder DeletingRemoteBranch();
 
@@ -253,12 +260,28 @@ internal sealed class GitPushBuilder(IGitProcessRunner runner, AbsoluteDirectory
 
 		if (_branch is null)
 		{
+			// git push --delete with no refspec dies with "--delete doesn't make sense without any
+			// refs", so the incomplete configuration is refused here, as a branch without a remote is.
+			if (_delete)
+			{
+				throw new InvalidOperationException(
+					"DeletingRemoteBranch was called without a branch. Call WithBranch to name the branch to delete.");
+			}
+
 			AppendOperands(arguments, _remote.WeakString);
 			return;
 		}
 
-		AppendOperands(arguments, _remote.WeakString, _branch.WeakString);
+		// A bare name is resolved by git against every ref namespace, so "v1" could push or delete a
+		// tag. Qualifying it confines the push to the branch. With no :dst, git updates the remote
+		// ref of the same full name, refs/heads/<name>, and --set-upstream still records it.
+		AppendOperands(arguments, _remote.WeakString, QualifiedBranch(_branch));
 	}
+
+	/// <summary>Qualifies a branch name as a full ref, so git can't resolve it to a tag.</summary>
+	/// <param name="branch">The branch name.</param>
+	/// <returns><c>refs/heads/</c> followed by the name.</returns>
+	internal static string QualifiedBranch(GitBranchName branch) => "refs/heads/" + branch.WeakString;
 
 	/// <inheritdoc />
 	protected override GitPushResult ParseResult(GitProcessResult result) =>

@@ -134,7 +134,7 @@ public class GitPullBuilderTests
 		int marker = Array.IndexOf(arguments, "--end-of-options");
 
 		Assert.AreEqual("origin", arguments[marker + 1]);
-		Assert.AreEqual("main", arguments[marker + 2]);
+		Assert.AreEqual("refs/heads/main", arguments[marker + 2]);
 	}
 
 	[TestMethod]

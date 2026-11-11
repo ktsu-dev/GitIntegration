@@ -83,7 +83,38 @@ public class GitPushBuilderTests
 
 		Assert.AreNotEqual(-1, marker);
 		Assert.AreEqual("origin", arguments[marker + 1]);
-		Assert.AreEqual("main", arguments[marker + 2]);
+		Assert.AreEqual("refs/heads/main", arguments[marker + 2]);
+	}
+
+	[TestMethod]
+	public void QualifiesTheBranchAsARefWhenDeletingIt()
+	{
+		// A bare "v1" would let git delete the remote tag v1 when no branch v1 exists.
+		RecordingGitProcessRunner runner = new();
+		GitPushBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ToRemote("origin".As<GitRemoteName>()).WithBranch("v1".As<GitBranchName>()).DeletingRemoteBranch();
+
+		string[] arguments = [.. builder.BuildArguments()];
+		int marker = Array.IndexOf(arguments, "--end-of-options");
+
+		CollectionAssert.Contains(arguments, "--delete");
+		Assert.AreEqual("origin", arguments[marker + 1]);
+		Assert.AreEqual("refs/heads/v1", arguments[marker + 2]);
+		Assert.AreEqual(marker + 3, arguments.Length);
+	}
+
+	[TestMethod]
+	public void RejectsADeleteWithoutABranch()
+	{
+		// git push --delete origin with no refspec dies with "--delete doesn't make sense without
+		// any refs", so the configuration is refused before git runs.
+		RecordingGitProcessRunner runner = new();
+		GitPushBuilder builder = new(runner, TestPaths.Root);
+
+		_ = builder.ToRemote("origin".As<GitRemoteName>()).DeletingRemoteBranch();
+
+		Assert.ThrowsExactly<InvalidOperationException>(() => _ = builder.BuildArguments());
 	}
 
 	[TestMethod]

@@ -917,6 +917,125 @@ public class GitRemoteSyncTests
 		Assert.AreEqual(second.Sha, fetched.Updates[0].NewSha);
 	}
 
+	/// <summary>
+	/// Creates a non-bare repository with one commit on <c>main</c>, to stand in for a remote whose
+	/// tags a test creates directly.
+	/// </summary>
+	private static async Task<GitRepository> CreateUpstreamAsync(
+		TemporaryRepository upstreamDirectory,
+		CancellationToken cancellationToken)
+	{
+		GitInitResult init = await IntegrationGitFixture.CreateClient()
+			.Init(upstreamDirectory.Root)
+			.WithInitialBranch(Main)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitRepository upstream = init.Repository;
+		Assert.IsNotNull(upstream.LocalPath);
+
+		await IntegrationGitFixture.ConfigureIdentityAsync(upstream, AuthorName, AuthorEmail, cancellationToken)
+			.ConfigureAwait(false);
+
+		_ = await CommitFileAsync(upstream, upstreamDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+
+		return upstream;
+	}
+
+	[TestMethod]
+	public async Task DeletingABranchNamedLikeARemoteTagLeavesTheTagAsync()
+	{
+		// The remote has tag v1 and no branch v1. A bare "v1" refspec deletes the tag.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository upstreamDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		GitRepository upstream = await CreateUpstreamAsync(upstreamDirectory, cancellationToken).ConfigureAwait(false);
+		Assert.IsNotNull(upstream.LocalPath);
+
+		GitTagName tag = "v1".As<GitTagName>();
+		_ = await upstream.CreateTag(tag).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository clone = await CreateWorkingCopyAsync(cloneDirectory, upstream.LocalPath, cancellationToken).ConfigureAwait(false);
+
+		GitResult<GitPushResult> deleted = await clone.Push()
+			.ToRemote(Origin)
+			.WithBranch("v1".As<GitBranchName>())
+			.DeletingRemoteBranch()
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// git reports a delete of a branch that doesn't exist as deleted, with a warning, so the
+		// assertion is about which ref it names, not whether it names one.
+		if (deleted.Value is not null)
+		{
+			Assert.IsFalse(deleted.Value.Updates.Any(update => update.Reference == "refs/tags/v1".As<GitRefName>()));
+		}
+
+		IReadOnlyList<GitTag> tags = await upstream.Tags().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.IsTrue(tags.Any(t => t.Name == tag));
+	}
+
+	[TestMethod]
+	public async Task PushesABranchThatSharesItsNameWithALocalTagAsync()
+	{
+		// A bare "v2" matches both refs/heads/v2 and refs/tags/v2, and git refuses it as ambiguous.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository workingDirectory = new();
+
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+		GitRepository repository = await CreateWorkingCopyAsync(workingDirectory, remote, cancellationToken).ConfigureAwait(false);
+
+		GitBranchName name = "v2".As<GitBranchName>();
+		_ = await CommitFileAsync(repository, workingDirectory, "a.txt", "one\n", "c1", cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateBranch(name).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await repository.CreateTag("v2".As<GitTagName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitPushResult result = await repository.Push()
+			.ToRemote(Origin)
+			.WithBranch(name)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsFalse(result.HasRejections);
+		Assert.AreEqual(1, result.Updates.Count);
+		Assert.AreEqual("refs/heads/v2".As<GitRefName>(), result.Updates[0].Reference);
+	}
+
+	[TestMethod]
+	public async Task PullingABranchThatIsOnlyARemoteTagFailsAsync()
+	{
+		// The remote has tag onlytag and no branch of that name. A bare "onlytag" makes git fetch
+		// the tag and fast-forward the current branch to it.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository upstreamDirectory = new();
+		using TemporaryRepository cloneDirectory = new();
+
+		GitRepository upstream = await CreateUpstreamAsync(upstreamDirectory, cancellationToken).ConfigureAwait(false);
+		Assert.IsNotNull(upstream.LocalPath);
+
+		GitRepository clone = await CreateWorkingCopyAsync(cloneDirectory, upstream.LocalPath, cancellationToken).ConfigureAwait(false);
+		_ = await clone.Pull().FromRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		IReadOnlyList<GitCommit> before = await clone.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(upstream, upstreamDirectory, "b.txt", "two\n", "c2", cancellationToken).ConfigureAwait(false);
+		_ = await upstream.CreateTag("onlytag".As<GitTagName>()).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await Assert.ThrowsAsync<GitCommandException>(
+			async () => await clone.Pull()
+				.FromRemote(Origin)
+				.WithBranch("onlytag".As<GitBranchName>())
+				.FastForwardOnly()
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+
+		IReadOnlyList<GitCommit> after = await clone.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(1, after.Count);
+		Assert.AreEqual(before[0].Sha, after[0].Sha);
+	}
+
 	private static async Task CommitManyFilesAsync(
 		GitRepository repository,
 		TemporaryRepository temporary,
