@@ -7,7 +7,8 @@ using System.Collections.Generic;
 using ktsu.Semantics.Paths;
 
 /// <summary>
-/// Runs a fixed argument vector and returns git's trimmed standard output.
+/// Runs a fixed argument vector and returns git's trimmed standard output, or, for a path, the output
+/// without its line terminator.
 /// </summary>
 /// <remarks>
 /// Used by <see cref="GitClient"/> for the single-value probes — <c>rev-parse --show-toplevel</c>,
@@ -40,7 +41,43 @@ internal sealed class GitTextBuilder(
 		}
 	}
 
+	/// <summary>
+	/// Gets a value indicating whether only the one line terminator git appends is removed, rather
+	/// than all surrounding whitespace.
+	/// </summary>
+	/// <remarks>
+	/// For output that is a path. Linux and macOS allow a directory name to start or end with a
+	/// space, and a trimmed path names a different directory, possibly a sibling repository (#277).
+	/// </remarks>
+	internal bool PreservesWhitespace { get; init; }
+
 	/// <inheritdoc />
-	protected override string ParseResult(GitProcessResult result) =>
-		Ensure.NotNull(result).StandardOutput.Trim();
+	protected override string ParseResult(GitProcessResult result)
+	{
+		string output = Ensure.NotNull(result).StandardOutput;
+
+		return PreservesWhitespace ? StripLineTerminator(output) : output.Trim();
+	}
+
+	/// <summary>
+	/// Removes one trailing <c>\n</c> or <c>\r\n</c>, and nothing else.
+	/// </summary>
+	/// <param name="output">git's standard output.</param>
+	/// <returns>The output without its final line terminator.</returns>
+	internal static string StripLineTerminator(string output)
+	{
+		Ensure.NotNull(output);
+
+		if (output.EndsWith('\n'))
+		{
+			output = output[..^1];
+
+			if (output.EndsWith('\r'))
+			{
+				output = output[..^1];
+			}
+		}
+
+		return output;
+	}
 }
