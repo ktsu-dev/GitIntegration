@@ -56,9 +56,14 @@ internal static class GitOutputFormats
 	/// <c>refs/heads/</c>, <c>refs/remotes/</c> or <c>refs/tags/</c> outright always yields the name
 	/// the reference was created with.
 	/// </para>
+	/// <para>
+	/// The last field, <c>%(upstream:track,nobracket)</c>, is <c>gone</c> when the branch tracks an
+	/// upstream that no longer exists, and otherwise empty or an ahead/behind summary. Every
+	/// invocation runs under <c>LC_ALL=C</c>, so the word is not translated.
+	/// </para>
 	/// </remarks>
 	internal const string ForEachRefFormat =
-		"%(refname)%1f%(refname:lstrip=2)%1f%(objectname)%1f%(upstream:lstrip=2)%1f%(HEAD)%1f%(symref)";
+		"%(refname)%1f%(refname:lstrip=2)%1f%(objectname)%1f%(upstream:lstrip=2)%1f%(HEAD)%1f%(symref)%1f%(upstream:track,nobracket)";
 
 	/// <summary>
 	/// The <c>for-each-ref</c> format for tags: name, the reference's own object id, the

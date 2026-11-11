@@ -97,6 +97,39 @@ public class GitClientTests
 	}
 
 	[TestMethod]
+	public async Task DiscoverFallsBackToTheGitDirectoryOfABareRepositoryAsync()
+	{
+		// --show-toplevel has no working tree to print in a bare repository (#263).
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardError: "fatal: this operation must be run in a work tree\n", exitCode: 128)
+			.Then(standardOutput: "true\n" + TopLevel + "\n")
+			.Then(standardError: "error: No such remote 'origin'\n", exitCode: 2);
+		GitClient client = new(runner);
+
+		GitRepository? repository = await client
+			.DiscoverAsync(TestPaths.Root, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsNotNull(repository);
+		Assert.AreEqual(ExpectedTopLevel, repository.LocalPath);
+		CollectionAssert.Contains(runner.Invocations[1].ToArray(), "--absolute-git-dir");
+	}
+
+	[TestMethod]
+	public async Task DiscoverReportsAGitDirectoryWithNoWorkTreeAsAbsentAsync()
+	{
+		// Inside a non-bare repository's .git directory: no working tree, and not bare.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardError: "fatal: this operation must be run in a work tree\n", exitCode: 128)
+			.Then(standardOutput: "false\n" + TopLevel + "\n");
+		GitClient client = new(runner);
+
+		GitRepository? repository = await client
+			.DiscoverAsync(TestPaths.Root, TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsNull(repository);
+	}
+
+	[TestMethod]
 	public async Task DiscoverLeavesTheRemotePathNullWhenThereIsNoOriginAsync()
 	{
 		// "error: No such remote 'origin'" exits 2, not 128, and is not a discovery failure.

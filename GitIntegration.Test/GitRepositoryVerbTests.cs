@@ -127,7 +127,7 @@ public class GitRepositoryVerbTests
 	[TestMethod]
 	public async Task IsClonedReportsTrueWhenGitFindsAWorkingTreeAsync()
 	{
-		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner().Then(standardOutput: "true\n");
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner().Then(standardOutput: "false\n.git\ntrue\n");
 		GitRepository repository = RepositoryOn(runner);
 
 		bool isCloned = await repository.IsClonedAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
@@ -136,11 +136,36 @@ public class GitRepositoryVerbTests
 	}
 
 	[TestMethod]
+	public async Task IsClonedReportsTrueForABareRepositoryAsync()
+	{
+		// A bare repository has no working tree: --is-inside-work-tree prints false and exits 0,
+		// and --git-dir prints "." at its root (#263).
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner().Then(standardOutput: "true\n.\nfalse\n");
+		GitRepository repository = RepositoryOn(runner);
+
+		bool isCloned = await repository.IsClonedAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsTrue(isCloned);
+	}
+
+	[TestMethod]
+	public void ReadsTheRepositoryRootProbeForEveryLayout()
+	{
+		Assert.IsTrue(GitProbes.IsRepositoryRoot("false\n.git\ntrue"), "working-tree root");
+		Assert.IsTrue(GitProbes.IsRepositoryRoot("false\n/elsewhere/sg\ntrue"), ".git file at the root");
+		Assert.IsTrue(GitProbes.IsRepositoryRoot("true\n.\nfalse"), "bare repository root");
+		Assert.IsFalse(GitProbes.IsRepositoryRoot("true\n/dev/bare.git\nfalse"), "subdirectory of a bare repository");
+		Assert.IsFalse(GitProbes.IsRepositoryRoot("false\n.\nfalse"), "a non-bare repository's .git directory");
+		Assert.IsFalse(GitProbes.IsRepositoryRoot("false\n/dev/.git\ntrue\n../"), "subdirectory of a working tree");
+		Assert.IsFalse(GitProbes.IsRepositoryRoot(string.Empty), "no output");
+	}
+
+	[TestMethod]
 	public async Task IsClonedReportsFalseForADirectoryBelowAWorkingTreeRootAsync()
 	{
 		// --show-cdup prints the way up to the root, so a subdirectory of some other repository's
 		// working tree is inside a working tree but is not a clone.
-		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner().Then(standardOutput: "true\n../\n");
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner().Then(standardOutput: "false\n/dev/.git\ntrue\n../\n");
 		GitRepository repository = RepositoryOn(runner);
 
 		bool isCloned = await repository.IsClonedAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
