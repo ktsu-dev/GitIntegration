@@ -746,6 +746,12 @@ catch (GitHostingRateLimitException ex)
 }
 ```
 
+On GitHub, a token that is valid but not authorised for an organization's single sign-on raises
+`GitHostingAuthenticationException`, and the exception's message carries the URL to authorise the
+token at. GitHub answers such a request with a plain `403` that looks like a bad credential, and only
+its `X-GitHub-SSO` header names the URL, so `GitHubProvider` copies the URL into the message. See
+[Single sign-on](#single-sign-on) under `GitHubProvider`.
+
 ### Working with Semantic Types
 
 ```csharp
@@ -1019,6 +1025,14 @@ probe, `GET /user`, to establish whether the owner is the credential's own accou
 `GET /user/repos` is used, since it always describes the token's own repositories regardless of
 which owner was configured; otherwise, or when a GitHub App installation token's `GET /user`
 answers `403`, the enumeration falls back to the public `GET /users/{login}/repos` route.
+
+#### Single sign-on
+
+A token that is valid but not authorised for an organization's single sign-on raises
+`GitHostingAuthenticationException` carrying the URL to authorise it at. GitHub refuses such a
+request with `403` and an `X-GitHub-SSO: required; url=<uri>` header. `GitHubProvider` reads the URL
+from that header and appends it to the exception's message, after "Authorise it at:". A `403`
+without the header is still a `GitHostingAuthenticationException`, and its message is GitHub's own.
 
 ### `GitHubDeviceFlow`
 
