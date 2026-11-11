@@ -1237,6 +1237,83 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task SetRemoteUrlForPushOnlyReplacesEverySeveralPushUrlsAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		GitRemoteName origin = "origin".As<GitRemoteName>();
+		GitRepositoryRemotePath fetch = "https://example.com/fetch.git".As<GitRepositoryRemotePath>();
+		GitRepositoryRemotePath replacement = "https://example.com/three.git".As<GitRepositoryRemotePath>();
+
+		_ = await repository.AddRemote(origin, fetch).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		// Two mirrors, the shape git remote set-url --push refuses to change.
+		foreach (string mirror in new[] { "https://example.com/one.git", "https://example.com/two.git" })
+		{
+			_ = await new GitTextBuilder(
+				repository.ProcessRunner!, repository.LocalPath, "remote", "set-url", "--add", "--push", "origin", mirror)
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		Assert.AreEqual(2, (await repository.Remotes().ExecuteAsync(cancellationToken).ConfigureAwait(false))[0].PushUrls.Count);
+
+		_ = await repository.SetRemoteUrl(origin, replacement).ForPushOnly()
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRemote remote = (await repository.Remotes().ExecuteAsync(cancellationToken).ConfigureAwait(false)).Single();
+		CollectionAssert.AreEqual(new[] { replacement }, remote.PushUrls.ToArray());
+		Assert.AreEqual(fetch, remote.FetchUrl);
+	}
+
+	[TestMethod]
+	public async Task SetRemoteUrlReplacesEverySeveralFetchUrlsAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		GitRemoteName origin = "origin".As<GitRemoteName>();
+		GitRepositoryRemotePath replacement = "https://example.com/three.git".As<GitRepositoryRemotePath>();
+
+		_ = await repository.AddRemote(origin, "https://example.com/one.git".As<GitRepositoryRemotePath>())
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "remote", "set-url", "--add", "origin", "https://example.com/two.git")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await repository.SetRemoteUrl(origin, replacement).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		string urls = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "--local", "--get-all", "remote.origin.url")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		Assert.AreEqual(replacement.WeakString, urls);
+		Assert.AreEqual(replacement, (await repository.Remotes().ExecuteAsync(cancellationToken).ConfigureAwait(false)).Single().FetchUrl);
+	}
+
+	[TestMethod]
+	public async Task SetRemoteUrlStillReportsAMissingRemoteAsync()
+	{
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		GitResult<GitCompleted> result = await repository
+			.SetRemoteUrl("origin".As<GitRemoteName>(), "https://example.com/one.git".As<GitRepositoryRemotePath>())
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.IsFalse(result.Success);
+		Assert.AreEqual(0, (await repository.Remotes().ExecuteAsync(cancellationToken).ConfigureAwait(false)).Count);
+	}
+
+	[TestMethod]
 	public async Task RemotesSkipsAConfiguredRemoteWithNoUrlAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
