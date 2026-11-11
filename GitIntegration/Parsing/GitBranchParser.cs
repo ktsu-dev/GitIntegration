@@ -15,7 +15,7 @@ using System.Collections.Generic;
 internal static class GitBranchParser
 {
 	private const string RemotePrefix = "refs/remotes/";
-	private const int FieldCount = 6;
+	private const int FieldCount = 7;
 
 	/// <summary>
 	/// Parses unit-separated reference records.
@@ -71,6 +71,10 @@ internal static class GitBranchParser
 				// empty field.
 				IsCurrent = string.Equals(fields[4], "*", StringComparison.Ordinal),
 				IsRemote = isRemote,
+
+				// %(upstream:track,nobracket) is "gone" when the configured upstream doesn't exist,
+				// the same state Status() reports for the checked-out branch.
+				IsUpstreamGone = string.Equals(fields[6], "gone", StringComparison.Ordinal),
 			});
 		}
 

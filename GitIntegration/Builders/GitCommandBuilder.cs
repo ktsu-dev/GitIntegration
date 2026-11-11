@@ -4,6 +4,7 @@ namespace ktsu.GitIntegration;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -271,8 +272,134 @@ public abstract class GitCommandBuilder<TResult>(IGitProcessRunner runner, Absol
 		// without a forced locale this would silently miss on a non-English machine and degrade to
 		// a generic GitCommandException. Any alternative IGitProcessRunner implementation must
 		// force the locale too, or accept that degradation.
-		return diagnostic.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
+		return IsRepositoryNotFound(diagnostic, RepositoryPath)
 			? new GitRepositoryNotFoundException(message, result.ExitCode, result.Arguments, diagnostic)
 			: new GitCommandException(message, result.ExitCode, result.Arguments, diagnostic);
 	}
+
+	private const string NotARepository = "not a git repository";
+
+	/// <summary>
+	/// Decides whether a diagnostic says the repository the command was scoped to is missing.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// git uses one phrase for two different failures. Discovery finding no repository says
+	/// <c>not a git repository (or any of the parent directories): .git</c>, or names a mount point
+	/// in place of the parent directories. A gitfile whose target is gone says
+	/// <c>not a git repository: &lt;path&gt;</c>, and that gitfile need not be this repository's.
+	/// A submodule whose <c>.git/modules/&lt;name&gt;</c> is missing makes <c>status</c> and
+	/// <c>diff</c> in the superproject report <c>not a git repository: sub/../.git/modules/sub</c>,
+	/// while the superproject itself is a perfectly good repository.
+	/// </para>
+	/// <para>
+	/// So the second form counts only when its path is this repository's own git directory, the
+	/// one discovery reaches from <paramref name="repositoryPath"/>: a linked worktree or a
+	/// submodule checkout whose administrative directory has gone. Any other path is a failure
+	/// further in, and stays a plain <see cref="GitCommandException"/> carrying git's message.
+	/// </para>
+	/// </remarks>
+	/// <param name="diagnostic">The text git wrote to explain the failure.</param>
+	/// <param name="repositoryPath">The directory the command ran in, if it was scoped to one.</param>
+	/// <returns><see langword="true"/> when the scoped repository itself is missing.</returns>
+	internal static bool IsRepositoryNotFound(string diagnostic, AbsoluteDirectoryPath? repositoryPath)
+	{
+		Ensure.NotNull(diagnostic);
+
+		int index = diagnostic.IndexOf(NotARepository, StringComparison.OrdinalIgnoreCase);
+
+		if (index < 0)
+		{
+			return false;
+		}
+
+		string rest = diagnostic[(index + NotARepository.Length)..];
+
+		if (!rest.StartsWith(": ", StringComparison.Ordinal) || repositoryPath is null)
+		{
+			return true;
+		}
+
+		int end = rest.IndexOfAny(['\r', '\n']);
+		string reported = (end < 0 ? rest[2..] : rest[2..end]).Trim();
+
+		if (reported.Length == 0)
+		{
+			return true;
+		}
+
+		(string GitDirectory, string Top)? own = FindOwnGitDirectory(repositoryPath.WeakString);
+
+		// Nothing to compare against, so keep the classification git's phrase has always had.
+		if (own is null)
+		{
+			return true;
+		}
+
+		// git prints the path as the gitfile spelt it: absolute, or relative to the directory it is
+		// working in. That is the scoped directory, or the top of the working tree once git has
+		// moved there.
+		return SamePath(Resolve(repositoryPath.WeakString, reported), own.Value.GitDirectory)
+			|| SamePath(Resolve(own.Value.Top, reported), own.Value.GitDirectory);
+	}
+
+	/// <summary>
+	/// Finds the git directory discovery reaches from <paramref name="start"/>, following a gitfile.
+	/// </summary>
+	/// <param name="start">The directory to walk up from.</param>
+	/// <returns>
+	/// The full git directory path and the directory holding <c>.git</c>, or <see langword="null"/>
+	/// when there is no <c>.git</c> above.
+	/// </returns>
+	private static (string GitDirectory, string Top)? FindOwnGitDirectory(string start)
+	{
+		try
+		{
+			for (DirectoryInfo? directory = new(start); directory is not null; directory = directory.Parent)
+			{
+				string dotGit = Path.Join(directory.FullName, ".git");
+
+				if (Directory.Exists(dotGit))
+				{
+					return (Path.GetFullPath(dotGit), directory.FullName);
+				}
+
+				if (File.Exists(dotGit))
+				{
+					foreach (string line in File.ReadLines(dotGit))
+					{
+						if (line.StartsWith("gitdir:", StringComparison.Ordinal))
+						{
+							return (Resolve(directory.FullName, line["gitdir:".Length..].Trim()), directory.FullName);
+						}
+					}
+
+					return null;
+				}
+			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+		{
+			// Classification is best effort. An unreadable directory falls back to git's phrase.
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	/// Hosts that fold letter case in paths, where git's spelling and ours may differ only in case.
+	/// </summary>
+	private static StringComparison PathComparison =>
+		OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+			? StringComparison.OrdinalIgnoreCase
+			: StringComparison.Ordinal;
+
+	private static string Resolve(string baseDirectory, string path) =>
+		Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Join(baseDirectory, path));
+
+	private static bool SamePath(string left, string right) =>
+		string.Equals(
+			Path.TrimEndingDirectorySeparator(left),
+			Path.TrimEndingDirectorySeparator(right),
+			PathComparison);
 }
