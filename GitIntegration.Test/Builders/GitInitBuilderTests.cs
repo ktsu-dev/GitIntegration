@@ -179,6 +179,51 @@ public class GitInitBuilderTests
 	}
 
 	[TestMethod]
+	public void TellsAWorkingTreeRootFromAGitDirectory()
+	{
+		Assert.IsTrue(GitInitBuilder.IsWorkTreeRoot("false\n.git"), "non-bare repository at the target");
+		Assert.IsTrue(GitInitBuilder.IsWorkTreeRoot("false\n/elsewhere/sg"), ".git file at the target");
+		Assert.IsFalse(GitInitBuilder.IsWorkTreeRoot("true\n."), "bare repository at the target");
+		Assert.IsFalse(GitInitBuilder.IsWorkTreeRoot("false\n."), ".git directory as the target");
+		Assert.IsFalse(GitInitBuilder.IsWorkTreeRoot("false\n/dev/.git\n../"), "subdirectory of a repository");
+		Assert.IsFalse(GitInitBuilder.IsWorkTreeRoot(string.Empty), "no output");
+	}
+
+	[TestMethod]
+	public async Task RefusesABareInitOnAWorkingTreeRootBeforeRunningGitAsync()
+	{
+		// git init --bare there would write HEAD, config, objects/ and the rest into the working
+		// tree as untracked files and exit 0. Only the probe may run.
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "false\n.git\n");
+		GitInitBuilder builder = new(runner, Target);
+		_ = builder.Bare();
+
+		GitCommandException exception = await Assert.ThrowsExactlyAsync<GitCommandException>(
+			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(-1, exception.ExitCode);
+		Assert.AreEqual(1, runner.Invocations.Count);
+	}
+
+	[TestMethod]
+	public async Task TryExecuteReportsABareInitOnAWorkingTreeRootAsAResultAsync()
+	{
+		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
+			.Then(standardOutput: "false\n.git\n");
+		GitInitBuilder builder = new(runner, Target);
+		_ = builder.Bare();
+
+		GitResult<GitInitResult> result =
+			await builder.TryExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false);
+
+		Assert.IsFalse(result.Success);
+		Assert.AreEqual(-1, result.Error?.ExitCode);
+		Assert.AreEqual(1, runner.Invocations.Count);
+	}
+
+	[TestMethod]
 	public async Task ThrowsWhenInitItselfFailsAsync()
 	{
 		ScriptedGitProcessRunner runner = new ScriptedGitProcessRunner()
