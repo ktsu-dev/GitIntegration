@@ -91,15 +91,16 @@ public class GitRepository
 	public IGitProcessRunner? ProcessRunner { get; init; }
 
 	/// <summary>
-	/// Decides whether <see cref="LocalPath"/> currently holds a git working tree.
+	/// Decides whether <see cref="LocalPath"/> currently holds a git working tree or a bare repository.
 	/// </summary>
 	/// <remarks>
-	/// The path has to be the working tree's root. A directory beneath some other repository's
-	/// working tree is not a clone, even though git would run there against the outer repository,
-	/// so "clone if not cloned" still clones into it.
+	/// The path has to be the working tree's root, or the bare repository's own directory. A
+	/// directory beneath some other repository's working tree is not a clone, even though git would
+	/// run there against the outer repository, so "clone if not cloned" still clones into it. A
+	/// bare repository, as <c>Clone(...).Bare()</c> and <c>Init(...).Bare()</c> make, is a clone.
 	/// </remarks>
 	/// <param name="cancellationToken">Cancels the invocation.</param>
-	/// <returns><see langword="true"/> when the path is the root of a working tree.</returns>
+	/// <returns><see langword="true"/> when the path is the root of a working tree or of a bare repository.</returns>
 	/// <exception cref="InvalidOperationException">This repository has no <see cref="ProcessRunner"/>.</exception>
 	public Task<bool> IsClonedAsync(CancellationToken cancellationToken = default)
 	{
@@ -113,7 +114,7 @@ public class GitRepository
 	}
 
 	private static Task<bool> IsClonedCoreAsync(IGitProcessRunner runner, AbsoluteDirectoryPath localPath, CancellationToken cancellationToken) =>
-		GitProbes.IsWorkTreeRootAsync(runner, localPath, cancellationToken);
+		GitProbes.IsRepositoryRootAsync(runner, localPath, cancellationToken);
 
 	/// <summary>Reports the working tree and index state.</summary>
 	/// <returns>A fresh builder.</returns>

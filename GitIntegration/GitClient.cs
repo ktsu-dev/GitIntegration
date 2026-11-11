@@ -26,6 +26,7 @@ using ktsu.Semantics.Paths;
 public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider fileSystem) : IGitClient
 {
 	private const string DubiousOwnershipPhrase = "detected dubious ownership in repository";
+	private const string NoWorkTreePhrase = "this operation must be run in a work tree";
 
 	private readonly IGitProcessRunner _runner = Ensure.NotNull(runner);
 	private readonly IFileSystemProvider _fileSystem = Ensure.NotNull(fileSystem);
@@ -81,7 +82,7 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 		GitRepository? repository = await DiscoverCoreAsync(path, cancellationToken).ConfigureAwait(false);
 
 		return repository ?? throw new GitRepositoryNotFoundException(
-			$"'{path.WeakString}' is not inside a git working tree.");
+			$"'{path.WeakString}' is not inside a git working tree or a bare repository.");
 	}
 
 	private async Task<GitRepository?> DiscoverCoreAsync(AbsoluteDirectoryPath startingPath, CancellationToken cancellationToken)
@@ -108,6 +109,15 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 				error.StandardError);
 		}
 
+		if (topLevel.Error is { } noWorkTree &&
+			noWorkTree.StandardError.Contains(NoWorkTreePhrase, StringComparison.Ordinal))
+		{
+			// A bare repository, or a .git directory, has no working tree for --show-toplevel to
+			// print (#263). Only the bare repository is a repository to open; a .git directory
+			// belongs to the working tree above it.
+			return await DiscoverBareAsync(startingPath, cancellationToken).ConfigureAwait(false);
+		}
+
 		if (!topLevel.Success || string.IsNullOrEmpty(topLevel.Value))
 		{
 			return null;
@@ -120,6 +130,40 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 		{
 			throw new GitParseException(
 				$"git reported a working tree root that is not an absolute directory path: '{topLevel.Value}'.");
+		}
+
+		return new GitRepository
+		{
+			LocalPath = localPath,
+			RemotePath = await ReadOriginUrlAsync(localPath, cancellationToken).ConfigureAwait(false),
+			ProcessRunner = _runner,
+		};
+	}
+
+	private async Task<GitRepository?> DiscoverBareAsync(AbsoluteDirectoryPath startingPath, CancellationToken cancellationToken)
+	{
+		GitResult<string> probe = await new GitTextBuilder(
+			_runner, startingPath, "rev-parse", "--is-bare-repository", "--absolute-git-dir")
+			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		if (!probe.Success || probe.Value is null)
+		{
+			return null;
+		}
+
+		string[] lines = probe.Value.Split('\n');
+
+		if (lines.Length < 2 || !string.Equals(lines[0].TrimEnd('\r'), "true", StringComparison.Ordinal))
+		{
+			return null;
+		}
+
+		string gitDir = lines[1].TrimEnd('\r');
+
+		if (!AbsoluteDirectoryPath.TryCreate(gitDir, out AbsoluteDirectoryPath? localPath) || localPath is null)
+		{
+			throw new GitParseException(
+				$"git reported a bare repository directory that is not an absolute directory path: '{gitDir}'.");
 		}
 
 		return new GitRepository
