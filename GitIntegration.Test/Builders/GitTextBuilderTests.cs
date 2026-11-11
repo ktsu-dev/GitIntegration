@@ -54,5 +54,16 @@ public class GitTextBuilderTests
 		Assert.AreEqual("true", value);
 	}
 
+	[TestMethod]
+	public void StripsOnlyTheOneLineTerminatorFromAPath()
+	{
+		// A trailing or leading space is part of a POSIX directory name (#277).
+		Assert.AreEqual("/tmp/repo ", GitTextBuilder.StripLineTerminator("/tmp/repo \n"));
+		Assert.AreEqual(" /tmp/repo", GitTextBuilder.StripLineTerminator(" /tmp/repo\r\n"));
+		Assert.AreEqual("/tmp/repo\n", GitTextBuilder.StripLineTerminator("/tmp/repo\n\n"));
+		Assert.AreEqual("/tmp/repo", GitTextBuilder.StripLineTerminator("/tmp/repo"));
+		Assert.AreEqual(string.Empty, GitTextBuilder.StripLineTerminator(string.Empty));
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

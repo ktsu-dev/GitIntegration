@@ -195,7 +195,10 @@ at once without a project-wide suppression.
 **Local layer.** `GitClient` implements `IGitClient` by running everything through an
 `IGitProcessRunner`. Repository discovery is delegated to `git rev-parse --show-toplevel`, which
 performs the upward directory walk itself — this is why `GitClient` needs no filesystem abstraction
-of its own. Every verb builder (`GitStatusBuilder`, `GitLogBuilder`, `GitDiffBuilder`, etc.) derives
+of its own. A bare repository has no working tree for it to print, so when git answers "this
+operation must be run in a work tree" discovery falls back to `rev-parse --is-bare-repository
+--absolute-git-dir`, and `IsClonedAsync`'s probe likewise accepts a bare repository's root (#263). A
+non-bare repository's `.git` directory is neither. Every verb builder (`GitStatusBuilder`, `GitLogBuilder`, `GitDiffBuilder`, etc.) derives
 from `GitCommandBuilder<TResult>`, which owns argument assembly, execution, and failure translation.
 A builder is single-use and not thread-safe; the underlying `IGitProcessRunner` is a shared,
 thread-safe singleton.
@@ -223,7 +226,11 @@ Non-obvious, load-bearing design points:
    `rev-parse --is-bare-repository --git-dir --show-cdup` check) is the only way to know either
    fact. `--git-dir` alone is not enough: it prints an absolute path both for an ancestor
    repository and for a submodule, linked worktree or `--separate-git-dir` repository rooted at the
-   target, and only the empty `--show-cdup` tells the second apart.
+   target, and only the empty `--show-cdup` tells the second apart. The same probe refuses
+   `Init(path).Bare()` on a working-tree root (#278): `git init --bare` there writes a second
+   repository's `HEAD`, `config`, `objects/` and the rest into the working tree and exits 0, so the
+   builder fails with exit code -1 before git runs. A bare repository, or a non-bare `Init` on one,
+   is re-initialized as git does.
 
 5. **`Clone`'s destination check is advisory.** Git enforces the same rule itself; the pre-check
    exists only so a doomed clone fails before paying its network cost, and it is deliberately racy —

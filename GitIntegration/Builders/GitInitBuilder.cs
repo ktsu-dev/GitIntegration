@@ -15,6 +15,22 @@ using ktsu.Semantics.Paths;
 public interface IGitInitBuilder : IGitCommandBuilder<GitInitResult>
 {
 	/// <summary>Creates a repository with no working tree.</summary>
+	/// <remarks>
+	/// <para>
+	/// Refused when the target is already the root of a working tree. git would not convert that
+	/// repository: it would write a second, bare repository's files (<c>HEAD</c>, <c>config</c>,
+	/// <c>objects/</c> and so on) into the working tree as untracked files, and exit 0.
+	/// <see cref="IGitCommandBuilder{TResult}.ExecuteAsync"/> throws a
+	/// <see cref="GitCommandException"/> with exit code -1, and
+	/// <see cref="IGitCommandBuilder{TResult}.TryExecuteAsync"/> returns the matching error, before
+	/// git runs. An existing bare repository at the target is re-initialized as usual.
+	/// </para>
+	/// <para>
+	/// The reverse is left to git: an <c>Init</c> without <c>Bare()</c> on an existing bare repository
+	/// re-initializes it, the repository stays bare, and <see cref="GitInitResult.AlreadyExisted"/> is
+	/// <see langword="true"/>.
+	/// </para>
+	/// </remarks>
 	/// <returns>The same builder, to allow chaining.</returns>
 	public IGitInitBuilder Bare();
 
@@ -47,6 +63,7 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	private GitBranchName? _initialBranch;
 	private bool _bare;
 	private bool _alreadyExisted;
+	private bool _targetIsWorkTreeRoot;
 
 	/// <inheritdoc />
 	public IGitInitBuilder Bare()
@@ -114,7 +131,14 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 		// Probe first, then let the base run init and call ParseResult exactly as it does for every
 		// other verb. Reimplementing the run-and-classify flow here would duplicate the base's
 		// failure handling for no gain.
-		_alreadyExisted = await ProbeAsync(cancellationToken).ConfigureAwait(false);
+		await ProbeAsync(cancellationToken).ConfigureAwait(false);
+
+		if (WouldWriteIntoWorkTree)
+		{
+			// Exit code -1 and an empty vector, because no git command ran. GitCommandException
+			// documents -1 as its "no data" default for exactly this reason.
+			throw new GitCommandException(BareIntoWorkTreeMessage, -1, [], string.Empty);
+		}
 
 		return await base.ExecuteAsync(cancellationToken).ConfigureAwait(false);
 	}
@@ -122,12 +146,32 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	/// <inheritdoc />
 	public override async Task<GitResult<GitInitResult>> TryExecuteAsync(CancellationToken cancellationToken = default)
 	{
-		_alreadyExisted = await ProbeAsync(cancellationToken).ConfigureAwait(false);
+		await ProbeAsync(cancellationToken).ConfigureAwait(false);
+
+		if (WouldWriteIntoWorkTree)
+		{
+			return GitResult<GitInitResult>.FromError(new GitCommandError
+			{
+				ExitCode = -1,
+				Arguments = [],
+				StandardError = BareIntoWorkTreeMessage,
+			});
+		}
 
 		return await base.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 	}
 
-	private async Task<bool> ProbeAsync(CancellationToken cancellationToken)
+	/// <summary>
+	/// Whether <c>git init --bare</c> would write a bare repository's files into an existing
+	/// working tree, rather than re-initialize anything.
+	/// </summary>
+	private bool WouldWriteIntoWorkTree => _bare && _targetIsWorkTreeRoot;
+
+	private string BareIntoWorkTreeMessage =>
+		$"The bare init target '{_targetPath.WeakString}' is the root of an existing working tree; " +
+		"git would write a bare repository's files into it.";
+
+	private async Task ProbeAsync(CancellationToken cancellationToken)
 	{
 		// Asks "is there a repository at exactly this path", deliberately not via
 		// GitProbes.IsWorkTreeAsync's --is-inside-work-tree: that answers a different question,
@@ -142,7 +186,28 @@ internal sealed class GitInitBuilder(IGitProcessRunner runner, AbsoluteDirectory
 			Runner, _targetPath, "rev-parse", "--is-bare-repository", "--git-dir", "--show-cdup")
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
-		return probe.Success && probe.Value is not null && IsRepositoryRoot(probe.Value);
+		bool found = probe.Success && probe.Value is not null;
+		_alreadyExisted = found && IsRepositoryRoot(probe.Value!);
+		_targetIsWorkTreeRoot = found && IsWorkTreeRoot(probe.Value!);
+	}
+
+	/// <summary>
+	/// Reads the probe's answer: whether the target is the root of a working tree, as opposed to a
+	/// git directory (a bare repository or a <c>.git</c> directory), or not a repository root at all.
+	/// </summary>
+	/// <remarks>
+	/// A repository root whose <c>--git-dir</c> is anything but <c>.</c> has a working tree there:
+	/// an ordinary repository (<c>.git</c>), or a submodule, linked worktree or
+	/// <c>--separate-git-dir</c> repository (an absolute path).
+	/// </remarks>
+	/// <param name="output">The trimmed output of the probe.</param>
+	/// <returns><see langword="true"/> when the target is the root of an existing working tree.</returns>
+	internal static bool IsWorkTreeRoot(string output)
+	{
+		string[] lines = Ensure.NotNull(output).Split('\n');
+
+		return IsRepositoryRoot(output) &&
+			!string.Equals(lines[1].TrimEnd('\r'), ".", StringComparison.Ordinal);
 	}
 
 	/// <summary>

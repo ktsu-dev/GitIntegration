@@ -869,7 +869,7 @@ Carries an optional `LocalPath` plus optional hosting metadata, and exposes one 
 | `AddWorktree(AbsoluteDirectoryPath)` | `IGitWorktreeAddBuilder` | Builds `git worktree add`. |
 | `RemoveWorktree(AbsoluteDirectoryPath)` | `IGitWorktreeRemoveBuilder` | Builds `git worktree remove <path>`. |
 | `PruneWorktrees()` | `IGitWorktreePruneBuilder` | Builds `git worktree prune`. |
-| `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree. |
+| `IsClonedAsync(CancellationToken)` | `Task<bool>` | Decides whether `LocalPath` currently holds a git working tree or a bare repository. |
 | `OpenWebClient()` | `void` | Opens `WebURI` in the default browser, when it is an absolute `http`/`https` URI. |
 
 ### `IGitCommandBuilder<TResult>`
@@ -937,7 +937,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitTimeoutException` | Git did not complete within the configured `GitOptions.Timeout`. |
 | `GitParseException` | Git succeeded but produced output the parser could not interpret. |
 | `GitCommandException` | Git ran and exited non-zero. Carries `ExitCode`, `Arguments`, and `StandardError`. |
-| `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree. |
+| `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree or a bare repository. |
 | `GitNothingToCommitException` | A `GitCommandException` specialization: `git commit` was run with nothing staged. The one `commit` failure that is an ordinary program state rather than a fault. |
 | `GitPushRejectedException` | A `GitCommandException` specialization: git refused at least one reference during `push`. Carries the parsed `Result` (`GitPushResult`) so the rejection detail is not lost. |
 | `GitPullConflictException` | A `GitCommandException` specialization: `pull` left conflicts in the working tree. Use `Status()` to see which paths are unmerged. |
@@ -955,7 +955,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitStatusEntry` | `IndexState`, `WorkTreeState`, `Path`, `OriginalPath`, `IsDirectory` (an untracked or ignored directory git collapsed to one record) for one changed path. |
 | `GitCommit` | `Sha`, `TreeSha`, `ParentShas`, `Author`, `Committer`, `Subject`, `Body`. |
 | `GitSignature` | `Name`, `Email`, `Timestamp` recorded on a commit. |
-| `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`. |
+| `GitBranch` | `Name`, `Sha`, `Upstream`, `IsCurrent`, `IsRemote`, `IsUpstreamGone`. |
 | `GitRemote` | `Name`, `FetchUrl`, `PushUrl` (the first push URL), `PushUrls` (every push URL, in git's order). |
 | `GitDiffEntry` | `Kind`, `Path`, `OriginalPath`, `SimilarityPercent`. |
 | `GitWorktree` | `Path`, `Head`, `Branch`, `IsMain`, `IsBare`, `IsDetached`, `IsLocked`, `LockReason`, `IsPrunable`, `PrunableReason` for one working tree. `IsMain` is positional: true only for the first record git emits, since git's porcelain has no attribute for it. |

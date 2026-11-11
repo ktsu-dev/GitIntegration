@@ -124,7 +124,7 @@ public sealed class GitTimeoutException : GitException
 }
 
 /// <summary>
-/// The path given is not inside a git working tree.
+/// The path given is not inside a git working tree or a bare repository.
 /// </summary>
 public sealed class GitRepositoryNotFoundException : GitCommandException
 {
