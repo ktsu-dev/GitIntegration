@@ -146,7 +146,8 @@ public class GitTrailingSpacePathTests
 		Assert.AreNotEqual(sibling, opened.LocalPath);
 		Assert.IsNotNull(opened.LocalPath);
 		Assert.EndsWith(spacedName, opened.LocalPath.WeakString);
-		Assert.IsNotNull(discovered?.LocalPath);
+		Assert.IsNotNull(discovered);
+		Assert.IsNotNull(discovered.LocalPath);
 		Assert.EndsWith(spacedName, discovered.LocalPath.WeakString);
 	}
 
