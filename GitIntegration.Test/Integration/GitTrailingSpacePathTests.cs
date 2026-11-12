@@ -119,7 +119,9 @@ public class GitTrailingSpacePathTests
 		GitRepository repository = await IntegrationGitFixture.CreateClient()
 			.OpenAsync(spaced.As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
 
-		Assert.AreEqual(spaced.As<AbsoluteDirectoryPath>(), repository.LocalPath);
+		// git resolves symlinks in the path (macOS's /var is /private/var), so compare the name.
+		Assert.IsNotNull(repository.LocalPath);
+		Assert.EndsWith(Path.DirectorySeparatorChar + "bare ", repository.LocalPath.WeakString);
 	}
 
 	[TestMethod]
@@ -131,18 +133,21 @@ public class GitTrailingSpacePathTests
 
 		using TemporaryRepository parent = new();
 		string spaced = Path.Join(parent.RootPath, "bare ");
-		AbsoluteDirectoryPath expected = await InitBareAsync(spaced, cancellationToken).ConfigureAwait(false);
+		AbsoluteDirectoryPath spacedRoot = await InitBareAsync(spaced, cancellationToken).ConfigureAwait(false);
 		AbsoluteDirectoryPath sibling = await InitBareAsync(Path.Join(parent.RootPath, "bare"), cancellationToken).ConfigureAwait(false);
 
 		GitClient client = IntegrationGitFixture.CreateClient();
-		GitRepository opened = await client.OpenAsync(expected, cancellationToken).ConfigureAwait(false);
+		GitRepository opened = await client.OpenAsync(spacedRoot, cancellationToken).ConfigureAwait(false);
 		GitRepository? discovered = await client
 			.DiscoverAsync(Path.Join(spaced, "refs").As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
 
+		// git resolves symlinks in the path (macOS's /var is /private/var), so compare the name.
+		string spacedName = Path.DirectorySeparatorChar + "bare ";
 		Assert.AreNotEqual(sibling, opened.LocalPath);
-		Assert.AreEqual(expected, opened.LocalPath);
-		Assert.IsNotNull(discovered);
-		Assert.AreEqual(expected, discovered.LocalPath);
+		Assert.IsNotNull(opened.LocalPath);
+		Assert.EndsWith(spacedName, opened.LocalPath.WeakString);
+		Assert.IsNotNull(discovered?.LocalPath);
+		Assert.EndsWith(spacedName, discovered.LocalPath.WeakString);
 	}
 
 	public TestContext TestContext { get; set; } = null!;
