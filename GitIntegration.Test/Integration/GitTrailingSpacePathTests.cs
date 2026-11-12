@@ -97,5 +97,53 @@ public class GitTrailingSpacePathTests
 		Assert.AreEqual(remote, repository.RemotePath?.WeakString);
 	}
 
+	private static async Task<AbsoluteDirectoryPath> InitBareAsync(string path, CancellationToken cancellationToken)
+	{
+		_ = Directory.CreateDirectory(path);
+		AbsoluteDirectoryPath root = path.As<AbsoluteDirectoryPath>();
+		_ = await IntegrationGitFixture.CreateClient().Init(root).Bare().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		return root;
+	}
+
+	[TestMethod]
+	public async Task OpenKeepsATrailingSpaceInABareRepositoryAsync()
+	{
+		RequirePosix();
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository parent = new();
+		string spaced = Path.Join(parent.RootPath, "bare ");
+		_ = await InitBareAsync(spaced, cancellationToken).ConfigureAwait(false);
+
+		GitRepository repository = await IntegrationGitFixture.CreateClient()
+			.OpenAsync(spaced.As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(spaced.As<AbsoluteDirectoryPath>(), repository.LocalPath);
+	}
+
+	[TestMethod]
+	public async Task OpenAndDiscoverDoNotReturnABareSiblingWithoutTheTrailingSpaceAsync()
+	{
+		RequirePosix();
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository parent = new();
+		string spaced = Path.Join(parent.RootPath, "bare ");
+		AbsoluteDirectoryPath expected = await InitBareAsync(spaced, cancellationToken).ConfigureAwait(false);
+		AbsoluteDirectoryPath sibling = await InitBareAsync(Path.Join(parent.RootPath, "bare"), cancellationToken).ConfigureAwait(false);
+
+		GitClient client = IntegrationGitFixture.CreateClient();
+		GitRepository opened = await client.OpenAsync(expected, cancellationToken).ConfigureAwait(false);
+		GitRepository? discovered = await client
+			.DiscoverAsync(Path.Join(spaced, "refs").As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
+
+		Assert.AreNotEqual(sibling, opened.LocalPath);
+		Assert.AreEqual(expected, opened.LocalPath);
+		Assert.IsNotNull(discovered);
+		Assert.AreEqual(expected, discovered.LocalPath);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }

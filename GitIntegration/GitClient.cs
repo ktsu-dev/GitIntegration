@@ -142,8 +142,13 @@ public sealed class GitClient(IGitProcessRunner runner, IFileSystemProvider file
 
 	private async Task<GitRepository?> DiscoverBareAsync(AbsoluteDirectoryPath startingPath, CancellationToken cancellationToken)
 	{
+		// The git directory is a path, so, as in DiscoverCoreAsync, only line terminators come off
+		// it: a trailing space is part of a POSIX directory name (#277, #317).
 		GitResult<string> probe = await new GitTextBuilder(
 			_runner, startingPath, "rev-parse", "--is-bare-repository", "--absolute-git-dir")
+		{
+			PreservesWhitespace = true,
+		}
 			.TryExecuteAsync(cancellationToken).ConfigureAwait(false);
 
 		if (!probe.Success || probe.Value is null)
