@@ -11,7 +11,11 @@ using System.Globalization;
 /// </summary>
 internal static class GitLogParser
 {
-	private const int FieldCount = 11;
+	/// <summary>
+	/// Sha, tree, parents, author date and committer date: the fields that cannot contain the unit
+	/// separator, and so the only ones it separates.
+	/// </summary>
+	private const int MachineFieldCount = 5;
 
 	/// <summary>
 	/// Parses NUL-terminated, unit-separated log output.
@@ -41,16 +45,21 @@ internal static class GitLogParser
 
 	private static GitCommit ReadCommit(string record)
 	{
-		// Bounded to FieldCount: the last field, %b, is free-form message text that may itself
-		// contain the unit separator (verified against real git). A bounded split makes the
-		// trailing body field absorb any embedded separator instead of overflowing into extra
-		// array elements and shifting every field that follows.
-		string[] fields = record.Split(GitOutputFormats.UnitSeparator, FieldCount);
+		// Only the machine fields are unit-separated. The bounded split leaves the free-text tail,
+		// which may itself contain the separator, whole as the last element.
+		string[] fields = record.Split(GitOutputFormats.UnitSeparator, MachineFieldCount + 1);
 
-		if (fields.Length < FieldCount)
+		if (fields.Length <= MachineFieldCount)
 		{
 			throw new GitParseException($"Malformed log record: '{record}'.");
 		}
+
+		TextFieldReader text = new(fields[MachineFieldCount], record);
+		string authorName = text.ReadUntil('<');
+		string authorEmail = text.ReadUntil('>');
+		string committerName = text.ReadUntil('<');
+		string committerEmail = text.ReadUntil('>');
+		string subject = text.ReadUntil('\n');
 
 		return new GitCommit
 		{
@@ -59,23 +68,51 @@ internal static class GitLogParser
 			ParentShas = ReadParents(fields[2]),
 			Author = new GitSignature
 			{
-				Name = GitParseValues.ToOptionalSemantic<GitAuthorName>(fields[3], "author name"),
-				Email = GitParseValues.ToOptionalSemantic<GitAuthorEmail>(fields[4], "author email"),
-				Timestamp = ReadTimestamp(fields[5]),
+				Name = GitParseValues.ToOptionalSemantic<GitAuthorName>(authorName, "author name"),
+				Email = GitParseValues.ToOptionalSemantic<GitAuthorEmail>(authorEmail, "author email"),
+				Timestamp = ReadTimestamp(fields[3]),
 			},
 			Committer = new GitSignature
 			{
-				Name = GitParseValues.ToOptionalSemantic<GitAuthorName>(fields[6], "committer name"),
-				Email = GitParseValues.ToOptionalSemantic<GitAuthorEmail>(fields[7], "committer email"),
-				Timestamp = ReadTimestamp(fields[8]),
+				Name = GitParseValues.ToOptionalSemantic<GitAuthorName>(committerName, "committer name"),
+				Email = GitParseValues.ToOptionalSemantic<GitAuthorEmail>(committerEmail, "committer email"),
+				Timestamp = ReadTimestamp(fields[4]),
 			},
-			Subject = fields[9],
+			Subject = subject,
 
 			// %b ends with the newline git appends after the body. That terminator is not part of
 			// the message, and leaving it on would make every round trip through this type add
 			// another one.
-			Body = fields[10].TrimEnd('\n', '\r'),
+			Body = text.Rest.TrimEnd('\n', '\r'),
 		};
+	}
+
+	/// <summary>
+	/// Reads the free-text tail of a log record, <c>%an&lt;%ae&gt;%cn&lt;%ce&gt;%s%n%b</c>, one
+	/// delimiter at a time.
+	/// </summary>
+	/// <remarks>
+	/// Each delimiter is one git guarantees the field before it cannot contain: see
+	/// <see cref="GitOutputFormats.LogFormat"/>.
+	/// </remarks>
+	private sealed class TextFieldReader(string text, string record)
+	{
+		private int _position;
+
+		internal string Rest => text[_position..];
+
+		internal string ReadUntil(char delimiter)
+		{
+			int end = text.IndexOf(delimiter, _position);
+			if (end < 0)
+			{
+				throw new GitParseException($"Malformed log record: '{record}'.");
+			}
+
+			string value = text[_position..end];
+			_position = end + 1;
+			return value;
+		}
 	}
 
 	private static GitCommitSha[] ReadParents(string value)

@@ -12,7 +12,7 @@ using ktsu.Semantics.Strings;
 public class GitLogBuilderTests
 {
 	private const string ExpectedFormat =
-		"--format=%H%x1f%T%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%s%x1f%b";
+		"--format=%H%x1f%T%x1f%P%x1f%aI%x1f%cI%x1f%an<%ae>%cn<%ce>%s%n%b";
 
 	[TestMethod]
 	public void BuildsTheDefaultLogVector()

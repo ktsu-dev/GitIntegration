@@ -20,9 +20,9 @@ public class GitCommitBuilderTests
 	/// <summary>One record in the pinned log format, as the readback invocation returns it.</summary>
 	private const string ReadBack =
 		Sha + Us + Tree + Us + Parent + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-		"subject here" + Us + "body text" + Nul;
+		"2026-08-20T00:05:20+10:00" + Us + "2026-08-20T00:05:20+10:00" + Us +
+		"Fixture Author<fixture@example.com>Fixture Author<fixture@example.com>" +
+		"subject here\n" + "body text" + Nul;
 
 	private static GitCommitMessage Message => "subject here".As<GitCommitMessage>();
 
@@ -233,7 +233,7 @@ public class GitCommitBuilderTests
 		string[] readBack = [.. runner.Invocations[1]];
 		CollectionAssert.Contains(
 			readBack,
-			"--format=%H%x1f%T%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%s%x1f%b");
+			"--format=%H%x1f%T%x1f%P%x1f%aI%x1f%cI%x1f%an<%ae>%cn<%ce>%s%n%b");
 		CollectionAssert.Contains(readBack, "--max-count=1");
 		CollectionAssert.Contains(readBack, "-z");
 	}
