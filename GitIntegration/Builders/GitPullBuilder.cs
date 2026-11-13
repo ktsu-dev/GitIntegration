@@ -303,6 +303,12 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	/// standard <em>output</em> — the same trap <c>commit</c> sets with "nothing to commit". Both a
 	/// merge conflict and a rebase conflict carry the word CONFLICT, so one match covers both, and
 	/// the <c>LC_ALL=C</c> that every invocation runs under is what makes it dependable.
+	/// <para>
+	/// Which of the two stopped is read from the same output rather than from the argument vector,
+	/// because a pull without <c>Merge()</c> or <c>Rebase()</c> follows <c>pull.rebase</c>
+	/// (ktsu-dev/GitIntegration#242). The rebase sequencer reports the commit it could not replay
+	/// as "could not apply" on standard error, which a merge never does.
+	/// </para>
 	/// </remarks>
 	/// <param name="result">The failed invocation outcome.</param>
 	/// <returns>The exception to throw.</returns>
@@ -310,14 +316,24 @@ internal sealed class GitPullBuilder(IGitProcessRunner runner, AbsoluteDirectory
 	{
 		Ensure.NotNull(result);
 
-		return result.StandardOutput.Contains("CONFLICT", StringComparison.Ordinal)
-			? new GitPullConflictException(
-				"The pull left conflicts in the working tree. Use Status() to see which paths " +
-				$"are unmerged: {result.StandardOutput.Trim()}",
-				result.ExitCode,
-				result.Arguments,
-				result.StandardError)
-			: base.CreateException(result);
+		if (!result.StandardOutput.Contains("CONFLICT", StringComparison.Ordinal))
+		{
+			return base.CreateException(result);
+		}
+
+		GitPullConflictKind kind = result.StandardError.Contains("could not apply", StringComparison.OrdinalIgnoreCase)
+			? GitPullConflictKind.Rebase
+			: GitPullConflictKind.Merge;
+
+		string state = kind == GitPullConflictKind.Rebase ? "mid-rebase" : "mid-merge";
+
+		return new GitPullConflictException(
+			$"The pull left conflicts in the working tree and the repository is {state}. Use Status() " +
+			$"to see which paths are unmerged: {result.StandardOutput.Trim()}",
+			result.ExitCode,
+			result.Arguments,
+			result.StandardError,
+			kind);
 	}
 
 	/// <summary>

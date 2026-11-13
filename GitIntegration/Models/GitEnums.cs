@@ -187,3 +187,28 @@ public enum GitSubmodulePushCheck
 	/// <summary>Push the submodules' commits and stop, leaving the superproject unpushed.</summary>
 	Only,
 }
+
+/// <summary>
+/// Which operation a conflicting <c>pull</c> stopped in, and so which one the repository is now
+/// in the middle of.
+/// </summary>
+/// <remarks>
+/// A pull reconciles by merging or by rebasing. Which one it used is not always the caller's
+/// choice: a plain <c>Pull()</c> sets no mode, so <c>pull.rebase</c> or
+/// <c>branch.&lt;name&gt;.rebase</c> decides it. The two leave different states behind, and each
+/// is undone with its own command, <c>merge --abort</c> or <c>rebase --abort</c>.
+/// </remarks>
+public enum GitPullConflictKind
+{
+	/// <summary>
+	/// The pull merged and stopped with conflicts. The repository is mid-merge, with
+	/// <c>MERGE_HEAD</c> set and the branch still checked out.
+	/// </summary>
+	Merge,
+
+	/// <summary>
+	/// The pull rebased and a replayed commit conflicted. The repository is mid-rebase, on a
+	/// detached <c>HEAD</c>, and <c>merge --abort</c> does not apply.
+	/// </summary>
+	Rebase,
+}

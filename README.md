@@ -488,8 +488,10 @@ else
 
 `Pull()` returns `GitCompleted` rather than a parsed result, because everything `git pull` prints is
 human prose with no porcelain form. Use `Status()` and `Log()` afterwards to learn what changed. A
-merge conflict is the one outcome with its own exception, `GitPullConflictException`, because it
-leaves the repository mid-merge:
+conflict is the one outcome with its own exception, `GitPullConflictException`, because it leaves
+the repository mid-merge or mid-rebase. Its `Kind` says which, and so whether `merge --abort` or
+`rebase --abort` undoes it. A pull without `Merge()` or `Rebase()` follows `pull.rebase`, so the
+caller may not have chosen:
 
 ```csharp
 using ktsu.GitIntegration;
@@ -503,12 +505,13 @@ try
         .FastForwardOnly()
         .ExecuteAsync();
 }
-catch (GitPullConflictException)
+catch (GitPullConflictException conflict)
 {
     GitStatus status = await repository.Status().ExecuteAsync();
     IEnumerable<GitStatusEntry> unmerged = status.Entries.Where(e => e.IndexState == GitFileState.Unmerged);
 
-    Console.WriteLine($"Pull left {unmerged.Count()} unmerged path(s); resolve them and commit.");
+    string next = conflict.Kind == GitPullConflictKind.Rebase ? "git rebase --continue" : "commit";
+    Console.WriteLine($"Pull left {unmerged.Count()} unmerged path(s); resolve them, then {next}.");
 }
 ```
 
@@ -940,7 +943,7 @@ The shared contract every verb builder implements. A builder is single-use and n
 | `GitRepositoryNotFoundException` | A `GitCommandException` specialization: the path is not inside a git working tree or a bare repository. |
 | `GitNothingToCommitException` | A `GitCommandException` specialization: `git commit` was run with nothing staged. The one `commit` failure that is an ordinary program state rather than a fault. |
 | `GitPushRejectedException` | A `GitCommandException` specialization: git refused at least one reference during `push`. Carries the parsed `Result` (`GitPushResult`) so the rejection detail is not lost. |
-| `GitPullConflictException` | A `GitCommandException` specialization: `pull` left conflicts in the working tree. Use `Status()` to see which paths are unmerged. |
+| `GitPullConflictException` | A `GitCommandException` specialization: `pull` left conflicts in the working tree. `Kind` (`GitPullConflictKind.Merge` or `Rebase`) says whether the repository is mid-merge or mid-rebase. Use `Status()` to see which paths are unmerged. |
 | `GitHostingException` | Base type for every hosting-layer failure. Does **not** derive from `GitException` — it carries HTTP concepts, not process ones. Carries `ProviderName`, `StatusCode`, `ResponseBody`. |
 | `GitHostingAuthenticationException` | A `GitHostingException` specialization: the host rejected the request as unauthenticated, or the credential no longer grants access. |
 | `GitHostingNotFoundException` | A `GitHostingException` specialization: the requested resource does not exist, or is not visible to the caller's credentials. |

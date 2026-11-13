@@ -3,6 +3,7 @@
 namespace ktsu.GitIntegration.Test;
 
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -688,10 +689,12 @@ public class GitRemoteSyncTests
 		// expressing what it wants is better than a test reaching around it. The config pin stays
 		// regardless: the other pulls in this file must not depend on host state either, and this is
 		// simply the one pull that actually diverges to prove it.
-		await Assert.ThrowsExactlyAsync<GitPullConflictException>(
+		GitPullConflictException exception = await Assert.ThrowsExactlyAsync<GitPullConflictException>(
 			async () => await first.Pull().FromRemote(Origin).WithBranch(Main).Merge()
 				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
 			.ConfigureAwait(false);
+
+		Assert.AreEqual(GitPullConflictKind.Merge, exception.Kind);
 
 		// The repository is mid-merge, and that state is inspectable through the read-only verbs
 		// rather than needing any conflict machinery in this library.
@@ -699,6 +702,84 @@ public class GitRemoteSyncTests
 
 		Assert.IsFalse(status.IsClean);
 		Assert.IsTrue(status.Entries.Any(entry => entry.IndexState == GitFileState.Unmerged));
+	}
+
+	[TestMethod]
+	public async Task AConflictingRebasePullReportsARebaseConflictAsync()
+	{
+		// A rebase conflict leaves the repository mid-rebase on a detached HEAD, where merge --abort
+		// fails. The exception must say so rather than describe a merge (#242).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository firstDirectory = new();
+		using TemporaryRepository secondDirectory = new();
+
+		GitRepository first = await CreateConflictingHistoriesAsync(
+			remoteDirectory, firstDirectory, secondDirectory, cancellationToken).ConfigureAwait(false);
+
+		GitPullConflictException exception = await Assert.ThrowsExactlyAsync<GitPullConflictException>(
+			async () => await first.Pull().FromRemote(Origin).WithBranch(Main).Rebase()
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(GitPullConflictKind.Rebase, exception.Kind);
+		StringAssert.Contains(exception.Message, "mid-rebase");
+		Assert.IsTrue(Directory.Exists(Path.Combine(firstDirectory.Root.WeakString, ".git", "rebase-merge")));
+	}
+
+	[TestMethod]
+	public async Task APlainPullFollowingPullRebaseReportsARebaseConflictAsync()
+	{
+		// Pull() without Merge() or Rebase() sets no mode, so pull.rebase decides, and the caller
+		// may not know a rebase ran at all (#242).
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository remoteDirectory = new();
+		using TemporaryRepository firstDirectory = new();
+		using TemporaryRepository secondDirectory = new();
+
+		GitRepository first = await CreateConflictingHistoriesAsync(
+			remoteDirectory, firstDirectory, secondDirectory, cancellationToken).ConfigureAwait(false);
+
+		_ = await new GitTextBuilder(first.ProcessRunner!, first.LocalPath!, "config", "pull.rebase", "true")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitPullConflictException exception = await Assert.ThrowsExactlyAsync<GitPullConflictException>(
+			async () => await first.Pull().FromRemote(Origin).WithBranch(Main)
+				.ExecuteAsync(cancellationToken).ConfigureAwait(false))
+			.ConfigureAwait(false);
+
+		Assert.AreEqual(GitPullConflictKind.Rebase, exception.Kind);
+		Assert.IsTrue(Directory.Exists(Path.Combine(firstDirectory.Root.WeakString, ".git", "rebase-merge")));
+	}
+
+	/// <summary>
+	/// Builds a remote and two clones whose <c>main</c> branches change the same line, and returns
+	/// the first, whose next pull from <c>origin</c> conflicts.
+	/// </summary>
+	private static async Task<GitRepository> CreateConflictingHistoriesAsync(
+		TemporaryRepository remoteDirectory,
+		TemporaryRepository firstDirectory,
+		TemporaryRepository secondDirectory,
+		CancellationToken cancellationToken)
+	{
+		AbsoluteDirectoryPath remote = await CreateBareRemoteAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
+
+		GitRepository first = await CreateWorkingCopyAsync(firstDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(first, firstDirectory, "c.txt", "line1\nline2\n", "base", cancellationToken).ConfigureAwait(false);
+		_ = await first.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		GitRepository second = await CreateWorkingCopyAsync(secondDirectory, remote, cancellationToken).ConfigureAwait(false);
+		_ = await second.Pull().FromRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		_ = await CommitFileAsync(second, secondDirectory, "c.txt", "line1\nTHEIRS\n", "theirs", cancellationToken).ConfigureAwait(false);
+		_ = await second.Push().ToRemote(Origin).WithBranch(Main).ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		_ = await CommitFileAsync(first, firstDirectory, "c.txt", "line1\nMINE\n", "mine", cancellationToken).ConfigureAwait(false);
+
+		return first;
 	}
 
 	[TestMethod]

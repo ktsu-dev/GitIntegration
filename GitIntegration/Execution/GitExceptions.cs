@@ -280,19 +280,21 @@ public sealed class GitPushRejectedException : GitCommandException
 }
 
 /// <summary>
-/// A pull merged cleanly enough to start but left conflicts in the working tree.
+/// A pull merged or rebased cleanly enough to start but left conflicts in the working tree.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The repository is now mid-merge, which no other verb in this library produces. Resolving it is
-/// a non-goal of this design, but the state is inspectable: <c>status</c> reports each conflicted
-/// path as an unmerged entry, so a caller can find out exactly what needs attention through
-/// <c>GitRepository.Status()</c>.
+/// The repository is now mid-merge or mid-rebase, which no other verb in this library produces.
+/// <see cref="Kind"/> says which, and so whether <c>merge --abort</c> or <c>rebase --abort</c>
+/// undoes it: a plain pull follows <c>pull.rebase</c>, so the caller may not have chosen.
+/// Resolving it is a non-goal of this design, but the state is inspectable: <c>status</c> reports
+/// each conflicted path as an unmerged entry, so a caller can find out exactly what needs
+/// attention through <c>GitRepository.Status()</c>.
 /// </para>
 /// <para>
-/// Given its own type because git reports the conflict on standard <em>output</em> while exiting
-/// 128, so without a dedicated classification it would be indistinguishable from any other pull
-/// failure.
+/// Given its own type because git reports the conflict on standard <em>output</em>, with a
+/// non-zero exit code it also uses for other failures, so without a dedicated classification it
+/// would be indistinguishable from any other pull failure.
 /// </para>
 /// </remarks>
 public sealed class GitPullConflictException : GitCommandException
@@ -316,6 +318,26 @@ public sealed class GitPullConflictException : GitCommandException
 	/// <param name="standardError">Everything git wrote to standard error.</param>
 	public GitPullConflictException(string message, int exitCode, IReadOnlyList<string> arguments, string standardError)
 		: base(message, exitCode, arguments, standardError) { }
+
+	/// <summary>Initializes a new instance of the <see cref="GitPullConflictException"/> class.</summary>
+	/// <param name="message">The message describing the failure.</param>
+	/// <param name="exitCode">The exit code git returned.</param>
+	/// <param name="arguments">The argument vector that produced the failure.</param>
+	/// <param name="standardError">Everything git wrote to standard error.</param>
+	/// <param name="kind">Which operation the pull stopped in.</param>
+	public GitPullConflictException(
+		string message,
+		int exitCode,
+		IReadOnlyList<string> arguments,
+		string standardError,
+		GitPullConflictKind kind)
+		: base(message, exitCode, arguments, standardError) => Kind = kind;
+
+	/// <summary>
+	/// Gets which operation the pull stopped in, and so whether the repository is mid-merge or
+	/// mid-rebase.
+	/// </summary>
+	public GitPullConflictKind Kind { get; }
 }
 
 /// <summary>
