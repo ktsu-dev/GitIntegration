@@ -19,23 +19,23 @@ public class GitLogParserTests
 	private const string SecondTree = "50997ba19ef5248ac46e7ec0992ec0b07d7c8f8b";
 	private const string MergedInSha = "6f8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b";
 
-	// Captured verbatim from a real repository. The second record is the root commit, so its
-	// parents field is empty, and it carries a two-paragraph body ending in the newline %b appends.
+	// Shaped as git emits LogFormat for a real repository. The second record is the root commit, so
+	// its parents field is empty, and it carries a two-paragraph body ending in the newline %b appends.
 	private const string TwoCommits =
 		FirstSha + Us + FirstTree + Us + SecondSha + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-		"Second commit" + Us + Nul +
+		"2026-08-20T00:05:20+10:00" + Us + "2026-08-20T00:05:20+10:00" + Us +
+		"Fixture Author<fixture@example.com>Fixture Author<fixture@example.com>" +
+		"Second commit\n" + Nul +
 		SecondSha + Us + SecondTree + Us + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:04:59+10:00" + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:04:59+10:00" + Us +
-		"Initial commit" + Us + "A body line.\n\nAnd a second paragraph.\n" + Nul;
+		"2026-08-20T00:04:59+10:00" + Us + "2026-08-20T00:04:59+10:00" + Us +
+		"Fixture Author<fixture@example.com>Fixture Author<fixture@example.com>" +
+		"Initial commit\n" + "A body line.\n\nAnd a second paragraph.\n" + Nul;
 
 	private const string MergeCommit =
 		FirstSha + Us + FirstTree + Us + SecondSha + " " + MergedInSha + Us +
-		"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-		"Other Committer" + Us + "other@example.com" + Us + "2026-08-21T09:00:00-04:00" + Us +
-		"Merge branch 'feature/x'" + Us + Nul;
+		"2026-08-20T00:05:20+10:00" + Us + "2026-08-21T09:00:00-04:00" + Us +
+		"Fixture Author<fixture@example.com>Other Committer<other@example.com>" +
+		"Merge branch 'feature/x'\n" + Nul;
 
 	[TestMethod]
 	public void ReadsEveryCommitInOrder()
@@ -94,9 +94,9 @@ public class GitLogParserTests
 		// commit must not make the whole history unreadable.
 		string record =
 			FirstSha + Us + FirstTree + Us + Us +
-			"Fixture Author" + Us + Us + "2026-08-20T00:05:20+10:00" + Us +
-			"Other Committer" + Us + Us + "2026-08-21T09:00:00-04:00" + Us +
-			"Imported commit" + Us + Nul;
+			"2026-08-20T00:05:20+10:00" + Us + "2026-08-21T09:00:00-04:00" + Us +
+			"Fixture Author<>Other Committer<>" +
+			"Imported commit\n" + Nul;
 
 		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
 
@@ -113,9 +113,9 @@ public class GitLogParserTests
 		// git commit refuses an empty name, but commit-tree and fast-import will still write one.
 		string record =
 			FirstSha + Us + FirstTree + Us + Us +
-			Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-			Us + "other@example.com" + Us + "2026-08-21T09:00:00-04:00" + Us +
-			"Imported commit" + Us + Nul;
+			"2026-08-20T00:05:20+10:00" + Us + "2026-08-21T09:00:00-04:00" + Us +
+			"<fixture@example.com><other@example.com>" +
+			"Imported commit\n" + Nul;
 
 		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
 
@@ -233,18 +233,72 @@ public class GitLogParserTests
 	[TestMethod]
 	public void ReadsABodyContainingTheUnitSeparator()
 	{
-		// Verified against real git: a commit whose body is "body before<US>body after" emits a log
-		// record with 12 raw fields when split unbounded, and an unbounded split silently drops
-		// everything after the 11th. The bounded split used here keeps the body whole instead.
 		string bodyWithSeparator = "body before" + Us + "body after";
-		string record =
-			FirstSha + Us + FirstTree + Us + Us +
-			"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-			"Fixture Author" + Us + "fixture@example.com" + Us + "2026-08-20T00:05:20+10:00" + Us +
-			"Subject line" + Us + bodyWithSeparator + Nul;
+		string record = Record("Fixture Author", "fixture@example.com", "Subject line", bodyWithSeparator + "\n");
 
 		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
 
+		Assert.AreEqual("Subject line", commits[0].Subject);
 		Assert.AreEqual(bodyWithSeparator, commits[0].Body);
 	}
+
+	[TestMethod]
+	public void ReadsASubjectContainingTheUnitSeparator()
+	{
+		// git commit -m $'sub\x1fject' keeps the byte in %s (#196).
+		string subject = "sub" + Us + "ject";
+		string record = Record("Fixture Author", "fixture@example.com", subject, "body\n");
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		Assert.AreEqual(subject, commits[0].Subject);
+		Assert.AreEqual("body", commits[0].Body);
+	}
+
+	[TestMethod]
+	public void ReadsSignatureNamesAndEmailsContainingTheUnitSeparator()
+	{
+		// git -c user.name=$'A\x1fB' commit is accepted and %an prints the byte. Before #196 it shifted
+		// every later field and failed the whole log.
+		string name = "A" + Us + "B";
+		string email = "a" + Us + "b@example.com";
+		string record = Record(name, email, "Subject", string.Empty);
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		Assert.AreEqual(name, commits[0].Author.Name?.WeakString);
+		Assert.AreEqual(email, commits[0].Author.Email?.WeakString);
+		Assert.AreEqual(name, commits[0].Committer.Name?.WeakString);
+		Assert.AreEqual(email, commits[0].Committer.Email?.WeakString);
+		Assert.AreEqual("Subject", commits[0].Subject);
+		Assert.AreEqual(string.Empty, commits[0].Body);
+	}
+
+	[TestMethod]
+	public void ReadsANameContainingAClosingAngleBracket()
+	{
+		// git reads a name as everything before the first '<', so an imported name may hold a '>'.
+		string record = Record("A>B", "a@example.com", "Subject", string.Empty);
+
+		IReadOnlyList<GitCommit> commits = GitLogParser.Parse(record);
+
+		Assert.AreEqual("A>B", commits[0].Author.Name?.WeakString);
+		Assert.AreEqual("a@example.com", commits[0].Author.Email?.WeakString);
+	}
+
+	[TestMethod]
+	public void RejectsARecordWhoseTextFieldsAreTruncated()
+	{
+		string broken = FirstSha + Us + FirstTree + Us + Us +
+			"2026-08-20T00:05:20+10:00" + Us + "2026-08-20T00:05:20+10:00" + Us +
+			"Fixture Author<fixture@example.com>" + Nul;
+
+		Assert.ThrowsExactly<GitParseException>(() => GitLogParser.Parse(broken));
+	}
+
+	private static string Record(string name, string email, string subject, string body) =>
+		FirstSha + Us + FirstTree + Us + Us +
+		"2026-08-20T00:05:20+10:00" + Us + "2026-08-20T00:05:20+10:00" + Us +
+		name + "<" + email + ">" + name + "<" + email + ">" +
+		subject + "\n" + body + Nul;
 }

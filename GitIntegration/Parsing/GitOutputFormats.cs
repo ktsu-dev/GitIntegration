@@ -18,21 +18,29 @@ internal static class GitOutputFormats
 	/// <remarks>
 	/// Chosen because git forbids it in a reference name and no filesystem permits it in a path, so
 	/// it can never appear inside those fields and be mistaken for a separator. A commit message,
-	/// however, is free-form text and legally can contain it. <see cref="GitLogParser"/> bounds its
-	/// split of the log format's fields so the trailing body field absorbs any embedded separator
-	/// rather than the field count shifting.
+	/// however, is free-form text and legally can contain it, and so can a commit's signature names.
+	/// <see cref="LogFormat"/> therefore separates only its machine fields with it.
 	/// </remarks>
 	internal const char UnitSeparator = '\u001f';
 
 	/// <summary>
-	/// The <c>log</c> format: sha, tree, parents, author name/email/date, committer
-	/// name/email/date, subject, body.
+	/// The <c>log</c> format: sha, tree, parents, author date, committer date, then author
+	/// name/email, committer name/email, subject and body.
 	/// </summary>
 	/// <remarks>
 	/// Used with <c>-z</c>, which NUL-terminates each commit, so a multi-line body cannot be
 	/// mistaken for the start of a new record. <c>%x1f</c> is git's escape for a literal byte.
+	/// <para>
+	/// Only the five machine fields are separated by <see cref="UnitSeparator"/>. Names, emails and
+	/// the subject are free text in which git keeps a literal 0x1F (ktsu-dev/GitIntegration#196), so
+	/// they are delimited by characters that git's own ident parsing guarantees they cannot hold:
+	/// git reads a name as the text before the first <c>&lt;</c> of the ident line and an email as
+	/// the text up to the next <c>&gt;</c>, so <c>%an&lt;%ae&gt;</c> splits unambiguously, and
+	/// <c>%s</c> joins the subject paragraph's lines with spaces, so it ends at the first newline.
+	/// Everything after that newline is <c>%b</c>, which is last and may contain anything.
+	/// </para>
 	/// </remarks>
-	internal const string LogFormat = "%H%x1f%T%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%s%x1f%b";
+	internal const string LogFormat = "%H%x1f%T%x1f%P%x1f%aI%x1f%cI%x1f%an<%ae>%cn<%ce>%s%n%b";
 
 	/// <summary>
 	/// The <c>for-each-ref</c> format: full reference name, name, object id, upstream, and the

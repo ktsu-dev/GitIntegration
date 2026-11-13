@@ -722,6 +722,44 @@ public class GitRoundTripTests
 	}
 
 	[TestMethod]
+	public async Task CommitAndLogReadTheUnitSeparatorInASubjectAndAuthorNameAsync()
+	{
+		// git keeps a literal 0x1F in a subject and a signature name. Before #196 the subject came back
+		// cut short and the name shifted every later field, so Log() threw for the whole history.
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository temporary = new();
+		GitRepository repository = await InitializeAsync(temporary, cancellationToken).ConfigureAwait(false);
+
+		const string Subject = "sub\u001fject";
+		const string Name = "A\u001fB";
+
+		// WithAuthor refuses a control character, but git itself takes one from user.name.
+		_ = await new GitTextBuilder(
+			repository.ProcessRunner!, repository.LocalPath, "config", "user.name", Name)
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		temporary.WriteFile("a.txt", "one\n");
+		_ = await repository.Add().All().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		GitCommit commit = await repository.Commit(Subject.As<GitCommitMessage>())
+			.WithBody("body")
+			.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(Subject, commit.Subject);
+		Assert.AreEqual("body", commit.Body);
+		Assert.AreEqual(Name, commit.Author.Name?.WeakString);
+		Assert.AreEqual(AuthorEmail, commit.Author.Email);
+
+		IReadOnlyList<GitCommit> history = await repository.Log().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+		Assert.AreEqual(1, history.Count);
+		Assert.AreEqual(Subject, history[0].Subject);
+		Assert.AreEqual(Name, history[0].Author.Name?.WeakString);
+		Assert.AreEqual(Name, history[0].Committer.Name?.WeakString);
+	}
+
+	[TestMethod]
 	public async Task BranchCreateCheckoutAndDeleteRoundTripAsync()
 	{
 		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;

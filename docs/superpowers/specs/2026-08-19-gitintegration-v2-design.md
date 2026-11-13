@@ -356,16 +356,20 @@ Every command uses git's machine-readable form. Human-facing output is never par
 
 NUL delimiting (`-z`) is used wherever git supports it, so paths containing spaces, quotes, or
 newlines survive intact. Fields within a record are separated by the ASCII unit separator `0x1F`,
-which cannot occur in a path or a ref name.
+which cannot occur in a path or a ref name. It can occur in a commit message and in a signature
+name or email, so the log format uses it only between its machine fields (ktsu-dev/GitIntegration#196).
 
 The log format string is fixed as:
 
 ```
-%H%x1f%T%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%s%x1f%b
+%H%x1f%T%x1f%P%x1f%aI%x1f%cI%x1f%an<%ae>%cn<%ce>%s%n%b
 ```
 
-giving sha, tree, parents, author name/email/ISO-date, committer name/email/ISO-date, subject, and
-body — with `-z` terminating each commit record, so a multi-line body cannot be confused for a new
+giving sha, tree, parents, author ISO-date, committer ISO-date, then author name/email, committer
+name/email, subject, and body. git reads an ident's name as the text before its first `<` and its
+email as the text up to the next `>`, so neither can hold the delimiter that ends it, and `%s` joins
+the subject paragraph's lines with spaces, so it ends at the first newline. The body is last,
+with `-z` terminating each commit record, so a multi-line body cannot be confused for a new
 record. `%aI`/`%cI` are strict ISO-8601, parsed directly into `DateTimeOffset` with the correct
 offset preserved.
 
