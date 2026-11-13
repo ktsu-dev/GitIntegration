@@ -62,7 +62,7 @@ Octokit, and Azure DevOps, over a raw `HttpClient`). The solution uses:
 - `GitIntegration/Models/` — result records and enums: `GitStatus`, `GitStatusEntry`, `GitCommit`,
   `GitSignature`, `GitBranch`, `GitTag`, `GitSubmodule`, `GitRemote`, `GitDiffEntry`,
   `GitDivergence`, `GitVersion`, `GitFileState`, `GitChangeKind`, `GitUntrackedFilesMode`,
-  `GitSubmoduleState`, `GitSubmoduleRecursion`, `GitSubmodulePushCheck`, `GitInitResult`,
+  `GitSubmoduleState`, `GitSubmoduleRecursion`, `GitSubmodulePushCheck`, `GitPullConflictKind`, `GitInitResult`,
   `GitCompleted` — the shared "unit" result for mutating verbs whose only outcome is success (C# has
   no generic `void`) — and the remote-sync models `GitRefUpdate`, `GitRefUpdateKind`,
   `GitFetchResult` (`Updates`, `DetailAvailable`, `IsUpToDate`, `HasRejections`), and `GitPushResult` (`Updates`,
@@ -284,8 +284,10 @@ Non-obvious, load-bearing design points:
 8. **`Pull` returns `GitCompleted`, not a parsed result.** Everything `git pull` prints is human
    prose with no porcelain form, and this design forbids parsing that prose for every other verb —
    so `pull` does not get a special exemption either. A caller who needs to know what changed uses
-   `Status()` and `Log()` afterwards, both of which are precise. A merge conflict is the one outcome
-   that gets its own type, `GitPullConflictException`, because it leaves the repository mid-merge —
+   `Status()` and `Log()` afterwards, both of which are precise. A conflict is the one outcome
+   that gets its own type, `GitPullConflictException`, because it leaves the repository mid-merge or
+   mid-rebase, which its `Kind` (`GitPullConflictKind`) tells apart from the sequencer's "could not
+   apply" on stderr, since `pull.rebase` can pick a rebase the caller never asked for —
    `CreateException` is overridden to look for `CONFLICT` on standard *output*, the same trap
    `commit` sets with "nothing to commit" on stderr-vs-stdout, and `LC_ALL=C` is what makes matching
    the literal word dependable.

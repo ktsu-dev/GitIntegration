@@ -198,6 +198,7 @@ public class GitPullBuilderTests
 
 		Assert.AreEqual(128, exception.ExitCode);
 		StringAssert.Contains(exception.Message, "c.txt");
+		Assert.AreEqual(GitPullConflictKind.Merge, exception.Kind);
 	}
 
 	[TestMethod]
@@ -213,9 +214,12 @@ public class GitPullBuilderTests
 		};
 		GitPullBuilder builder = new(runner, TestPaths.Root);
 
-		await Assert.ThrowsExactlyAsync<GitPullConflictException>(
+		GitPullConflictException exception = await Assert.ThrowsExactlyAsync<GitPullConflictException>(
 			async () => await builder.ExecuteAsync(TestContext.CancellationTokenSource.Token).ConfigureAwait(false))
 			.ConfigureAwait(false);
+
+		Assert.AreEqual(GitPullConflictKind.Rebase, exception.Kind);
+		StringAssert.Contains(exception.Message, "mid-rebase");
 	}
 
 	[TestMethod]
