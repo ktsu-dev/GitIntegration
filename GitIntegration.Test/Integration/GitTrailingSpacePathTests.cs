@@ -97,5 +97,59 @@ public class GitTrailingSpacePathTests
 		Assert.AreEqual(remote, repository.RemotePath?.WeakString);
 	}
 
+	private static async Task<AbsoluteDirectoryPath> InitBareAsync(string path, CancellationToken cancellationToken)
+	{
+		_ = Directory.CreateDirectory(path);
+		AbsoluteDirectoryPath root = path.As<AbsoluteDirectoryPath>();
+		_ = await IntegrationGitFixture.CreateClient().Init(root).Bare().ExecuteAsync(cancellationToken).ConfigureAwait(false);
+		return root;
+	}
+
+	[TestMethod]
+	public async Task OpenKeepsATrailingSpaceInABareRepositoryAsync()
+	{
+		RequirePosix();
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository parent = new();
+		string spaced = Path.Join(parent.RootPath, "bare ");
+		_ = await InitBareAsync(spaced, cancellationToken).ConfigureAwait(false);
+
+		GitRepository repository = await IntegrationGitFixture.CreateClient()
+			.OpenAsync(spaced.As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
+
+		// git resolves symlinks in the path (macOS's /var is /private/var), so compare the name.
+		Assert.IsNotNull(repository.LocalPath);
+		Assert.EndsWith(Path.DirectorySeparatorChar + "bare ", repository.LocalPath.WeakString);
+	}
+
+	[TestMethod]
+	public async Task OpenAndDiscoverDoNotReturnABareSiblingWithoutTheTrailingSpaceAsync()
+	{
+		RequirePosix();
+		CancellationToken cancellationToken = TestContext.CancellationTokenSource.Token;
+		await IntegrationGitFixture.RequireGitAsync(cancellationToken).ConfigureAwait(false);
+
+		using TemporaryRepository parent = new();
+		string spaced = Path.Join(parent.RootPath, "bare ");
+		AbsoluteDirectoryPath spacedRoot = await InitBareAsync(spaced, cancellationToken).ConfigureAwait(false);
+		AbsoluteDirectoryPath sibling = await InitBareAsync(Path.Join(parent.RootPath, "bare"), cancellationToken).ConfigureAwait(false);
+
+		GitClient client = IntegrationGitFixture.CreateClient();
+		GitRepository opened = await client.OpenAsync(spacedRoot, cancellationToken).ConfigureAwait(false);
+		GitRepository? discovered = await client
+			.DiscoverAsync(Path.Join(spaced, "refs").As<AbsoluteDirectoryPath>(), cancellationToken).ConfigureAwait(false);
+
+		// git resolves symlinks in the path (macOS's /var is /private/var), so compare the name.
+		string spacedName = Path.DirectorySeparatorChar + "bare ";
+		Assert.AreNotEqual(sibling, opened.LocalPath);
+		Assert.IsNotNull(opened.LocalPath);
+		Assert.EndsWith(spacedName, opened.LocalPath.WeakString);
+		Assert.IsNotNull(discovered);
+		Assert.IsNotNull(discovered.LocalPath);
+		Assert.EndsWith(spacedName, discovered.LocalPath.WeakString);
+	}
+
 	public TestContext TestContext { get; set; } = null!;
 }
