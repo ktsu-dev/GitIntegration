@@ -726,7 +726,7 @@ public class GitRemoteSyncTests
 
 		Assert.AreEqual(GitPullConflictKind.Rebase, exception.Kind);
 		StringAssert.Contains(exception.Message, "mid-rebase");
-		Assert.IsTrue(Directory.Exists(Path.Combine(firstDirectory.Root.WeakString, ".git", "rebase-merge")));
+		Assert.IsTrue(Directory.Exists(Path.Join(firstDirectory.RootPath, ".git", "rebase-merge")));
 	}
 
 	[TestMethod]
@@ -753,7 +753,7 @@ public class GitRemoteSyncTests
 			.ConfigureAwait(false);
 
 		Assert.AreEqual(GitPullConflictKind.Rebase, exception.Kind);
-		Assert.IsTrue(Directory.Exists(Path.Combine(firstDirectory.Root.WeakString, ".git", "rebase-merge")));
+		Assert.IsTrue(Directory.Exists(Path.Join(firstDirectory.RootPath, ".git", "rebase-merge")));
 	}
 
 	/// <summary>
